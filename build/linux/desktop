@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=WW Excel
+Comment=Spreadsheet app for macOS
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/ww-excel %u
+Terminal=false
+Type=Application
+Icon=ww-excel
+Categories=Utility;
+StartupWMClass=ww-excel
+
+ 

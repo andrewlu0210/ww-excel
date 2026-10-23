@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "WW",
+			"FileDescription": "Spreadsheet app for macOS",
+			"LegalCopyright": "© 2026 WW",
+			"ProductName": "WW Excel",
+			"Comments": "This is a comment"
+		}
+	}
+}

@@ -1,0 +1,104 @@
+# 效能量測紀錄
+
+## 如何量測
+
+```bash
+export PATH="$HOME/go/bin:$PATH"
+wails3 build
+WW_BENCH=1 WW_BENCH_OUT="$PWD/docs/perf-latest.md" ./bin/ww-excel
+```
+
+量測模式會開啟視窗，自動跑完所有項目，把報告寫到 `docs/perf-latest.md`，格線截圖寫到 `docs/snapshot-*.png`，然後自行關閉。
+一般模式下按狀態列的「效能量測」按鈕也能跑同一套量測，結果顯示在視窗內。
+Go 端 benchmark：`go test -run x -bench . -benchmem ./internal/...`
+
+---
+
+## v0.1（2026-10-23）
+
+環境：Apple Silicon、macOS 27、WKWebView、1280×800 @2x、資料 20,000 列 × 5 欄（約 10 萬格）加上邊界標記。
+
+### 結論
+
+| 項目 | 目標 | 結果 | 判定 |
+|---|---|---|---|
+| 100 萬列捲動 | 60fps | 三種捲動情境都是 60fps，300 frames 內掉幀 0 | ✅ |
+| Grid 繪製成本 | < 8ms / frame | p50 1–2ms，p95 3ms 以內 | ✅ |
+| 空呼叫延遲 | — | 平均 0.21ms | ✅ |
+| 一個 viewport 的資料（9 blocks） | < 16ms | 平均 1.2ms，94KB JSON | ✅ |
+| 捲動時資料送達 | 1–2 frame 內 | 平均 2.25ms，p99 5ms | ✅ |
+| 10 萬格的記憶體 | 合理 | Go heap 23.6MB | ✅（可再優化） |
+
+### 觀察與後續
+
+- **呼叫延遲不是瓶頸**：一次 binding 呼叫的成本主要在 JSON 序列化，每 KB 約 0.01ms。block 批次讀取的設計可以沿用。
+- **Event 推送**：小事件約每秒 6 萬個；帶 1 個 block（10KB）的事件約每秒 4,600 個。連續推送時延遲會累積（p95 約 40ms），所以 v0.2 的 diff 推送要**合併成每次編輯一個事件**，不要逐格發。
+- **Go 記憶體**：每個 block 是 64×32 格的固定陣列，每格 32 bytes，所以一個 block 佔 64KB。資料只有 5 欄時大部分空間沒用到。v0.4 導入 style table 或共用字串時，可以改成「稀疏 block」或縮小 `Cell`。
+- **計時精度**：WKWebView 的 `performance.now()` 只到 1ms，所以表中 p50 = 0/1 是精度限制，判讀以 mean 為準。
+- **捲動映射**：預設列高 20px 時，100 萬列總高約 2,100 萬 px，低於 WebKit 上限，因此捲動是 1:1。列高總和超過 3,000 萬 px 時才會按比例縮放。
+
+### 原始報告
+
+#### v0.1 Perf Report
+
+- 時間：2026-10-23T12:55:06.120Z
+- 資料：1,048,576 used rows × 16,384 used cols（含邊界標記）
+- 視窗：1280×800 @2x
+- UA：Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) wails.io
+- 注意：WKWebView 的 `performance.now()` 精度為 1ms，低於 1ms 的數值會顯示為 0 或 1，請以 mean 判讀。
+
+#### Binding 呼叫延遲（空呼叫 Ping）
+
+| case | n | mean ms | p50 ms | p95 ms | p99 ms | total ms | per call ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| sequential | 500 | 0.21 | 0.00 | 1.00 | 1.00 |  |  |
+| 100 parallel | 100 |  |  |  |  | 5.00 | 0.05 |
+
+#### GetBlocks 批次讀取
+
+| case | n | mean ms | p50 ms | p95 ms | p99 ms | cells | payload KB |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 blocks | 40 | 0.33 | 0.00 | 1.00 | 1.00 | 320 | 10.5 |
+| 9 blocks | 40 | 1.18 | 1.00 | 2.00 | 2.00 | 2880 | 94.4 |
+| 25 blocks | 40 | 2.80 | 3.00 | 3.00 | 4.00 | 8000 | 262.2 |
+| 64 blocks | 40 | 6.85 | 7.00 | 8.00 | 8.00 | 20480 | 671.2 |
+
+> 一個 viewport 約 3×3 blocks（含預取環則約 5×5）。
+
+#### Event 推送（Go → 前端）
+
+| case | received | total ms | events/s | lag p50 ms | lag p95 ms |
+| --- | --- | --- | --- | --- | --- |
+| 200 events × 0 blocks | 200 | 3.00 | 66667 | 1.00 | 3.00 |
+| 200 events × 1 blocks | 200 | 43.00 | 4651 | 23.00 | 41.00 |
+| 50 events × 9 blocks | 50 | 25.00 | 2000 | 12.00 | 23.00 |
+
+> lag 以 Go 端 UnixMilli 與前端 Date.now() 相減，精度為 1ms。
+
+#### Canvas 捲動
+
+| case | frames | fps | frame p95 ms | frame max ms | dropped (>20.7ms) | draw p50 ms | draw p95 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| steady 200px/frame | 300 | 60.0 | 18.00 | 19.00 | 0 | 2.00 | 3.00 |
+| random jumps over 1M rows | 300 | 60.0 | 18.00 | 18.00 | 0 | 1.00 | 2.00 |
+| diagonal | 300 | 60.0 | 18.00 | 19.00 | 0 | 1.00 | 1.00 |
+
+> 每個 frame 以程式設定捲動位置並同步重繪；draw 為 grid layer 單次繪製耗時。
+
+#### 捲動期間的 block 載入（資料送達畫面的延遲）
+
+| case | n | mean ms | p50 ms | p95 ms | p99 ms | blocks/call mean | blocks/call max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GetBlocks during scroll | 199 | 2.25 | 2.00 | 4.00 | 5.00 | 6.4 | 8 |
+
+> 從 ensure() 發出請求到資料寫入快取的時間；載入後下一個 frame 即重繪。
+
+#### 記憶體
+
+| metric | value |
+| --- | --- |
+| Go heap alloc | 23.3 MB |
+| Go sys | 67.1 MB |
+| Frontend cached blocks | 1500 |
+
+> WKWebView 不提供 performance.memory，前端記憶體請用「活動監視器」觀察 WebContent 程序。
