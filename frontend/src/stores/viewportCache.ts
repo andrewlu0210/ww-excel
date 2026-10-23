@@ -2,7 +2,8 @@ import type { BlockDTO, BlockRef, BlocksResult, CellsChanged } from '../bridge/s
 
 export interface CellView {
   text: string;
-  numeric: boolean;
+  numeric: boolean; // right-aligned
+  center: boolean; // logicals and errors are centered
 }
 
 export interface BlockRange {
@@ -132,7 +133,7 @@ export class BlockCache {
         const block = this.blocks.get(this.key(Math.floor(c.row / this.blockRows), Math.floor(c.col / this.blockCols)));
         if (!block) continue;
         const i = (c.row % this.blockRows) * this.blockCols + (c.col % this.blockCols);
-        block.cells[i] = c.v === '' ? undefined : { text: c.v, numeric: c.n === true };
+        block.cells[i] = c.v === '' ? undefined : { text: c.v, numeric: c.n === true, center: c.x === true };
       }
     }
     this.onUpdate();
@@ -141,7 +142,7 @@ export class BlockCache {
   private store(dto: BlockDTO): void {
     const cells: (CellView | undefined)[] = new Array(this.blockRows * this.blockCols);
     for (const c of dto.cells ?? []) {
-      cells[c.r * this.blockCols + c.c] = { text: c.v, numeric: c.n === true };
+      cells[c.r * this.blockCols + c.c] = { text: c.v, numeric: c.n === true, center: c.x === true };
     }
     this.blocks.set(this.key(dto.row, dto.col), { cells });
   }

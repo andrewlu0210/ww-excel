@@ -12,11 +12,10 @@ const MaxFillCells = 1 << 20
 
 var ErrFillTooLarge = errors.New("selection too large to fill")
 
-// EnterText sets one cell from typed text. Returns nil when the cell
-// already holds that value.
-func EnterText(wb *model.Workbook, sheet, row, col int, text string) Command {
-	cell := model.ParseInput(text)
-	if wb.Sheets[sheet].Get(row, col) == cell {
+// SetCell writes one cell (typed input). Returns nil when the cell
+// already holds the same input.
+func SetCell(wb *model.Workbook, sheet, row, col int, cell model.Cell) Command {
+	if wb.Sheets[sheet].Get(row, col).SameInput(cell) {
 		return nil
 	}
 	return &SetCells{
@@ -26,8 +25,14 @@ func EnterText(wb *model.Workbook, sheet, row, col int, text string) Command {
 	}
 }
 
-// FillRanges sets every cell of the ranges to the parsed text (⌘Enter).
-func FillRanges(sheet int, ranges []model.Range, text string) (Command, error) {
+// EnterText is SetCell for plain values (no formula compilation).
+func EnterText(wb *model.Workbook, sheet, row, col int, text string) Command {
+	return SetCell(wb, sheet, row, col, model.ParseInput(text))
+}
+
+// FillRanges sets every cell of the ranges (⌘Enter); cellAt produces the
+// cell for each position, e.g. a formula adjusted to that cell.
+func FillRanges(sheet int, ranges []model.Range, cellAt func(row, col int) model.Cell) (Command, error) {
 	total := 0
 	for _, rg := range ranges {
 		total += rg.Clamp().CellCount()
@@ -36,14 +41,13 @@ func FillRanges(sheet int, ranges []model.Range, text string) (Command, error) {
 		return nil, ErrFillTooLarge
 	}
 
-	cell := model.ParseInput(text)
-	changes := make([]CellChange, 0, total)
+	changes := []CellChange{}
 	var area *model.Range
 	for _, rg := range ranges {
 		rg = rg.Clamp()
 		for r := rg.R0; r <= rg.R1; r++ {
 			for c := rg.C0; c <= rg.C1; c++ {
-				changes = append(changes, CellChange{Row: r, Col: c, After: cell})
+				changes = append(changes, CellChange{Row: r, Col: c, After: cellAt(r, c)})
 			}
 		}
 		area = union(area, rg)

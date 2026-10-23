@@ -2,13 +2,17 @@
 // controller with simulated key events and typed text, then checks the
 // Go model (source of truth) and the frontend cache. Native IME input
 // and menu accelerators cannot be simulated here; test those by hand.
-import { sheetApi } from '../bridge/sheet';
+import { documentApi, sheetApi } from '../bridge/sheet';
 import type { CellPos, Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import type { BlockCache } from '../stores/viewportCache';
 
 export interface SheetDriver {
   pressKey(key: string, mods?: Partial<KeyboardEventInit>): void;
+  clickCell(pos: CellPos, kind?: 'down' | 'drag' | 'up' | 'dbl'): void;
+  focusBar(): void;
+  getBarText(): string;
+  getAssist(): { suggestions: string[]; hint: string | null; error: string | null; highlights: unknown[] };
   typeText(text: string): void;
   whenIdle(): Promise<void>;
   getSelection(): Selection;
@@ -60,7 +64,9 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
     const a = sheet.getSelection().active;
     checks.push({ name, ok: a.row === row && a.col === col, detail: `作用中 ${addr(a)}，預期 ${cellAddress(row, col)}` });
   };
-  const expect = (name: string, ok: boolean, detail: string) => checks.push({ name, ok, detail });
+  // JSON.stringify(undefined) is undefined, so coerce details to text.
+  const expect = (name: string, ok: boolean, detail: string | undefined) =>
+    checks.push({ name, ok, detail: String(detail ?? '') });
 
   // 1. Typing starts Enter mode; Enter commits and moves down.
   await type('Hello');
@@ -166,21 +172,119 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   const all = sheet.getSelection().ranges[0];
   expect('⌘A 全選', all.r1 === 1_048_575 && all.c1 === 16_383, JSON.stringify(all));
 
-  // Leave a multi-range selection on screen for the snapshot.
-  sheet.setSelectionForTest({
-    active: { row: 4, col: 0 },
-    anchor: { row: 4, col: 0 },
-    focus: { row: 5, col: 1 },
-    ranges: [
-      { r0: 0, c0: 3, r1: 1, c1: 4 },
-      { r0: 4, c0: 0, r1: 5, c1: 1 },
-    ],
-  });
-  await step();
+  // ---- v0.3 formulas ----
+  await key('Escape');
+  await goTo(7, 0);
+  await type('3');
+  await key('Enter');
+  await type('4');
+  await key('Enter'); // A8=3, A9=4, now at A10
 
+  // 14. Autocomplete offers functions alphabetically (like Excel, "=su"
+  // starts at SUBSTITUTE); Tab inserts NAME( and shows the hint.
+  await type('=su');
+  const sug = sheet.getAssist().suggestions;
+  expect('函數自動完成', sug[0] === 'SUBSTITUTE' && sug.includes('SUM') && sug.includes('SUMIF'), JSON.stringify(sug));
+  await type('m');
+  expect('繼續輸入縮小清單', sheet.getAssist().suggestions[0] === 'SUM', JSON.stringify(sheet.getAssist().suggestions));
+  await key('Tab');
+  expect('Tab 接受建議並顯示參數提示', sheet.getAssist().hint === 'SUM', JSON.stringify(sheet.getAssist()));
+
+  // 15. Point mode: arrows insert a reference, Shift extends it.
+  await key('ArrowUp');
+  expect('方向鍵插入參照（指向模式）', sheet.getAssist().highlights.length === 1, JSON.stringify(sheet.getAssist().highlights));
+  await key('ArrowUp', { shiftKey: true });
+  await type(')');
+  await key('Enter');
+  await expectCell('指向模式產生 =SUM(A8:A9)', 9, 0, '=SUM(A8:A9)');
+  expect('公式結果', sheet.getGrid()?.cache.cell(9, 0)?.text === '7', `cache(A10) = ${JSON.stringify(sheet.getGrid()?.cache.cell(9, 0))}`);
+
+  // 16. Editing a precedent recalculates the formula.
+  await goTo(7, 0);
+  await type('10');
+  await key('Enter');
+  expect('修改參照儲存格後重算', sheet.getGrid()?.cache.cell(9, 0)?.text === '14', `cache(A10) = ${JSON.stringify(sheet.getGrid()?.cache.cell(9, 0))}`);
+
+  // 17. F4 cycles absolute references.
+  await goTo(9, 1);
+  await type('=A8');
+  await key('F4');
+  await key('Enter');
+  await expectCell('F4 切換為 $A$8', 9, 1, '=$A$8');
+
+  // 18. Clicking a cell while editing a formula inserts it.
+  await goTo(9, 3);
+  await type('=');
+  sheet.clickCell({ row: 7, col: 0 });
+  sheet.clickCell({ row: 7, col: 0 }, 'up');
+  await step();
+  await type('*2');
+  await key('Enter');
+  await expectCell('滑鼠點選插入參照', 9, 3, '=A8*2');
+  expect('滑鼠點選後的結果', sheet.getGrid()?.cache.cell(9, 3)?.text === '20', JSON.stringify(sheet.getGrid()?.cache.cell(9, 3)));
+
+  // 19. Lower-case input is stored canonically; missing ")" is added.
+  await goTo(9, 4);
+  await type('=round(a8/3,1');
+  await key('Enter');
+  await expectCell('公式標準化並自動補上括號', 9, 4, '=ROUND(A8/3,1)');
+
+  // 20. A bad formula keeps the editor open with an explanation.
+  await goTo(9, 5);
+  await type('=SUM(1;2)');
+  await key('Enter');
+  expect('公式錯誤時保持編輯並提示', sheet.getEditing() !== null && !!sheet.getAssist().error, JSON.stringify(sheet.getAssist().error));
+  await expectCell('錯誤公式不寫入', 9, 5, '');
+  await key('Escape');
+
+  // 21. Errors and logicals are centered.
+  await goTo(10, 0);
+  await type('=1/0');
+  await key('Tab');
+  await type('=1=1');
+  await key('Enter');
+  const e1 = sheet.getGrid()?.cache.cell(10, 0);
+  const e2 = sheet.getGrid()?.cache.cell(10, 1);
+  expect('錯誤值置中', e1?.text === '#DIV/0!' && e1.center, JSON.stringify(e1));
+  expect('邏輯值置中', e2?.text === 'TRUE' && e2.center, JSON.stringify(e2));
+
+  // 22. The formula bar shows the formula of the active cell and edits it.
+  await goTo(9, 0);
+  expect('公式列顯示公式', sheet.getBarText() === '=SUM(A8:A9)', JSON.stringify(sheet.getBarText()));
+  sheet.focusBar();
+  await step();
+  expect('點選公式列進入編輯模式', sheet.getEditing()?.mode === 'edit', JSON.stringify(sheet.getEditing()));
+  await key('Escape');
+
+  // 23. Circular references show 0 and are reported.
+  await goTo(11, 0);
+  await type('=A12+1');
+  await key('Enter');
+  const st = await documentApi.state();
+  expect('循環參照回報', st.circular === 'A12', JSON.stringify(st.circular));
+  await expectCell('循環參照公式保留', 11, 0, '=A12+1');
+  await key('ArrowUp');
+  await key('Backspace');
+
+  // Show a formula being edited, with reference boxes, for the snapshot.
+  await goTo(12, 2);
+  await type('=SUM(');
+  sheet.clickCell({ row: 7, col: 0 });
+  sheet.clickCell({ row: 8, col: 0 }, 'drag');
+  sheet.clickCell({ row: 8, col: 0 }, 'up');
+  await step();
+  await type(')+B10*');
+  await key('ArrowUp');
+  await key('ArrowUp');
+  await key('ArrowLeft');
+  await step();
+  return finish(checks);
+}
+
+function finish(checks: Check[]): { markdown: string; failed: number } {
   const failed = checks.filter((c) => !c.ok).length;
   const lines = [
-    '# v0.2 Self-test',
+    '# Self-test',
     '',
     `- 時間：${new Date().toISOString()}`,
     `- 結果：${checks.length - failed} / ${checks.length} 通過`,
@@ -190,4 +294,18 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
     ...checks.map((c) => `| ${c.ok ? '✅' : '❌'} | ${c.name} | ${c.detail.replace(/\|/g, '\\|').replace(/\n/g, '\\n')} |`),
   ];
   return { markdown: lines.join('\n') + '\n', failed };
+}
+
+// The v0.2 snapshot: a multi-range selection.
+export async function multiRangeSnapshot(sheet: SheetDriver): Promise<void> {
+  sheet.setSelectionForTest({
+    active: { row: 4, col: 0 },
+    anchor: { row: 4, col: 0 },
+    focus: { row: 5, col: 1 },
+    ranges: [
+      { r0: 0, c0: 3, r1: 1, c1: 4 },
+      { r0: 4, c0: 0, r1: 5, c1: 1 },
+    ],
+  });
+  await sheet.whenIdle();
 }

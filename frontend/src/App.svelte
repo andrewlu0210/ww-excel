@@ -5,8 +5,7 @@
   import { benchApi, documentApi, sheetApi, type SheetInfo } from './bridge/sheet';
   import Sheet from './components/Sheet.svelte';
   import StatusBar from './components/StatusBar.svelte';
-  import { cellAddress } from './grid/layout';
-  import { single, type CellPos } from './grid/selection';
+  import { single } from './grid/selection';
   import type { SheetMode } from './input/keymap';
 
   const SHEET = 0;
@@ -14,9 +13,8 @@
   let info = $state<SheetInfo>();
   let sheetView = $state<ReturnType<typeof Sheet>>();
   let mode = $state<SheetMode>('ready');
-  let formulaText = $state('');
-  let activeCell = $state<CellPos>({ row: 0, col: 0 });
   let sheetName = $state('');
+  let circular = $state('');
   let benchBusy = $state(false);
   let report = $state('');
 
@@ -64,7 +62,10 @@
   onMount(() => {
     const offs = [
       documentApi.onMenu((action) => void sheetView?.runMenu(action)),
-      documentApi.onState((st) => (sheetName = st.name)),
+      documentApi.onState((st) => {
+        sheetName = st.name;
+        circular = st.circular;
+      }),
     ];
 
     void (async () => {
@@ -77,9 +78,14 @@
         await saveBenchSnapshots();
         await benchApi.report(md);
       } else if (await benchApi.selfTestMode()) {
+        // Report JS errors right away so a broken step does not look like
+        // a hang.
+        const fail = (what: string) => void benchApi.report(`# Self-test\n\n❌ JS 錯誤：${what}\n`);
+        window.addEventListener('error', (e) => fail(`${e.message} @ ${e.filename}:${e.lineno}`));
+        window.addEventListener('unhandledrejection', (e) => fail(String(e.reason?.stack ?? e.reason)));
         await wait(500);
         // Watchdog: a hung step must still produce a report and quit.
-        const timeout = wait(60_000).then(() => ({ markdown: '# v0.2 Self-test\n\n❌ 逾時（60 秒）：有步驟沒有完成。\n', failed: 1 }));
+        const timeout = wait(60_000).then(() => ({ markdown: '# Self-test\n\n❌ 逾時（60 秒）：有步驟沒有完成。\n', failed: 1 }));
         const result = await Promise.race([runSelfTest(sheetView!, SHEET), timeout]);
         const g = sheetView!.getGrid()!;
         await benchApi.snapshot('selftest', g.snapshot());
@@ -92,16 +98,9 @@
 </script>
 
 <main class="app">
-  <header class="formula-bar">
-    <div class="name-box">{cellAddress(activeCell.row, activeCell.col)}</div>
-    <div class="fx">fx</div>
-    <!-- Read-only until formula-bar editing arrives with v0.3 point mode. -->
-    <input class="formula" value={formulaText} readonly tabindex="-1" onfocus={() => sheetView?.focus()} />
-  </header>
-
   {#if info}
-    <Sheet bind:this={sheetView} sheet={SHEET} {info} bind:mode bind:formulaText bind:activeCell />
-    <StatusBar {sheetName} {mode} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench} />
+    <Sheet bind:this={sheetView} sheet={SHEET} {info} bind:mode />
+    <StatusBar {sheetName} {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench} />
   {/if}
 
   {#if report}
@@ -126,36 +125,6 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-  }
-  .formula-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 8px;
-    background: var(--chrome-bg);
-    border-bottom: 1px solid var(--chrome-border);
-  }
-  .name-box {
-    width: 90px;
-    padding: 3px 6px;
-    border: 1px solid var(--chrome-border);
-    border-radius: 4px;
-    font-variant-numeric: tabular-nums;
-  }
-  .fx {
-    color: var(--chrome-muted);
-    font-style: italic;
-    padding: 0 4px;
-  }
-  .formula {
-    flex: 1;
-    font: inherit;
-    padding: 3px 6px;
-    border: 1px solid var(--chrome-border);
-    border-radius: 4px;
-    background: var(--grid-bg);
-    color: var(--chrome-text);
   }
   .report {
     position: absolute;

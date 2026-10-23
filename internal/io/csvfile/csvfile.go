@@ -50,7 +50,7 @@ func Read(r io.Reader, sheetName string) (Result, error) {
 			rec = rec[:model.MaxCols]
 		}
 		for col, field := range rec {
-			if cell := model.ParseValue(field); cell.Kind != model.KindEmpty {
+			if cell := model.ParseValue(field); !cell.IsEmpty() {
 				res.Sheet.Set(row, col, cell)
 			}
 		}

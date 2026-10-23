@@ -42,9 +42,10 @@ export interface CellDTO {
     "v": string;
 
     /**
-     * N marks numeric values (right-aligned in the grid).
+     * N: number (right-aligned). X: logical or error (centered).
      */
     "n"?: boolean;
+    "x"?: boolean;
 }
 
 export interface CellPos {
@@ -53,7 +54,8 @@ export interface CellPos {
 }
 
 /**
- * CellsChanged is the single event emitted per edit, undo or redo.
+ * CellsChanged is emitted once per edit, undo or redo for each sheet
+ * it touched (formulas on other sheets may recalculate).
  */
 export interface CellsChanged {
     "sheet": number;
@@ -78,7 +80,12 @@ export interface ChangedCell {
     "row": number;
     "col": number;
     "v": string;
+
+    /**
+     * N: number (right-aligned). X: logical or error (centered).
+     */
     "n"?: boolean;
+    "x"?: boolean;
 }
 
 export interface DocState {
@@ -89,6 +96,11 @@ export interface DocState {
     "canRedo": boolean;
     "undoLabel": string;
     "redoLabel": string;
+
+    /**
+     * Circular is the first cell in a circular reference, or "".
+     */
+    "circular": string;
 }
 
 export interface MemStats {

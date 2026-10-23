@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"ww-excel/internal/formula"
+	"ww-excel/internal/model"
 )
 
 // BenchEventName carries synthetic block payloads for measuring event
@@ -91,6 +94,28 @@ func benchOutPath() string {
 		return out
 	}
 	return "docs/perf-latest.md"
+}
+
+// RecalcChain builds a separate workbook with a chain of n formulas
+// (A2=A1+1, A3=A2+1, ...) and returns how long one full recalculation
+// after changing A1 takes, in milliseconds.
+func (b *BenchService) RecalcChain(n int) float64 {
+	wb := model.NewWorkbook()
+	e := formula.New(wb)
+	sh := wb.Sheets[0]
+	sh.Set(0, 0, model.NumberCell(1))
+	for r := 1; r < n; r++ {
+		f, err := e.Compile(fmt.Sprintf("A%d+1", r), 0)
+		if err != nil {
+			return -1
+		}
+		sh.Set(r, 0, model.Cell{F: f})
+	}
+	e.Rebuild()
+	start := time.Now()
+	sh.Set(0, 0, model.NumberCell(2))
+	e.Update([]formula.Key{{Row: 0, Col: 0}})
+	return float64(time.Since(start).Microseconds()) / 1000
 }
 
 // SaveSnapshot writes a PNG data URL next to the bench report so grid

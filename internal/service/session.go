@@ -3,9 +3,9 @@
 package service
 
 import (
+	"sort"
 	"sync"
 
-	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 	"ww-excel/internal/model"
 )
@@ -35,10 +35,13 @@ type ChangedCell struct {
 	Row int    `json:"row"`
 	Col int    `json:"col"`
 	V   string `json:"v"`
-	N   bool   `json:"n,omitempty"`
+	// N: number (right-aligned). X: logical or error (centered).
+	N bool `json:"n,omitempty"`
+	X bool `json:"x,omitempty"`
 }
 
-// CellsChanged is the single event emitted per edit, undo or redo.
+// CellsChanged is emitted once per edit, undo or redo for each sheet
+// it touched (formulas on other sheets may recalculate).
 type CellsChanged struct {
 	Sheet   int           `json:"sheet"`
 	Version uint64        `json:"version"`
@@ -60,6 +63,8 @@ type DocState struct {
 	CanRedo   bool   `json:"canRedo"`
 	UndoLabel string `json:"undoLabel"`
 	RedoLabel string `json:"redoLabel"`
+	// Circular is the first cell in a circular reference, or "".
+	Circular string `json:"circular"`
 }
 
 type Emitter func(name string, data any)
@@ -104,48 +109,72 @@ func (s *Session) stateLocked() DocState {
 		CanRedo:   h.CanRedo(),
 		UndoLabel: h.UndoLabel(),
 		RedoLabel: h.RedoLabel(),
+		Circular:  s.doc.Circular(),
 	}
 }
 
-// change runs a mutation under the write lock, then emits one diff event
-// and the new document state.
-func (s *Session) change(selectAfter bool, fn func(d *document.Document) (command.Effect, bool)) bool {
+// change runs a mutation under the write lock, then emits one diff
+// event per touched sheet and the new document state.
+func (s *Session) change(selectAfter bool, fn func(d *document.Document) (document.Change, bool)) bool {
 	s.mu.Lock()
-	eff, ok := fn(s.doc)
-	var diff CellsChanged
+	ch, ok := fn(s.doc)
+	var diffs []CellsChanged
 	var state DocState
 	if ok {
-		diff = s.diffLocked(eff, selectAfter)
+		diffs = s.diffsLocked(ch, selectAfter)
 		state = s.stateLocked()
 	}
 	s.mu.Unlock()
 
 	if ok {
-		s.emit(EventCellsChanged, diff)
+		for _, d := range diffs {
+			s.emit(EventCellsChanged, d)
+		}
 		s.publishState(state)
 	}
 	return ok
 }
 
-func (s *Session) diffLocked(eff command.Effect, selectAfter bool) CellsChanged {
-	sh := s.doc.Workbook().Sheets[eff.Sheet]
-	diff := CellsChanged{Sheet: eff.Sheet, Version: s.doc.Version(), Cells: []ChangedCell{}}
-	diff.UsedRows, diff.UsedCols = sh.UsedRange()
-	if len(eff.Cells) > maxDiffCells {
-		diff.Invalidate = true
-	} else {
-		for _, ref := range eff.Cells {
-			c := sh.Get(ref.Row, ref.Col)
-			diff.Cells = append(diff.Cells, ChangedCell{
-				Row: ref.Row, Col: ref.Col, V: c.Display(), N: c.Kind == model.KindNumber,
-			})
+func cellDisplay(c model.Cell) (v string, numeric, centered bool) {
+	return c.Display(), c.Kind == model.KindNumber, c.Kind == model.KindBool || c.Kind == model.KindError
+}
+
+func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChanged {
+	type pos struct{ row, col int }
+	bySheet := map[int][]pos{ch.Sheet: nil}
+	for _, c := range ch.Cells {
+		bySheet[ch.Sheet] = append(bySheet[ch.Sheet], pos{c.Row, c.Col})
+	}
+	for _, k := range ch.Recalc {
+		bySheet[k.Sheet] = append(bySheet[k.Sheet], pos{k.Row, k.Col})
+	}
+	sheets := make([]int, 0, len(bySheet))
+	for sh := range bySheet {
+		sheets = append(sheets, sh)
+	}
+	sort.Ints(sheets)
+
+	var out []CellsChanged
+	for _, si := range sheets {
+		sh := s.doc.Workbook().Sheets[si]
+		diff := CellsChanged{Sheet: si, Version: s.doc.Version(), Cells: []ChangedCell{}}
+		diff.UsedRows, diff.UsedCols = sh.UsedRange()
+		cells := bySheet[si]
+		if len(cells) > maxDiffCells {
+			diff.Invalidate = true
+		} else {
+			for _, p := range cells {
+				v, n, x := cellDisplay(sh.Get(p.row, p.col))
+				diff.Cells = append(diff.Cells, ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x})
+			}
 		}
+		if selectAfter && si == ch.Sheet && ch.Bounds != nil {
+			b := ch.Bounds
+			diff.Select = &RangeDTO{R0: b.R0, C0: b.C0, R1: b.R1, C1: b.C1}
+		}
+		out = append(out, diff)
 	}
-	if selectAfter && eff.Bounds != nil {
-		b := eff.Bounds
-		diff.Select = &RangeDTO{R0: b.R0, C0: b.C0, R1: b.R1, C1: b.C1}
-	}
-	return diff
+	return out
 }
 
 // replace swaps in a new document and tells the frontend to reload.

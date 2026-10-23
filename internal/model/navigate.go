@@ -38,12 +38,35 @@ func (r Range) CellCount() int {
 func (s *Sheet) EachInRange(rg Range, fn func(row, col int, cell Cell)) {
 	rg = rg.Clamp()
 	var keys []BlockKey
-	for k := range s.blocks {
-		br0, bc0 := int(k.Row)*BlockRows, int(k.Col)*BlockCols
-		if br0+BlockRows-1 < rg.R0 || br0 > rg.R1 || bc0+BlockCols-1 < rg.C0 || bc0 > rg.C1 {
-			continue
+	br0, br1 := rg.R0/BlockRows, rg.R1/BlockRows
+	bc0, bc1 := rg.C0/BlockCols, rg.C1/BlockCols
+	if spanned := (br1 - br0 + 1) * (bc1 - bc0 + 1); spanned <= len(s.blocks) {
+		// Small range: look its blocks up directly.
+		for br := br0; br <= br1; br++ {
+			for bc := bc0; bc <= bc1; bc++ {
+				if k := (BlockKey{Row: int32(br), Col: int32(bc)}); s.blocks[k] != nil {
+					keys = append(keys, k)
+				}
+			}
 		}
-		keys = append(keys, k)
+	} else {
+		for k := range s.blocks {
+			if int(k.Row) < br0 || int(k.Row) > br1 || int(k.Col) < bc0 || int(k.Col) > bc1 {
+				continue
+			}
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 1 {
+		// Common case: one block, already row-major.
+		b := s.blocks[keys[0]]
+		r0, c0 := int(keys[0].Row)*BlockRows, int(keys[0].Col)*BlockCols
+		b.Each(func(r, c int, cell Cell) {
+			if rg.Contains(r0+r, c0+c) {
+				fn(r0+r, c0+c, cell)
+			}
+		})
+		return
 	}
 
 	type hit struct {
@@ -93,7 +116,7 @@ func (s *Sheet) SortedBlockKeys() []BlockKey {
 }
 
 func (s *Sheet) filled(row, col int) bool {
-	return s.Get(row, col).Kind != KindEmpty
+	return !s.Get(row, col).IsEmpty()
 }
 
 // DataEdge implements Excel's ⌘+arrow jump from (row, col) in direction

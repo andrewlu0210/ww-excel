@@ -2,6 +2,7 @@
 // in beta, so keep binding/event usage behind these wrappers.
 import { Events } from '@wailsio/runtime';
 import { BenchService, DocumentService, SheetService } from '../../bindings/ww-excel/internal/service';
+import type { FuncInfo } from '../../bindings/ww-excel/internal/formula/models';
 import type {
   BenchEvent,
   BlockDTO,
@@ -19,6 +20,7 @@ import type {
 import type { MenuAction } from '../input/keymap';
 
 export type {
+  FuncInfo,
   BenchEvent,
   BlockDTO,
   BlockRef,
@@ -44,9 +46,16 @@ export const sheetApi = {
   },
 
   editText: (sheet: number, row: number, col: number): Promise<string> => SheetService.EditText(sheet, row, col),
-  setCell: (sheet: number, row: number, col: number, text: string): Promise<void> =>
-    SheetService.SetCell(sheet, row, col, text),
-  fill: (sheet: number, ranges: RangeDTO[], text: string): Promise<void> => SheetService.Fill(sheet, ranges, text),
+
+  // Edits resolve to null, or to a message for the user when Go rejects
+  // the input (e.g. a formula syntax error); nothing changes then.
+  setCell: (sheet: number, row: number, col: number, text: string): Promise<string | null> =>
+    rejected(SheetService.SetCell(sheet, row, col, text)),
+  fill: (sheet: number, ranges: RangeDTO[], text: string, activeRow: number, activeCol: number): Promise<string | null> =>
+    rejected(SheetService.Fill(sheet, ranges, text, activeRow, activeCol)),
+  async functions(): Promise<FuncInfo[]> {
+    return (await SheetService.Functions()) ?? [];
+  },
   clear: (sheet: number, ranges: RangeDTO[]): Promise<void> => SheetService.Clear(sheet, ranges),
   undo: (): Promise<boolean> => SheetService.Undo(),
   redo: (): Promise<boolean> => SheetService.Redo(),
@@ -57,6 +66,15 @@ export const sheetApi = {
     return Events.On('cells:changed', (ev) => cb(ev.data));
   },
 };
+
+async function rejected(p: Promise<void>): Promise<string | null> {
+  try {
+    await p;
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
 
 export const documentApi = {
   state: (): Promise<DocState> => DocumentService.State(),
@@ -86,6 +104,7 @@ export const benchApi = {
     BenchService.EmitBurst(count, blocksPerEvent),
   report: (markdown: string): Promise<void> => BenchService.ReportBench(markdown),
   snapshot: (name: string, dataURL: string): Promise<void> => BenchService.SaveSnapshot(name, dataURL),
+  recalcChain: (n: number): Promise<number> => BenchService.RecalcChain(n),
 
   onBlockEvent(cb: (e: BenchEvent) => void): () => void {
     return Events.On('bench:block', (ev) => cb(ev.data));

@@ -15,6 +15,11 @@ func TestRoundTrip(t *testing.T) {
 	s.Set(0, 0, model.StringCell("42")) // text that looks like a number
 	s.Set(0, 1, model.NumberCell(42))
 	s.Set(model.MaxRows-1, model.MaxCols-1, model.StringCell("台北\n多行"))
+	s.Set(1, 0, model.BoolCell(false))
+	s.Set(1, 1, model.ErrorCell(model.ErrNA))
+	f := model.NumberCell(84)
+	f.F = &model.Formula{Text: "B1*2"}
+	s.Set(1, 2, f)
 
 	var buf bytes.Buffer
 	if err := Write(&buf, wb); err != nil {
@@ -28,8 +33,8 @@ func TestRoundTrip(t *testing.T) {
 	if gs.Name != "Sheet1" {
 		t.Errorf("name = %q", gs.Name)
 	}
-	for _, rc := range [][2]int{{0, 0}, {0, 1}, {model.MaxRows - 1, model.MaxCols - 1}} {
-		if a, b := gs.Get(rc[0], rc[1]), s.Get(rc[0], rc[1]); a != b {
+	for _, rc := range [][2]int{{0, 0}, {0, 1}, {model.MaxRows - 1, model.MaxCols - 1}, {1, 0}, {1, 1}, {1, 2}} {
+		if a, b := gs.Get(rc[0], rc[1]), s.Get(rc[0], rc[1]); !a.SameInput(b) || !a.SameValue(b) {
 			t.Errorf("(%d,%d) = %+v, want %+v", rc[0], rc[1], a, b)
 		}
 	}

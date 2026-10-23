@@ -28,12 +28,24 @@ interface Theme {
   selectionFill: string;
   font: string;
   headerFont: string;
+  refColors: string[];
 }
+
+// Reference highlight while editing a formula; color is an index into
+// the --ref-N palette.
+export interface Highlight {
+  range: Range;
+  color: number;
+  dashed: boolean;
+}
+
+export const REF_COLORS = 7;
 
 function readTheme(): Theme {
   const css = getComputedStyle(document.documentElement);
   const v = (name: string) => css.getPropertyValue(name).trim();
   return {
+    refColors: Array.from({ length: REF_COLORS }, (_, i) => v(`--ref-${i + 1}`)),
     gridBg: v('--grid-bg'),
     gridLine: v('--grid-line'),
     cellText: v('--cell-text'),
@@ -196,7 +208,11 @@ export class GridRenderer extends Layer {
         if (cellW === 0) continue;
 
         const textW = this.measure(cell.text);
-        const x = cell.numeric ? right - CELL_PAD - textW : left + CELL_PAD;
+        const x = cell.numeric
+          ? right - CELL_PAD - textW
+          : cell.center
+            ? left + (cellW - textW) / 2
+            : left + CELL_PAD;
         // Overflow into neighbours comes later; for now clip to the cell.
         if (textW > cellW - CELL_PAD * 2) {
           ctx.save();
@@ -375,7 +391,7 @@ export class SelectionRenderer extends Layer {
     this.theme = readTheme();
   }
 
-  draw(sx: number, sy: number, sel: Selection): void {
+  draw(sx: number, sy: number, sel: Selection, highlights: readonly Highlight[] = []): void {
     const { ctx, width: w, height: h, theme: th } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -419,7 +435,39 @@ export class SelectionRenderer extends Layer {
         ctx.fillRect(fx, fy, 6, 6);
       }
     }
+    this.drawHighlights(highlights, rect);
     ctx.restore();
+  }
+
+  // Colored boxes for the references in the formula being edited.
+  private drawHighlights(highlights: readonly Highlight[], rect: (r: Range) => Rect): void {
+    const { ctx, theme: th } = this;
+    for (const hl of highlights) {
+      const rc = rect(hl.range);
+      if (rc.w <= 0 || rc.h <= 0) continue;
+      const color = th.refColors[hl.color % th.refColors.length];
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = color;
+      ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash(hl.dashed ? [5, 3] : []);
+      ctx.strokeRect(rc.x - 0.5, rc.y - 0.5, rc.w - 1, rc.h - 1);
+      ctx.setLineDash([]);
+      if (!hl.dashed) {
+        // Corner handles, as in Excel.
+        ctx.fillStyle = color;
+        for (const [cx, cy] of [
+          [rc.x, rc.y],
+          [rc.x + rc.w, rc.y],
+          [rc.x, rc.y + rc.h],
+          [rc.x + rc.w, rc.y + rc.h],
+        ]) {
+          ctx.fillRect(cx - 3, cy - 3, 5, 5);
+        }
+      }
+    }
   }
 }
 

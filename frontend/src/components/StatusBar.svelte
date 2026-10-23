@@ -7,15 +7,17 @@
   interface Props {
     sheetName: string;
     mode: SheetMode;
+    // First cell of a circular reference, or "".
+    circular: string;
     cache?: BlockCache;
     drawTimes?: Samples;
     benchBusy: boolean;
     onbench: () => void;
   }
 
-  let { sheetName, mode, cache, drawTimes, benchBusy, onbench }: Props = $props();
+  let { sheetName, mode, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
 
-  const MODE_LABEL: Record<SheetMode, string> = { ready: '就緒', enter: '輸入', edit: '編輯' };
+  const MODE_LABEL: Record<SheetMode, string> = { ready: '就緒', enter: '輸入', edit: '編輯', point: '指向' };
 
   let fps = $state(0);
   let drawP95 = $state(0);
@@ -43,6 +45,9 @@
   <div class="left">
     <span class="mode">{MODE_LABEL[mode]}</span>
     <span class="tab active">{sheetName}</span>
+    {#if circular}
+      <span class="circular" title="公式直接或間接參照到自己的儲存格，結果顯示為 0">循環參照：{circular}</span>
+    {/if}
   </div>
   <div class="hud">
     <span title="Frames per second">{fps.toFixed(0)} fps</span>
@@ -74,6 +79,9 @@
   .mode {
     min-width: 32px;
     color: var(--chrome-text);
+  }
+  .circular {
+    color: var(--error-fg);
   }
   .tab {
     display: flex;

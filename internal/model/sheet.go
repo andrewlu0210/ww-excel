@@ -3,7 +3,7 @@
 // blocks around the viewport.
 package model
 
-import "strconv"
+import "ww-excel/internal/numfmt"
 
 const (
 	MaxRows = 1 << 20 // 1,048,576 rows, same as Excel
@@ -20,25 +20,116 @@ const (
 	KindEmpty CellKind = iota
 	KindNumber
 	KindString
+	KindBool  // Num is 1 or 0
+	KindError // Str holds the error code, e.g. "#DIV/0!"
 )
 
+// Excel error values.
+const (
+	ErrNull  = "#NULL!"
+	ErrDiv0  = "#DIV/0!"
+	ErrValue = "#VALUE!"
+	ErrRef   = "#REF!"
+	ErrName  = "#NAME?"
+	ErrNum   = "#NUM!"
+	ErrNA    = "#N/A"
+	ErrSpill = "#SPILL!"
+	ErrCalc  = "#CALC!"
+)
+
+var errorCodes = []string{ErrNull, ErrDiv0, ErrValue, ErrRef, ErrName, ErrNum, ErrNA, ErrSpill, ErrCalc}
+
+// ErrorCode returns the canonical error code matching s
+// case-insensitively, or "".
+func ErrorCode(s string) string {
+	for _, code := range errorCodes {
+		if len(s) == len(code) && equalFoldASCII(s, code) {
+			return code
+		}
+	}
+	return ""
+}
+
+func equalFoldASCII(a, b string) bool {
+	for i := 0; i < len(a); i++ {
+		x, y := a[i], b[i]
+		if 'a' <= x && x <= 'z' {
+			x -= 'a' - 'A'
+		}
+		if 'a' <= y && y <= 'z' {
+			y -= 'a' - 'A'
+		}
+		if x != y {
+			return false
+		}
+	}
+	return true
+}
+
+// Formula is a cell formula. Text is the canonical formula without the
+// leading "="; Compiled is owned by the formula engine (parsed AST and
+// precedents) and may be nil until compiled.
+type Formula struct {
+	Text     string
+	Compiled any
+}
+
+// Cell holds a value. For formula cells (F != nil) the value is the last
+// calculated result.
 type Cell struct {
 	Kind CellKind
 	Num  float64
 	Str  string
+	F    *Formula
 }
 
-func NumberCell(n float64) Cell { return Cell{Kind: KindNumber, Num: n} }
-func StringCell(s string) Cell  { return Cell{Kind: KindString, Str: s} }
+func NumberCell(n float64) Cell  { return Cell{Kind: KindNumber, Num: n} }
+func StringCell(s string) Cell   { return Cell{Kind: KindString, Str: s} }
+func ErrorCell(code string) Cell { return Cell{Kind: KindError, Str: code} }
+
+func BoolCell(b bool) Cell {
+	if b {
+		return Cell{Kind: KindBool, Num: 1}
+	}
+	return Cell{Kind: KindBool}
+}
+
+func FormulaCell(text string) Cell { return Cell{F: &Formula{Text: text}} }
+
+// IsEmpty reports whether the cell holds neither a value nor a formula.
+func (c Cell) IsEmpty() bool { return c.Kind == KindEmpty && c.F == nil }
+
+// SameInput reports whether two cells hold the same user input: equal
+// formula text, or equal values for non-formula cells.
+func (c Cell) SameInput(o Cell) bool {
+	if (c.F == nil) != (o.F == nil) {
+		return false
+	}
+	if c.F != nil {
+		return c.F.Text == o.F.Text
+	}
+	return c.Kind == o.Kind && c.Num == o.Num && c.Str == o.Str
+}
+
+// SameValue reports whether two cells hold the same value, ignoring
+// formulas. Used to detect recalculated cells that actually changed.
+func (c Cell) SameValue(o Cell) bool {
+	return c.Kind == o.Kind && c.Num == o.Num && c.Str == o.Str
+}
 
 // Display returns the text shown in the grid.
-// Number formats arrive in v0.4; until then numbers use the shortest repr.
+// Number formats arrive in v0.4; until then numbers use General.
 func (c Cell) Display() string {
 	switch c.Kind {
 	case KindNumber:
-		return strconv.FormatFloat(c.Num, 'f', -1, 64)
-	case KindString:
+		return numfmt.General(c.Num)
+	case KindString, KindError:
 		return c.Str
+	case KindBool:
+		if c.Num != 0 {
+			return "TRUE"
+		}
+		return "FALSE"
 	default:
 		return ""
 	}
@@ -70,7 +161,7 @@ func (b *Block) Each(fn func(r, c int, cell Cell)) {
 		return
 	}
 	for i := range b.cells {
-		if b.cells[i].Kind != KindEmpty {
+		if !b.cells[i].IsEmpty() {
 			fn(i/BlockCols, i%BlockCols, b.cells[i])
 		}
 	}
@@ -101,7 +192,7 @@ func (s *Sheet) Set(row, col int, cell Cell) {
 	key := KeyOf(row, col)
 	b := s.blocks[key]
 	if b == nil {
-		if cell.Kind == KindEmpty {
+		if cell.IsEmpty() {
 			return
 		}
 		b = &Block{}
@@ -109,20 +200,20 @@ func (s *Sheet) Set(row, col int, cell Cell) {
 	}
 
 	i := (row%BlockRows)*BlockCols + col%BlockCols
-	wasEmpty := b.cells[i].Kind == KindEmpty
+	wasEmpty := b.cells[i].IsEmpty()
 	b.cells[i] = cell
 
 	switch {
-	case wasEmpty && cell.Kind != KindEmpty:
+	case wasEmpty && !cell.IsEmpty():
 		b.count++
-	case !wasEmpty && cell.Kind == KindEmpty:
+	case !wasEmpty && cell.IsEmpty():
 		b.count--
 		if b.count == 0 {
 			delete(s.blocks, key)
 		}
 	}
 
-	if cell.Kind != KindEmpty {
+	if !cell.IsEmpty() {
 		s.usedRows = max(s.usedRows, row+1)
 		s.usedCols = max(s.usedCols, col+1)
 	}

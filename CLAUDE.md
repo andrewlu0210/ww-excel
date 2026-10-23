@@ -7,7 +7,7 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.2 完成**（2026-10-23），下一步是 v0.3（公式引擎）
+- 目前階段：**v0.3 完成**（2026-10-23），下一步是 v0.4（格式與 xlsx）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
 - 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、Svelte 5、Vite 8、vitest 5
 
@@ -39,6 +39,7 @@ WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
 - 量測結論整理在 `docs/perf.md`；每完成一版就補一節
 - 一般啟動是空白文件；`WW_FAKE_ROWS` / `WW_FAKE_COLS` 可以載入假資料（量測模式會自動載入）
 - 新增鍵盤或編輯行為時，在 `frontend/src/bench/selfTest.ts` 加上對應檢查項
+- 新增或修改函數時，在 `testdata/golden/functions.tsv` 加上案例（`go test ./internal/formula -run TestGolden`）
 - self-test 模擬不了原生 IME 和選單快捷鍵，這兩項每版都要手動確認
 
 ---
@@ -152,14 +153,24 @@ ww-excel/
 - 留到後續版本：⌥Enter 後自動換行與列高（v0.4 格式）、⌘A 先選目前區域再選整張（v0.5）、列標題自動加寬、Big5 編碼的 CSV
 
 ### v0.3 — 公式引擎（核心）
-- [ ] Lexer / Pratt Parser / AST
-- [ ] 依賴圖、增量重算、循環參照偵測
-- [ ] 值型別系統、錯誤值、日期序列值
-- [ ] 約 50 個常用函數：`SUM AVERAGE COUNT COUNTA MIN MAX ROUND SUMIF COUNTIF IF IFS AND OR NOT IFERROR VLOOKUP HLOOKUP XLOOKUP INDEX MATCH TEXT CONCAT LEFT RIGHT MID LEN TRIM UPPER LOWER DATE TODAY NOW YEAR MONTH DAY`…
-- [ ] 公式列、參照彩色框、point mode、F4 切換 `$`
-- [ ] 函數自動完成與參數提示
-- [ ] Golden test 測試集
-- **驗收**：golden test 全數通過；1 萬個公式的連鎖重算少於 100ms
+- [x] Lexer / Pratt Parser / AST
+- [x] 依賴圖、增量重算、循環參照偵測
+- [x] 值型別系統、錯誤值、日期序列值
+- [x] 約 90 個函數（數學統計、邏輯、查閱、文字、日期、資訊），清單見 `internal/formula/functions/`
+- [x] 公式列（可編輯）、參照彩色框、point mode、F4 / ⌘T 切換 `$`
+- [x] 函數自動完成與參數提示
+- [x] Golden test 測試集（`testdata/golden/functions.tsv`，211 項）
+- **驗收**：golden test 全數通過 ✅；1 萬個公式的連鎖重算 6.4ms ✅（見 `docs/perf.md`）
+- 設計重點：
+  - 套件：`formula/lexer` → `parser`（Pratt）→ `ast`（含 `Format` 標準化輸出、`Adjust` 插入／刪除列欄、`Translate` 複製公式）→ `eval`（值、轉型、運算子、條件）→ `functions`（`init` 註冊）→ `depgraph` → `formula`（引擎）
+  - `model.Cell.F *Formula` 存公式文字和編譯結果，值欄位存計算結果；Undo 直接還原整個 Cell，之後重算
+  - 重算：從變動的儲存格 BFS 標記 dirty，再用 Kahn 拓撲排序依序計算，**不用遞迴**；排不完的節點用 Tarjan SCC 找出循環，照 Excel 的做法設為 0，並持續回報到狀態列
+  - 範圍依賴依 block 分桶；涵蓋超過 64 個 block 的範圍（`A:A`）另存清單掃描
+  - 公式在輸入時就編譯；語法錯誤或引數數量不對會被拒絕，前端回到編輯狀態並顯示原因。未知函數照 Excel 允許輸入，結果是 `#NAME?`
+  - 沒有動態陣列：範圍在運算中取隱含交集，陣列結果只顯示左上角；`SUMPRODUCT` 這類函數的參數用陣列模式計算
+  - 數字顯示、比較和 `ROUND` 都先四捨五入到 15 位有效數字（`=0.1+0.2=0.3` 是 TRUE、`ROUND(2.675,2)` 是 2.68）
+- **Golden 期望值目前是依 Excel 文件手寫的**，還沒用真實 Excel 驗證。v0.4 有 xlsx 讀檔後，改成讀 Excel 存檔裡的快取值做比對
+- 留到後續版本：公式文字的參照上色（textarea 無法上色）、拖曳參照框調整範圍、`INDEX` 回傳參照（`A1:INDEX(...)`）、空格交集運算子、動態陣列與溢出、具名範圍（v0.6）、日期字串自動轉換（`="2026/1/1"+1`）
 
 ### v0.4 — 格式與 xlsx
 - [ ] 樣式系統（字型、填滿、框線、對齊、換行）與 style table

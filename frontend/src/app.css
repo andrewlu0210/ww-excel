@@ -20,6 +20,20 @@
   --header-full-bg: #a9dbbd;
   --accent: #107c41;
   --selection-fill: rgb(16 124 65 / 0.12);
+
+  /* Reference highlight palette while editing formulas (Excel order). */
+  --ref-1: #2f6fde;
+  --ref-2: #d6403a;
+  --ref-3: #8e44ad;
+  --ref-4: #1e8a4c;
+  --ref-5: #b7791f;
+  --ref-6: #0e8a9a;
+  --ref-7: #c2185b;
+
+  --popup-bg: #ffffff;
+  --popup-border: #c8c8c8;
+  --popup-active: #e3f0e8;
+  --error-fg: #b3261e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,6 +55,19 @@
     --header-full-bg: #2b5c40;
     --accent: #3fb878;
     --selection-fill: rgb(63 184 120 / 0.2);
+
+    --ref-1: #6ea0ff;
+    --ref-2: #ff7a70;
+    --ref-3: #c08af0;
+    --ref-4: #52c784;
+    --ref-5: #e3b04b;
+    --ref-6: #4cc4d2;
+    --ref-7: #f06d9f;
+
+    --popup-bg: #2b2b2b;
+    --popup-border: #474747;
+    --popup-active: #24412f;
+    --error-fg: #ff8a80;
   }
 }
 

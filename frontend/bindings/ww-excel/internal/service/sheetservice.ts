@@ -7,6 +7,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as formula$0 from "../formula/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -31,10 +35,18 @@ export function EditText(sheet: number, row: number, col: number): $CancellableP
 }
 
 /**
- * Fill writes text into every cell of the ranges (⌘Enter).
+ * Fill writes text into every cell of the ranges (⌘Enter). A formula is
+ * entered at the active cell and adjusted for the others.
  */
-export function Fill(sheet: number, ranges: $models.RangeDTO[] | null, text: string): $CancellablePromise<void> {
-    return $Call.ByID(2396490820, sheet, ranges, text);
+export function Fill(sheet: number, ranges: $models.RangeDTO[] | null, text: string, activeRow: number, activeCol: number): $CancellablePromise<void> {
+    return $Call.ByID(2396490820, sheet, ranges, text, activeRow, activeCol);
+}
+
+/**
+ * Functions lists worksheet functions for autocomplete and hints.
+ */
+export function Functions(): $CancellablePromise<formula$0.FuncInfo[] | null> {
+    return $Call.ByID(31122762);
 }
 
 /**
@@ -57,7 +69,9 @@ export function Redo(): $CancellablePromise<boolean> {
 }
 
 /**
- * SetCell commits typed text into one cell.
+ * SetCell commits typed text into one cell. A formula that cannot be
+ * entered (syntax error, wrong argument count) returns an error whose
+ * message is shown to the user; nothing changes.
  */
 export function SetCell(sheet: number, row: number, col: number, text: string): $CancellablePromise<void> {
     return $Call.ByID(4134490611, sheet, row, col, text);

@@ -75,3 +75,30 @@ func TestFormatForPath(t *testing.T) {
 		t.Fatal("format detection")
 	}
 }
+
+func TestLoadCSVFormulas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.csv")
+	if err := os.WriteFile(path, []byte("2,=A1*3,=SUM(\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := d.Workbook().Sheets[0]
+	if got := s.Get(0, 1); got.F == nil || got.Display() != "6" {
+		t.Fatalf("B1 = %+v, want formula = 6", got)
+	}
+	if got := s.Get(0, 2); got.F != nil || got.Display() != "=SUM(" {
+		t.Fatalf("invalid formula should load as text, got %+v", got)
+	}
+	// Saving as CSV writes values, as Excel does.
+	out := filepath.Join(t.TempDir(), "out.csv")
+	if err := d.SaveAs(out); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(out)
+	if want := "\xEF\xBB\xBF2,6,=SUM(\r\n"; string(data) != want {
+		t.Fatalf("csv = %q, want %q", data, want)
+	}
+}

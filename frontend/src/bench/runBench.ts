@@ -161,6 +161,20 @@ async function benchScroll(grid: ScrollTarget, cache: BlockCache): Promise<Secti
   ];
 }
 
+async function benchRecalc(): Promise<Section> {
+  const rows: Row[] = [];
+  for (const n of [1_000, 10_000, 100_000]) {
+    const ms: number[] = [];
+    for (let i = 0; i < 3; i++) ms.push(await benchApi.recalcChain(n));
+    rows.push({ case: `chain of ${n.toLocaleString()} formulas`, 'best ms': fmt(Math.min(...ms)), 'mean ms': fmt(mean(ms)) });
+  }
+  return {
+    title: '公式重算（Go 端，連鎖 A2=A1+1, A3=A2+1 …）',
+    rows,
+    note: '每次改 A1 後整串重算一次的時間，由 Go 端計時（微秒精度）。v0.3 驗收：1 萬個公式 < 100ms。',
+  };
+}
+
 async function benchMemory(cachedBlocks: () => number): Promise<Section> {
   const m = await benchApi.mem();
   return {
@@ -188,10 +202,11 @@ export async function runBench(grid: ScrollTarget, cache: BlockCache, info: stri
   sections.push(await benchBlocks());
   sections.push(await benchEvents());
   sections.push(...(await benchScroll(grid, cache)));
+  sections.push(await benchRecalc());
   sections.push(await benchMemory(() => cache.size));
 
   const header = [
-    '# v0.1 Perf Report',
+    '# Perf Report',
     '',
     `- 時間：${new Date().toISOString()}`,
     `- 資料：${info}`,

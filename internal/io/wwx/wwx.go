@@ -28,12 +28,16 @@ type fileSheet struct {
 	Cells []fileCell `json:"cells"`
 }
 
-// Exactly one of N or S is set.
+// A cell has at most one value field (n, s, b or e). F is the formula
+// text without "="; the value then is its cached result.
 type fileCell struct {
 	R int      `json:"r"`
 	C int      `json:"c"`
 	N *float64 `json:"n,omitempty"`
 	S *string  `json:"s,omitempty"`
+	B *bool    `json:"b,omitempty"`
+	E string   `json:"e,omitempty"`
+	F string   `json:"f,omitempty"`
 }
 
 func Write(w io.Writer, wb *model.Workbook) error {
@@ -48,6 +52,14 @@ func Write(w io.Writer, wb *model.Workbook) error {
 				fc.N = &c.Num
 			case model.KindString:
 				fc.S = &c.Str
+			case model.KindBool:
+				b := c.Num != 0
+				fc.B = &b
+			case model.KindError:
+				fc.E = c.Str
+			}
+			if c.F != nil {
+				fc.F = c.F.Text
 			}
 			fs.Cells = append(fs.Cells, fc)
 		})
@@ -89,12 +101,21 @@ func Read(r io.Reader) (*model.Workbook, error) {
 			if fc.R < 0 || fc.R >= model.MaxRows || fc.C < 0 || fc.C >= model.MaxCols {
 				return nil, fmt.Errorf("sheet %q: cell (%d,%d) out of range", fs.Name, fc.R, fc.C)
 			}
+			var cell model.Cell
 			switch {
 			case fc.N != nil:
-				sh.Set(fc.R, fc.C, model.NumberCell(*fc.N))
+				cell = model.NumberCell(*fc.N)
 			case fc.S != nil:
-				sh.Set(fc.R, fc.C, model.StringCell(*fc.S))
+				cell = model.StringCell(*fc.S)
+			case fc.B != nil:
+				cell = model.BoolCell(*fc.B)
+			case fc.E != "":
+				cell = model.ErrorCell(fc.E)
 			}
+			if fc.F != "" {
+				cell.F = &model.Formula{Text: fc.F}
+			}
+			sh.Set(fc.R, fc.C, cell)
 		}
 		wb.Sheets = append(wb.Sheets, sh)
 	}

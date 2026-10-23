@@ -2,6 +2,7 @@ package service
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -100,7 +101,7 @@ func TestEditEmitsOneDiffAndBumpsVersion(t *testing.T) {
 func TestUndoSelectsAffectedArea(t *testing.T) {
 	sess, rec := newTestSession(false)
 	svc := NewSheetService(sess)
-	if err := svc.Fill(0, []RangeDTO{{R0: 1, C0: 1, R1: 3, C1: 2}}, "x"); err != nil {
+	if err := svc.Fill(0, []RangeDTO{{R0: 1, C0: 1, R1: 3, C1: 2}}, "x", 1, 1); err != nil {
 		t.Fatal(err)
 	}
 	if !svc.Undo() {
@@ -136,9 +137,72 @@ func TestLargeClearInvalidates(t *testing.T) {
 
 func TestFillTooLarge(t *testing.T) {
 	sess, rec := newTestSession(false)
-	err := NewSheetService(sess).Fill(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: model.MaxCols - 1}}, "x")
+	err := NewSheetService(sess).Fill(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: model.MaxCols - 1}}, "x", 0, 0)
 	if err == nil || len(rec.diffs) != 0 {
 		t.Fatalf("err=%v diffs=%d", err, len(rec.diffs))
+	}
+}
+
+func TestFormulaEditing(t *testing.T) {
+	sess, rec := newTestSession(false)
+	svc := NewSheetService(sess)
+	svc.SetCell(0, 0, 0, "2")
+	if err := svc.SetCell(0, 0, 1, "=a1*10"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.EditText(0, 0, 1); got != "=A1*10" {
+		t.Fatalf("canonical formula = %q", got)
+	}
+
+	// Editing A1 emits one diff that includes the recalculated B1.
+	n := len(rec.diffs)
+	svc.SetCell(0, 0, 0, "5")
+	if len(rec.diffs) != n+1 {
+		t.Fatalf("diffs = %d, want one more", len(rec.diffs)-n)
+	}
+	d := rec.lastDiff(t)
+	if len(d.Cells) != 2 || d.Cells[1] != (ChangedCell{Row: 0, Col: 1, V: "50", N: true}) {
+		t.Fatalf("diff = %+v", d.Cells)
+	}
+
+	// Rejected formulas change nothing and explain why.
+	n = len(rec.diffs)
+	if err := svc.SetCell(0, 0, 2, "=SUM("); err == nil {
+		t.Fatal("expected an error")
+	}
+	if err := svc.SetCell(0, 0, 2, "=ROUND(1)"); err == nil || !strings.Contains(err.Error(), "引數太少") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(rec.diffs) != n {
+		t.Fatal("rejected formula emitted a diff")
+	}
+
+	// Errors and logicals are centered.
+	svc.SetCell(0, 1, 0, "=1/0")
+	if c := rec.lastDiff(t).Cells[0]; c.V != "#DIV/0!" || !c.X || c.N {
+		t.Fatalf("error cell = %+v", c)
+	}
+
+	// ⌘Enter with a formula adjusts relative references per cell.
+	if err := svc.Fill(0, []RangeDTO{{R0: 3, C0: 0, R1: 5, C1: 0}}, "=ROW()*10+A1", 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.EditText(0, 5, 0); got != "=ROW()*10+A3" {
+		t.Fatalf("filled formula = %q", got)
+	}
+
+	// Undo recalculates dependents too.
+	svc.SetCell(0, 0, 0, "7")
+	svc.Undo()
+	if got := svc.GetBlocks(0, []BlockRef{{0, 0}}).Blocks[0].Cells[1].V; got != "50" {
+		t.Fatalf("B1 after undo = %q", got)
+	}
+
+	// Circular references are reported in the document state.
+	svc.SetCell(0, 9, 0, "=A11")
+	svc.SetCell(0, 10, 0, "=A10")
+	if st := sess.State(); st.Circular != "A10" {
+		t.Fatalf("circular = %q", st.Circular)
 	}
 }
 

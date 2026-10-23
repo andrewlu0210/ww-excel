@@ -3,7 +3,7 @@
   import { sheetApi, type SheetInfo } from '../bridge/sheet';
   import { AxisLayout } from '../grid/layout';
   import { Samples, type ScrollBenchResult } from '../grid/perf';
-  import { GridRenderer, HEADER_H, HEADER_W, rangeRect, SelectionRenderer, type Rect } from '../grid/renderer';
+  import { GridRenderer, HEADER_H, HEADER_W, rangeRect, SelectionRenderer, type Highlight, type Rect } from '../grid/renderer';
   import { ScrollAxis } from '../grid/scroll';
   import type { CellPos, Selection } from '../grid/selection';
   import type { GridPointer, PointerArea } from '../input/pointer';
@@ -13,13 +13,15 @@
     sheet: number;
     info: SheetInfo;
     selection: Selection;
+    // Reference boxes while editing a formula.
+    highlights?: Highlight[];
     onpointer?: (e: GridPointer) => void;
     // Called after every redraw, e.g. to keep the editor on its cell.
     onviewport?: () => void;
     children?: Snippet;
   }
 
-  let { sheet, info, selection, onpointer, onviewport, children }: Props = $props();
+  let { sheet, info, selection, highlights = [], onpointer, onviewport, children }: Props = $props();
 
   const DEFAULT_ROW_H = 20;
   const DEFAULT_COL_W = 80;
@@ -68,7 +70,7 @@
   function drawNow(): void {
     if (!gridLayer || !selLayer) return;
     drawTimes.push(gridLayer.draw(sx, sy, selection));
-    selLayer.draw(sx, sy, selection);
+    selLayer.draw(sx, sy, selection, highlights);
     onviewport?.();
   }
 
@@ -260,9 +262,10 @@
     schedule();
   }
 
-  // Redraw when the selection changes.
+  // Redraw when the selection or the reference highlights change.
   $effect(() => {
     void selection;
+    void highlights;
     schedule();
   });
 

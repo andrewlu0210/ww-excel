@@ -21,7 +21,8 @@ func TestEnterTextNoop(t *testing.T) {
 func TestFillRanges(t *testing.T) {
 	wb := model.NewWorkbook()
 	h := NewHistory(0)
-	cmd, err := FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: 2, C1: 1}, {R0: 10, C0: 10, R1: 10, C1: 10}}, "7")
+	seven := func(int, int) model.Cell { return model.NumberCell(7) }
+	cmd, err := FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: 2, C1: 1}, {R0: 10, C0: 10, R1: 10, C1: 10}}, seven)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +37,7 @@ func TestFillRanges(t *testing.T) {
 		t.Fatal("fill not applied")
 	}
 
-	_, err = FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 1}}, "x")
+	_, err = FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 1}}, seven)
 	if !errors.Is(err, ErrFillTooLarge) {
 		t.Fatalf("err = %v, want ErrFillTooLarge", err)
 	}

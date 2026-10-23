@@ -3,6 +3,7 @@ package service
 import (
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
+	"ww-excel/internal/formula"
 	"ww-excel/internal/model"
 )
 
@@ -12,8 +13,9 @@ type CellDTO struct {
 	R int    `json:"r"`
 	C int    `json:"c"`
 	V string `json:"v"`
-	// N marks numeric values (right-aligned in the grid).
+	// N: number (right-aligned). X: logical or error (centered).
 	N bool `json:"n,omitempty"`
+	X bool `json:"x,omitempty"`
 }
 
 type BlockRef struct {
@@ -107,9 +109,8 @@ func (s *SheetService) GetBlocks(sheet int, refs []BlockRef) BlocksResult {
 				if b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)}); b != nil {
 					dto.Cells = make([]CellDTO, 0, b.Count())
 					b.Each(func(r, c int, cell model.Cell) {
-						dto.Cells = append(dto.Cells, CellDTO{
-							R: r, C: c, V: cell.Display(), N: cell.Kind == model.KindNumber,
-						})
+						v, n, x := cellDisplay(cell)
+						dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x})
 					})
 				}
 			}
@@ -130,27 +131,39 @@ func (s *SheetService) EditText(sheet, row, col int) string {
 	return text
 }
 
-// SetCell commits typed text into one cell.
-func (s *SheetService) SetCell(sheet, row, col int, text string) {
-	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+// SetCell commits typed text into one cell. A formula that cannot be
+// entered (syntax error, wrong argument count) returns an error whose
+// message is shown to the user; nothing changes.
+func (s *SheetService) SetCell(sheet, row, col int, text string) error {
+	var err error
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil || !validCell(row, col) {
-			return command.Effect{}, false
+			return document.Change{}, false
 		}
-		return d.Exec(command.EnterText(d.Workbook(), sheet, row, col, text))
+		var cell model.Cell
+		if cell, err = d.InputCell(sheet, text); err != nil {
+			return document.Change{}, false
+		}
+		return d.Exec(command.SetCell(d.Workbook(), sheet, row, col, cell))
 	})
+	return err
 }
 
-// Fill writes text into every cell of the ranges (⌘Enter).
-func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string) error {
+// Fill writes text into every cell of the ranges (⌘Enter). A formula is
+// entered at the active cell and adjusted for the others.
+func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string, activeRow, activeCol int) error {
 	var err error
-	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
-			return command.Effect{}, false
+			return document.Change{}, false
+		}
+		var cellAt func(int, int) model.Cell
+		if cellAt, err = d.FillCells(sheet, text, activeRow, activeCol); err != nil {
+			return document.Change{}, false
 		}
 		var cmd command.Command
-		cmd, err = command.FillRanges(sheet, toModelRanges(ranges), text)
-		if err != nil {
-			return command.Effect{}, false
+		if cmd, err = command.FillRanges(sheet, toModelRanges(ranges), cellAt); err != nil {
+			return document.Change{}, false
 		}
 		return d.Exec(cmd)
 	})
@@ -159,20 +172,25 @@ func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string) error {
 
 // Clear empties the ranges (Delete key).
 func (s *SheetService) Clear(sheet int, ranges []RangeDTO) {
-	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
-			return command.Effect{}, false
+			return document.Change{}, false
 		}
 		return d.Exec(command.ClearRanges(d.Workbook(), sheet, toModelRanges(ranges)))
 	})
 }
 
 func (s *SheetService) Undo() bool {
-	return s.s.change(true, func(d *document.Document) (command.Effect, bool) { return d.Undo() })
+	return s.s.change(true, func(d *document.Document) (document.Change, bool) { return d.Undo() })
 }
 
 func (s *SheetService) Redo() bool {
-	return s.s.change(true, func(d *document.Document) (command.Effect, bool) { return d.Redo() })
+	return s.s.change(true, func(d *document.Document) (document.Change, bool) { return d.Redo() })
+}
+
+// Functions lists worksheet functions for autocomplete and hints.
+func (s *SheetService) Functions() []formula.FuncInfo {
+	return formula.Functions()
 }
 
 // DataEdge returns the ⌘+arrow target from (row, col).

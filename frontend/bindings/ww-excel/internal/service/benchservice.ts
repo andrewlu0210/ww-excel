@@ -47,6 +47,15 @@ export function Ping(): $CancellablePromise<number> {
 }
 
 /**
+ * RecalcChain builds a separate workbook with a chain of n formulas
+ * (A2=A1+1, A3=A2+1, ...) and returns how long one full recalculation
+ * after changing A1 takes, in milliseconds.
+ */
+export function RecalcChain(n: number): $CancellablePromise<number> {
+    return $Call.ByID(1545930005, n);
+}
+
+/**
  * ReportBench writes the frontend-generated markdown report and quits
  * when running in bench or self-test mode.
  */

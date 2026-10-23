@@ -62,8 +62,11 @@ func TestDisplay(t *testing.T) {
 	}{
 		{Cell{}, ""},
 		{NumberCell(1234.5), "1234.5"},
-		{NumberCell(1e21), "1000000000000000000000"},
+		{NumberCell(1e21), "1E+21"},
+		{NumberCell(0.1 + 0.2), "0.3"},
 		{StringCell("台北"), "台北"},
+		{BoolCell(true), "TRUE"},
+		{ErrorCell(ErrDiv0), "#DIV/0!"},
 	}
 	for _, tt := range tests {
 		if got := tt.cell.Display(); got != tt.want {

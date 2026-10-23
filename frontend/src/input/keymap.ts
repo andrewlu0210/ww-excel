@@ -3,8 +3,8 @@
 
 export type EditMode = 'enter' | 'edit';
 
-// Status bar mode, as in Excel: 就緒 / 輸入 / 編輯.
-export type SheetMode = 'ready' | EditMode;
+// Status bar mode, as in Excel: 就緒 / 輸入 / 編輯 / 指向.
+export type SheetMode = 'ready' | EditMode | 'point';
 
 export type MenuAction = 'undo' | 'redo' | 'selectAll' | 'new' | 'open' | 'save' | 'saveAs' | 'close';
 
@@ -28,7 +28,11 @@ export type Action =
   | { type: 'commitFill' } // ⌘Return: fill the whole selection
   | { type: 'cancel' }
   | { type: 'newline' } // ⌥Return
-  | { type: 'toggleMode' }; // F2 while editing
+  | { type: 'toggleMode' } // F2 while editing
+  | { type: 'toggleAbs' } // F4 / ⌘T: cycle $ on the reference at the caret
+  // Arrow while editing: the controller decides between point mode,
+  // commit-and-move (Enter mode) and moving the caret (Edit mode).
+  | { type: 'arrow'; dr: number; dc: number; extend: boolean };
 
 export interface KeyLike {
   key: string;
@@ -116,12 +120,15 @@ export function idleAction(e: KeyLike): Action | null {
   }
 }
 
-export function editAction(e: KeyLike, mode: EditMode): Action | null {
+export function editAction(e: KeyLike): Action | null {
   if (isComposing(e)) return null;
 
   const menu = menuShortcut(e);
   // Inside the editor ⌘A / ⌘Z act on the text; the controller decides.
   if (menu) return { type: 'menu', action: menu };
+  if (e.key === 'F4' || (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't')) {
+    return { type: 'toggleAbs' };
+  }
 
   switch (e.key) {
     case 'Enter':
@@ -137,11 +144,18 @@ export function editAction(e: KeyLike, mode: EditMode): Action | null {
       return { type: 'toggleMode' };
   }
 
-  // In Enter mode (started by typing) arrows commit and move, like Excel.
   const arrow = ARROWS[e.key];
-  if (arrow && mode === 'enter' && !e.metaKey && !e.altKey && !e.ctrlKey && !e.shiftKey) {
-    const then = e.key === 'ArrowUp' ? 'up' : e.key === 'ArrowDown' ? 'down' : e.key === 'ArrowLeft' ? 'left' : 'right';
-    return { type: 'commit', then };
+  if (arrow && !e.metaKey && !e.altKey && !e.ctrlKey) {
+    return { type: 'arrow', dr: arrow[0], dc: arrow[1], extend: e.shiftKey };
   }
   return null;
+}
+
+// What a plain arrow does while editing, when point mode does not apply:
+// in Enter mode (started by typing) it commits and moves, like Excel; in
+// Edit mode (F2) it moves the caret.
+export function arrowCommit(a: { dr: number; dc: number; extend: boolean }, mode: EditMode): Action | null {
+  if (mode !== 'enter' || a.extend) return null;
+  const then = a.dr < 0 ? 'up' : a.dr > 0 ? 'down' : a.dc < 0 ? 'left' : 'right';
+  return { type: 'commit', then };
 }

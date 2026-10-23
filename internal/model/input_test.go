@@ -20,20 +20,26 @@ func TestParseInput(t *testing.T) {
 		{"NaN", StringCell("NaN")},
 		{"0x1F", StringCell("0x1F")},
 		{"1_000", StringCell("1_000")},
-		{"=A1+1", StringCell("=A1+1")},
+		{"=A1+1", FormulaCell("A1+1")},
+		{"=", StringCell("=")},
+		{"'=A1", StringCell("=A1")},
+		{"true", BoolCell(true)},
+		{"FALSE", BoolCell(false)},
+		{"#n/a", ErrorCell(ErrNA)},
+		{"#DIV/0!", ErrorCell(ErrDiv0)},
 		{"line1\nline2", StringCell("line1\nline2")},
 	}
 	for _, tt := range tests {
-		if got := ParseInput(tt.in); got != tt.want {
+		if got := ParseInput(tt.in); !got.SameInput(tt.want) {
 			t.Errorf("ParseInput(%q) = %+v, want %+v", tt.in, got, tt.want)
 		}
 	}
 }
 
 func TestEditTextRoundTrip(t *testing.T) {
-	for _, in := range []string{"42", "'42", "abc", "'abc", "-0.25", "  7"} {
+	for _, in := range []string{"42", "'42", "abc", "'abc", "-0.25", "  7", "=SUM(A1:A3)", "'=A1", "'TRUE", "TRUE", "'#N/A", "#N/A"} {
 		cell := ParseInput(in)
-		if got := ParseInput(cell.EditText()); got != cell {
+		if got := ParseInput(cell.EditText()); !got.SameInput(cell) {
 			t.Errorf("round trip %q: EditText=%q parsed=%+v want %+v", in, cell.EditText(), got, cell)
 		}
 	}

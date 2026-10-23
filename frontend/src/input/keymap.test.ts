@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editAction, idleAction, type KeyLike } from './keymap';
+import { arrowCommit, editAction, idleAction, type KeyLike } from './keymap';
 
 const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({
   key: k,
@@ -46,22 +46,31 @@ describe('idleAction', () => {
 
 describe('editAction', () => {
   it('commits and moves on Enter/Tab', () => {
-    expect(editAction(key('Enter'), 'edit')).toEqual({ type: 'commit', then: 'down' });
-    expect(editAction(key('Enter', { shiftKey: true }), 'edit')).toEqual({ type: 'commit', then: 'up' });
-    expect(editAction(key('Tab', { shiftKey: true }), 'edit')).toEqual({ type: 'commit', then: 'left' });
-    expect(editAction(key('Enter', { metaKey: true }), 'edit')).toEqual({ type: 'commitFill' });
-    expect(editAction(key('Enter', { altKey: true }), 'edit')).toEqual({ type: 'newline' });
-    expect(editAction(key('Escape'), 'enter')).toEqual({ type: 'cancel' });
+    expect(editAction(key('Enter'))).toEqual({ type: 'commit', then: 'down' });
+    expect(editAction(key('Enter', { shiftKey: true }))).toEqual({ type: 'commit', then: 'up' });
+    expect(editAction(key('Tab', { shiftKey: true }))).toEqual({ type: 'commit', then: 'left' });
+    expect(editAction(key('Enter', { metaKey: true }))).toEqual({ type: 'commitFill' });
+    expect(editAction(key('Enter', { altKey: true }))).toEqual({ type: 'newline' });
+    expect(editAction(key('Escape'))).toEqual({ type: 'cancel' });
   });
 
-  it('arrows commit in Enter mode but move the caret in Edit mode', () => {
-    expect(editAction(key('ArrowRight'), 'enter')).toEqual({ type: 'commit', then: 'right' });
-    expect(editAction(key('ArrowRight'), 'edit')).toBeNull();
-    expect(editAction(key('ArrowRight', { shiftKey: true }), 'enter')).toBeNull();
+  it('reports arrows; they commit in Enter mode and move the caret in Edit mode', () => {
+    const right = editAction(key('ArrowRight'));
+    expect(right).toEqual({ type: 'arrow', dr: 0, dc: 1, extend: false });
+    expect(arrowCommit({ dr: 0, dc: 1, extend: false }, 'enter')).toEqual({ type: 'commit', then: 'right' });
+    expect(arrowCommit({ dr: -1, dc: 0, extend: false }, 'enter')).toEqual({ type: 'commit', then: 'up' });
+    expect(arrowCommit({ dr: 0, dc: 1, extend: false }, 'edit')).toBeNull();
+    expect(arrowCommit({ dr: 0, dc: 1, extend: true }, 'enter')).toBeNull();
+    expect(editAction(key('ArrowLeft', { metaKey: true }))).toBeNull();
+  });
+
+  it('toggles absolute references with F4 and ⌘T', () => {
+    expect(editAction(key('F4'))).toEqual({ type: 'toggleAbs' });
+    expect(editAction(key('t', { metaKey: true }))).toEqual({ type: 'toggleAbs' });
   });
 
   it('does not commit while the IME confirms a candidate', () => {
-    expect(editAction(key('Enter', { keyCode: 229 }), 'enter')).toBeNull();
-    expect(editAction(key('ArrowDown', { isComposing: true }), 'enter')).toBeNull();
+    expect(editAction(key('Enter', { keyCode: 229 }))).toBeNull();
+    expect(editAction(key('ArrowDown', { isComposing: true }))).toBeNull();
   });
 });
