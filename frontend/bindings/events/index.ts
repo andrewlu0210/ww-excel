@@ -13,3 +13,23 @@ import "../github.com/wailsapp/wails/v3/internal/eventcreate.js";
  */
 export const BenchBlock = "bench:block";
 
+/**
+ * Name of the custom event "cells:changed".
+ */
+export const CellsChanged = "cells:changed";
+
+/**
+ * Name of the custom event "doc:reset".
+ */
+export const DocReset = "doc:reset";
+
+/**
+ * Name of the custom event "doc:state".
+ */
+export const DocState = "doc:state";
+
+/**
+ * Name of the custom event "menu:action".
+ */
+export const MenuAction = "menu:action";
+

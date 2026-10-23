@@ -102,3 +102,21 @@ Go 端 benchmark：`go test -run x -bench . -benchmem ./internal/...`
 | Frontend cached blocks | 1500 |
 
 > WKWebView 不提供 performance.memory，前端記憶體請用「活動監視器」觀察 WebContent 程序。
+
+---
+
+## v0.2（2026-10-23）
+
+加入編輯、選取與 Undo/Redo 後重跑同一套量測，數字與 v0.1 一致：
+
+| 項目 | v0.1 | v0.2 |
+|---|---|---|
+| 捲動 fps（三種情境） | 60 / 60 / 60 | 60 / 60 / 60 |
+| Grid 繪製 p95 | 3ms | 3ms |
+| 空呼叫平均 | 0.21ms | 0.21ms |
+| 9 blocks 平均 | 1.18ms | 1.18ms |
+| 捲動時資料送達平均 | 2.25ms | 2.38ms |
+| Go heap（10 萬格） | 23.6MB | 23.5MB |
+
+- 選取層改成多範圍繪製（含整欄／整列判斷），沒有增加可量測的繪製成本
+- 編輯 self-test（`WW_SELFTEST=1`）30/30 通過，結果見 `docs/selftest-latest.md`（不進版控）

@@ -46,6 +46,12 @@ func (b *BenchService) BenchMode() bool {
 	return os.Getenv("WW_BENCH") == "1"
 }
 
+// SelfTestMode reports whether the frontend should run the scripted
+// editing self-test (WW_SELFTEST=1) and report the results.
+func (b *BenchService) SelfTestMode() bool {
+	return os.Getenv("WW_SELFTEST") == "1"
+}
+
 // Ping is an empty round trip for measuring call latency.
 func (b *BenchService) Ping() int64 {
 	return time.Now().UnixMilli()
@@ -70,7 +76,7 @@ func (b *BenchService) EmitBurst(count, blocksPerEvent int) {
 	for i := range refs {
 		refs[i] = BlockRef{Row: i}
 	}
-	blocks := b.sheets.GetBlocks(0, refs)
+	blocks := b.sheets.GetBlocks(0, refs).Blocks
 
 	app := application.Get()
 	for i := 0; i < count; i++ {
@@ -103,12 +109,12 @@ func (b *BenchService) SaveSnapshot(name, dataURL string) error {
 }
 
 // ReportBench writes the frontend-generated markdown report and quits
-// when running in bench mode.
+// when running in bench or self-test mode.
 func (b *BenchService) ReportBench(report string) error {
 	if err := os.WriteFile(benchOutPath(), []byte(report), 0o644); err != nil {
 		return fmt.Errorf("write bench report: %w", err)
 	}
-	if b.BenchMode() {
+	if b.BenchMode() || b.SelfTestMode() {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			application.Get().Quit()

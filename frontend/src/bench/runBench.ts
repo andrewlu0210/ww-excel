@@ -60,7 +60,7 @@ async function benchBlocks(): Promise<Section> {
   for (const count of [1, 9, 25, 64]) {
     // Dense blocks from the top of the sheet (all hold data).
     const refs: BlockRef[] = Array.from({ length: count }, (_, i) => ({ row: i, col: 0 }));
-    const sample = await sheetApi.getBlocks(0, refs);
+    const sample = (await sheetApi.getBlocks(0, refs)).blocks ?? [];
     const cells = sample.reduce((n, b) => n + (b.cells?.length ?? 0), 0);
     const kb = JSON.stringify(sample).length / 1024;
 

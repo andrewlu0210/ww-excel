@@ -7,7 +7,7 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.1 完成**（2026-10-23），下一步是 v0.2
+- 目前階段：**v0.2 完成**（2026-10-23），下一步是 v0.3（公式引擎）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
 - 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、Svelte 5、Vite 8、vitest 5
 
@@ -27,11 +27,19 @@ cd frontend && npm run check        # svelte-check (needs up-to-date bindings)
 
 # Perf harness: opens a window, runs, writes docs/perf-latest.md + docs/snapshot-*.png, quits
 WW_BENCH=1 WW_BENCH_OUT="$PWD/docs/perf-latest.md" ./bin/ww-excel
+
+# Editing self-test: drives the real controller with simulated keys, writes
+# docs/selftest-latest.md + docs/selftest.png, quits (60s watchdog)
+WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
+
+./bin/ww-excel path/to/file.csv     # open a .csv / .wwx on launch
 ```
 
 - 要確認畫面時，跑上面的量測模式，再讀 `docs/snapshot-origin.png` 和 `docs/snapshot-end.png`，不需要螢幕錄製權限
 - 量測結論整理在 `docs/perf.md`；每完成一版就補一節
-- 假資料大小可以用 `WW_FAKE_ROWS` / `WW_FAKE_COLS` 調整（v0.2 導入真實開檔後移除）
+- 一般啟動是空白文件；`WW_FAKE_ROWS` / `WW_FAKE_COLS` 可以載入假資料（量測模式會自動載入）
+- 新增鍵盤或編輯行為時，在 `frontend/src/bench/selfTest.ts` 加上對應檢查項
+- self-test 模擬不了原生 IME 和選單快捷鍵，這兩項每版都要手動確認
 
 ---
 
@@ -122,18 +130,26 @@ ww-excel/
 - [x] 建立 `bridge/` 包裝層
 - **驗收**：100 萬列捲動 60fps；10 萬格資料時記憶體合理 → ✅ 達成（見 `docs/perf.md`）
 - 留到後續版本：列標題依位數自動加寬（目前固定 60px）、文字溢出到相鄰空格（目前會被裁切）、稀疏 block 節省記憶體
-- v0.2 要注意：diff event 每次編輯合併成一個事件，連續推送時延遲會累積
+- v0.2 要注意：diff event 每次編輯合併成一個事件，連續推送時延遲會累積 → 已實作
 
 ### v0.2 — 可編輯的試算表
-- [ ] 選取模型（active cell、range、多重範圍）
-- [ ] 鍵盤導航：方向鍵、⌘+方向鍵、Shift、Tab/Enter、Home/End、PgUp/PgDn
-- [ ] textarea 疊層編輯器（直接輸入 / F2 / Esc / Enter / ⌥+Enter）
-- [ ] IME 中文輸入
-- [ ] Go Workbook Model（稀疏 block 儲存）
-- [ ] Command Bus + Undo/Redo（⌘Z / ⇧⌘Z）
-- [ ] 開檔存檔：CSV 與自有格式
-- [ ] 原生選單列、檔案對話框
-- **驗收**：能輸入資料，Undo/Redo 正常，中文輸入順暢
+- [x] 選取模型（active cell、range、多重範圍）
+- [x] 鍵盤導航：方向鍵、⌘+方向鍵、Shift、Tab/Enter、Home/End、PgUp/PgDn
+- [x] textarea 疊層編輯器（直接輸入 / F2 / Esc / Enter / ⌥+Enter）
+- [x] IME 中文輸入（常駐 textarea 設計；需手動實測注音、倉頡）
+- [x] Go Workbook Model（稀疏 block 儲存）
+- [x] Command Bus + Undo/Redo（⌘Z / ⇧⌘Z）
+- [x] 開檔存檔：CSV 與自有格式（`.wwx` = gzip JSON）
+- [x] 原生選單列、檔案對話框
+- **驗收**：能輸入資料，Undo/Redo 正常 → ✅ self-test 30/30；中文輸入 → 待手動確認
+- 設計重點：
+  - 編輯器是一個常駐、隨時有焦點的 `<textarea>`，閒置時透明地放在作用中儲存格上，所以 IME 的第一個按鍵就會進入組字，候選字視窗也會出現在儲存格旁
+  - 所有後端呼叫依序排隊（`Sheet.svelte` 的 `enqueue`）；選單和 ⌘ 快捷鍵由 `runMenu` 處理，**不能在佇列內呼叫**，否則會自己等自己而卡死
+  - ⌘ 快捷鍵可能同時收到 keydown 和選單事件，`runMenu` 會忽略 150ms 內的重複動作
+  - GetBlocks 回傳文件版本，前端丟棄比最新 diff 舊的結果；開新文件時用 generation 計數擋掉舊請求
+  - 一次變動超過 5,000 格時只送「失效」通知，前端清掉快取重抓
+  - ⌘Q 不經過視窗的 closing hook，所以用 `ShouldQuit` 把它轉到關閉視窗的未儲存確認
+- 留到後續版本：⌥Enter 後自動換行與列高（v0.4 格式）、⌘A 先選目前區域再選整張（v0.5）、列標題自動加寬、Big5 編碼的 CSV
 
 ### v0.3 — 公式引擎（核心）
 - [ ] Lexer / Pratt Parser / AST

@@ -11,5 +11,7 @@ build/android/overlay.json
 build/android/gen/
 # Bench output (curated results live in docs/perf.md)
 docs/perf-latest.md
+docs/selftest-latest.md
 docs/snapshot-*.png
+docs/selftest.png
 .DS_Store

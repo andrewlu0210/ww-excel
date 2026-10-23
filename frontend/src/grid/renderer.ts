@@ -1,15 +1,11 @@
 import type { BlockCache } from '../stores/viewportCache';
 import { AxisLayout, colName } from './layout';
+import { current, isFullCols, isFullRows, isSingleCell, type Range, type Selection } from './selection';
 
 // Wide enough for 7-digit row numbers; Excel-style auto width comes later.
 export const HEADER_W = 60;
 export const HEADER_H = 22;
 const CELL_PAD = 4;
-
-export interface CellPos {
-  row: number;
-  col: number;
-}
 
 export interface VisibleRange {
   r0: number; // inclusive cell indices
@@ -27,7 +23,9 @@ interface Theme {
   headerLine: string;
   headerActiveBg: string;
   headerActiveText: string;
+  headerFullBg: string;
   accent: string;
+  selectionFill: string;
   font: string;
   headerFont: string;
 }
@@ -44,7 +42,9 @@ function readTheme(): Theme {
     headerLine: v('--header-line'),
     headerActiveBg: v('--header-active-bg'),
     headerActiveText: v('--header-active-text'),
+    headerFullBg: v('--header-full-bg'),
     accent: v('--accent'),
+    selectionFill: v('--selection-fill'),
     font: `13px ${v('--cell-font')}`,
     headerFont: `11px ${v('--ui-font')}`,
   };
@@ -109,7 +109,7 @@ export class GridRenderer extends Layer {
   }
 
   // Draws the whole grid layer; returns elapsed milliseconds.
-  draw(sx: number, sy: number, active: CellPos): number {
+  draw(sx: number, sy: number, sel: Selection): number {
     const t0 = performance.now();
     const { ctx, width: w, height: h, theme: th } = this;
     const vr = this.visibleRange(sx, sy);
@@ -138,7 +138,7 @@ export class GridRenderer extends Layer {
     this.drawCells(vr, xs, ys);
     ctx.restore();
 
-    this.drawHeaders(vr, xs, ys, active);
+    this.drawHeaders(vr, xs, ys, sel);
     return performance.now() - t0;
   }
 
@@ -222,7 +222,20 @@ export class GridRenderer extends Layer {
     return w;
   }
 
-  private drawHeaders(vr: VisibleRange, xs: number[], ys: number[], active: CellPos): void {
+  // 0 = not selected, 1 = inside a selection, 2 = whole row/col selected.
+  private headerState(sel: Selection, index: number, axis: 'row' | 'col'): number {
+    const lim = { rows: this.rows.count, cols: this.cols.count };
+    let state = 0;
+    for (const r of sel.ranges) {
+      const inside = axis === 'col' ? index >= r.c0 && index <= r.c1 : index >= r.r0 && index <= r.r1;
+      if (!inside) continue;
+      const full = axis === 'col' ? isFullCols(r, lim) : isFullRows(r, lim);
+      state = Math.max(state, full ? 2 : 1);
+    }
+    return state;
+  }
+
+  private drawHeaders(vr: VisibleRange, xs: number[], ys: number[], sel: Selection): void {
     const { ctx, width: w, height: h, theme: th } = this;
 
     ctx.fillStyle = th.headerBg;
@@ -233,6 +246,9 @@ export class GridRenderer extends Layer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
+    const colStates = new Array<number>(vr.c1 - vr.c0 + 1);
+    const rowStates = new Array<number>(vr.r1 - vr.r0 + 1);
+
     // Column header
     ctx.save();
     ctx.beginPath();
@@ -242,12 +258,12 @@ export class GridRenderer extends Layer {
       const left = xs[c - vr.c0];
       const right = xs[c - vr.c0 + 1];
       if (right === left) continue;
-      const isActive = c === active.col;
-      if (isActive) {
-        ctx.fillStyle = th.headerActiveBg;
+      const state = (colStates[c - vr.c0] = this.headerState(sel, c, 'col'));
+      if (state > 0) {
+        ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
         ctx.fillRect(left, 0, right - left, HEADER_H);
       }
-      ctx.fillStyle = isActive ? th.headerActiveText : th.headerText;
+      ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
       ctx.fillText(colName(c), (left + right) / 2, HEADER_H / 2 + 1);
     }
     ctx.restore();
@@ -261,12 +277,12 @@ export class GridRenderer extends Layer {
       const top = ys[r - vr.r0];
       const bottom = ys[r - vr.r0 + 1];
       if (bottom === top) continue;
-      const isActive = r === active.row;
-      if (isActive) {
-        ctx.fillStyle = th.headerActiveBg;
+      const state = (rowStates[r - vr.r0] = this.headerState(sel, r, 'row'));
+      if (state > 0) {
+        ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
         ctx.fillRect(0, top, HEADER_W, bottom - top);
       }
-      ctx.fillStyle = isActive ? th.headerActiveText : th.headerText;
+      ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
       ctx.fillText(String(r + 1), HEADER_W / 2, (top + bottom) / 2);
     }
     ctx.restore();
@@ -296,23 +312,56 @@ export class GridRenderer extends Layer {
     ctx.lineWidth = 1 / this.dpr;
     ctx.stroke();
 
-    // Active header underline, as in Excel
-    const activeX = active.col - vr.c0;
-    if (activeX >= 0 && activeX < xs.length - 1) {
-      ctx.fillStyle = th.accent;
-      ctx.fillRect(xs[activeX], HEADER_H - 2, xs[activeX + 1] - xs[activeX], 2);
+    // Accent edge on selected headers, as in Excel
+    ctx.fillStyle = th.accent;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(HEADER_W, 0, w - HEADER_W, HEADER_H);
+    ctx.clip();
+    for (let i = 0; i < colStates.length; i++) {
+      if (colStates[i] > 0) ctx.fillRect(xs[i], HEADER_H - 2, xs[i + 1] - xs[i], 2);
     }
-    const activeY = active.row - vr.r0;
-    if (activeY >= 0 && activeY < ys.length - 1) {
-      ctx.fillStyle = th.accent;
-      ctx.fillRect(HEADER_W - 2, ys[activeY], 2, ys[activeY + 1] - ys[activeY]);
+    ctx.restore();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, HEADER_H, HEADER_W, h - HEADER_H);
+    ctx.clip();
+    for (let i = 0; i < rowStates.length; i++) {
+      if (rowStates[i] > 0) ctx.fillRect(HEADER_W - 2, ys[i], 2, ys[i + 1] - ys[i]);
     }
+    ctx.restore();
   }
+}
+
+// Rectangle of a cell range in viewport coordinates, clamped to a margin
+// around the viewport so whole-sheet ranges stay small numbers.
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function rangeRect(rows: AxisLayout, cols: AxisLayout, r: Range, sx: number, sy: number): Rect {
+  const x0 = HEADER_W + cols.offset(r.c0) - sx;
+  const x1 = HEADER_W + cols.offset(r.c1 + 1) - sx;
+  const y0 = HEADER_H + rows.offset(r.r0) - sy;
+  const y1 = HEADER_H + rows.offset(r.r1 + 1) - sy;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+function clampRect(rc: Rect, width: number, height: number): Rect {
+  const m = 8;
+  const x0 = Math.max(rc.x, -m);
+  const y0 = Math.max(rc.y, -m);
+  const x1 = Math.min(rc.x + rc.w, width + m);
+  const y1 = Math.min(rc.y + rc.h, height + m);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 // Selection layer: redrawn independently of the grid layer.
 export class SelectionRenderer extends Layer {
-  private accent = readTheme().accent;
+  private theme = readTheme();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -323,31 +372,54 @@ export class SelectionRenderer extends Layer {
   }
 
   refreshTheme(): void {
-    this.accent = readTheme().accent;
+    this.theme = readTheme();
   }
 
-  draw(sx: number, sy: number, active: CellPos): void {
-    const { ctx, width: w, height: h } = this;
+  draw(sx: number, sy: number, sel: Selection): void {
+    const { ctx, width: w, height: h, theme: th } = this;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-
-    const cw = this.cols.size(active.col);
-    const ch = this.rows.size(active.row);
-    if (cw === 0 || ch === 0) return;
-    const x = HEADER_W + this.cols.offset(active.col) - sx;
-    const y = HEADER_H + this.rows.offset(active.row) - sy;
-    if (x > w || y > h || x + cw < HEADER_W || y + ch < HEADER_H) return;
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(HEADER_W, HEADER_H, w - HEADER_W, h - HEADER_H);
     ctx.clip();
-    ctx.strokeStyle = this.accent;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x - 1, y - 1, cw, ch);
-    // Fill handle
-    ctx.fillStyle = this.accent;
-    ctx.fillRect(x + cw - 4, y + ch - 4, 6, 6);
+
+    const single = isSingleCell(sel);
+    const rect = (r: Range) => clampRect(rangeRect(this.rows, this.cols, r, sx, sy), w, h);
+
+    if (!single) {
+      ctx.fillStyle = th.selectionFill;
+      for (const r of sel.ranges) {
+        const rc = rect(r);
+        if (rc.w > 0 && rc.h > 0) ctx.fillRect(rc.x, rc.y, rc.w, rc.h);
+      }
+      // The active cell stays unfilled.
+      const a = rect({ r0: sel.active.row, c0: sel.active.col, r1: sel.active.row, c1: sel.active.col });
+      ctx.clearRect(a.x, a.y, a.w - 1, a.h - 1);
+    }
+
+    ctx.strokeStyle = th.accent;
+    if (sel.ranges.length > 1) {
+      // Multiple ranges: thin outline on the active cell only.
+      const a = rect({ r0: sel.active.row, c0: sel.active.col, r1: sel.active.row, c1: sel.active.col });
+      ctx.lineWidth = 1;
+      ctx.strokeRect(a.x - 0.5, a.y - 0.5, a.w, a.h);
+    } else {
+      const rc = rect(current(sel));
+      if (rc.w > 0 && rc.h > 0) {
+        ctx.lineWidth = 2;
+        ctx.strokeRect(rc.x - 1, rc.y - 1, rc.w, rc.h);
+        // Fill handle with a background-colored ring
+        const fx = rc.x + rc.w - 4;
+        const fy = rc.y + rc.h - 4;
+        ctx.fillStyle = th.gridBg;
+        ctx.fillRect(fx - 1, fy - 1, 8, 8);
+        ctx.fillStyle = th.accent;
+        ctx.fillRect(fx, fy, 6, 6);
+      }
+    }
     ctx.restore();
   }
 }
+

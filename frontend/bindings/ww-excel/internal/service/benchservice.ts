@@ -48,7 +48,7 @@ export function Ping(): $CancellablePromise<number> {
 
 /**
  * ReportBench writes the frontend-generated markdown report and quits
- * when running in bench mode.
+ * when running in bench or self-test mode.
  */
 export function ReportBench(report: string): $CancellablePromise<void> {
     return $Call.ByID(2242952060, report);
@@ -60,4 +60,12 @@ export function ReportBench(report: string): $CancellablePromise<void> {
  */
 export function SaveSnapshot(name: string, dataURL: string): $CancellablePromise<void> {
     return $Call.ByID(1522158841, name, dataURL);
+}
+
+/**
+ * SelfTestMode reports whether the frontend should run the scripted
+ * editing self-test (WW_SELFTEST=1) and report the results.
+ */
+export function SelfTestMode(): $CancellablePromise<boolean> {
+    return $Call.ByID(1350790109);
 }

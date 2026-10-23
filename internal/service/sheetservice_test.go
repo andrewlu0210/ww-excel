@@ -1,20 +1,49 @@
 package service
 
 import (
+	"path/filepath"
+	"sync"
 	"testing"
 
+	"ww-excel/internal/document"
 	"ww-excel/internal/model"
 )
 
-func newTestService() *SheetService {
+type recorder struct {
+	mu     sync.Mutex
+	events []string
+	diffs  []CellsChanged
+}
+
+func (r *recorder) emit(name string, data any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, name)
+	if d, ok := data.(CellsChanged); ok {
+		r.diffs = append(r.diffs, d)
+	}
+}
+
+func (r *recorder) lastDiff(t *testing.T) CellsChanged {
+	t.Helper()
+	if len(r.diffs) == 0 {
+		t.Fatal("no diff emitted")
+	}
+	return r.diffs[len(r.diffs)-1]
+}
+
+func newTestSession(fake bool) (*Session, *recorder) {
 	wb := model.NewWorkbook()
-	model.FillFake(wb.Sheets[0], 20_000, 5, 1)
-	return NewSheetService(wb)
+	if fake {
+		model.FillFake(wb.Sheets[0], 20_000, 5, 1)
+	}
+	rec := &recorder{}
+	return NewSession(document.FromWorkbook(wb, ""), rec.emit), rec
 }
 
 func TestGetBlocks(t *testing.T) {
-	s := newTestService()
-	got := s.GetBlocks(0, []BlockRef{{0, 0}, {5000, 5000}, {0, 1}})
+	sess, _ := newTestSession(true)
+	got := NewSheetService(sess).GetBlocks(0, []BlockRef{{0, 0}, {5000, 5000}, {0, 1}}).Blocks
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -31,15 +60,106 @@ func TestGetBlocks(t *testing.T) {
 }
 
 func TestGetBlocksBadSheet(t *testing.T) {
-	s := newTestService()
-	got := s.GetBlocks(9, []BlockRef{{0, 0}})
+	sess, _ := newTestSession(true)
+	got := NewSheetService(sess).GetBlocks(9, []BlockRef{{0, 0}}).Blocks
 	if len(got) != 1 || len(got[0].Cells) != 0 {
 		t.Fatalf("unexpected %+v", got)
 	}
 }
 
+func TestEditEmitsOneDiffAndBumpsVersion(t *testing.T) {
+	sess, rec := newTestSession(false)
+	svc := NewSheetService(sess)
+	v0 := svc.GetBlocks(0, nil).Version
+
+	svc.SetCell(0, 2, 3, "12.5")
+	d := rec.lastDiff(t)
+	if len(rec.diffs) != 1 || d.Version <= v0 {
+		t.Fatalf("diffs=%d version=%d (was %d)", len(rec.diffs), d.Version, v0)
+	}
+	if len(d.Cells) != 1 || d.Cells[0] != (ChangedCell{Row: 2, Col: 3, V: "12.5", N: true}) {
+		t.Fatalf("diff cells = %+v", d.Cells)
+	}
+	if d.UsedRows != 3 || d.UsedCols != 4 || d.Select != nil {
+		t.Fatalf("diff meta = %+v", d)
+	}
+	if got := svc.GetBlocks(0, nil).Version; got != d.Version {
+		t.Fatalf("GetBlocks version %d != diff version %d", got, d.Version)
+	}
+
+	// Same value again: no-op, no event.
+	svc.SetCell(0, 2, 3, "12.5")
+	if len(rec.diffs) != 1 {
+		t.Fatal("no-op edit emitted a diff")
+	}
+	if !sess.State().Dirty || !sess.State().CanUndo || sess.State().UndoLabel != "輸入" {
+		t.Fatalf("state = %+v", sess.State())
+	}
+}
+
+func TestUndoSelectsAffectedArea(t *testing.T) {
+	sess, rec := newTestSession(false)
+	svc := NewSheetService(sess)
+	if err := svc.Fill(0, []RangeDTO{{R0: 1, C0: 1, R1: 3, C1: 2}}, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Undo() {
+		t.Fatal("undo failed")
+	}
+	d := rec.lastDiff(t)
+	if d.Select == nil || *d.Select != (RangeDTO{R0: 1, C0: 1, R1: 3, C1: 2}) {
+		t.Fatalf("select = %+v", d.Select)
+	}
+	if len(d.Cells) != 6 || d.Cells[0].V != "" {
+		t.Fatalf("undo diff = %+v", d.Cells)
+	}
+	if sess.State().Dirty {
+		t.Fatal("undo back to start should be clean")
+	}
+	if svc.Undo() {
+		t.Fatal("nothing left to undo")
+	}
+}
+
+func TestLargeClearInvalidates(t *testing.T) {
+	sess, rec := newTestSession(true)
+	svc := NewSheetService(sess)
+	svc.Clear(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 4}})
+	d := rec.lastDiff(t)
+	if !d.Invalidate || len(d.Cells) != 0 {
+		t.Fatalf("expected invalidation, got %d cells", len(d.Cells))
+	}
+	if got := svc.EditText(0, 1, 0); got != "" {
+		t.Fatalf("cell not cleared: %q", got)
+	}
+}
+
+func TestFillTooLarge(t *testing.T) {
+	sess, rec := newTestSession(false)
+	err := NewSheetService(sess).Fill(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: model.MaxCols - 1}}, "x")
+	if err == nil || len(rec.diffs) != 0 {
+		t.Fatalf("err=%v diffs=%d", err, len(rec.diffs))
+	}
+}
+
+func TestEditTextAndDataEdge(t *testing.T) {
+	sess, _ := newTestSession(true)
+	svc := NewSheetService(sess)
+	svc.SetCell(0, 0, 10, "'007")
+	if got := svc.EditText(0, 0, 10); got != "'007" {
+		t.Fatalf("EditText = %q", got)
+	}
+	if got := svc.DataEdge(0, 0, 0, 1, 0); got != (CellPos{Row: 19_999, Col: 0}) {
+		t.Fatalf("DataEdge = %+v", got)
+	}
+	if got := svc.DataEdge(0, 0, 0, 1, 1); got != (CellPos{}) {
+		t.Fatalf("diagonal should be rejected: %+v", got)
+	}
+}
+
 func TestInfo(t *testing.T) {
-	info := newTestService().Info(0)
+	sess, _ := newTestSession(true)
+	info := NewSheetService(sess).Info(0)
 	if info.Rows != model.MaxRows || info.Cols != model.MaxCols {
 		t.Fatalf("dims = %dx%d", info.Rows, info.Cols)
 	}
@@ -48,10 +168,84 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+type fakeDialogs struct {
+	choice   SaveChoice
+	openPath string
+	savePath string
+	asked    int
+	errors   []string
+}
+
+func (f *fakeDialogs) AskSave(string) SaveChoice         { f.asked++; return f.choice }
+func (f *fakeDialogs) PickOpen() (string, error)         { return f.openPath, nil }
+func (f *fakeDialogs) PickSave(string) (string, error)   { return f.savePath, nil }
+func (f *fakeDialogs) ShowError(title, msg string)       { f.errors = append(f.errors, title+": "+msg) }
+func (f *fakeDialogs) ShowWarning(title, message string) {}
+
+func TestDocumentFlow(t *testing.T) {
+	dir := t.TempDir()
+	sess, rec := newTestSession(false)
+	dlg := &fakeDialogs{savePath: filepath.Join(dir, "book")}
+	sheets := NewSheetService(sess)
+	docs := NewDocumentService(sess, dlg)
+
+	// Clean document: New does not ask.
+	if !docs.New() || dlg.asked != 0 {
+		t.Fatal("New on clean doc should not prompt")
+	}
+
+	sheets.SetCell(0, 0, 0, "hello")
+	dlg.choice = ChoiceCancel
+	if docs.New() || dlg.asked != 1 {
+		t.Fatal("cancel must abort New")
+	}
+
+	// Save on untitled asks for a path and appends .wwx.
+	if !docs.Save() {
+		t.Fatalf("save failed: %v", dlg.errors)
+	}
+	st := docs.State()
+	if st.Name != "book.wwx" || st.Dirty {
+		t.Fatalf("state after save = %+v", st)
+	}
+
+	// Open the saved file into a fresh session state.
+	sheets.SetCell(0, 0, 1, "dirty")
+	dlg.choice = ChoiceDiscard
+	dlg.openPath = filepath.Join(dir, "book.wwx")
+	if !docs.Open() {
+		t.Fatalf("open failed: %v", dlg.errors)
+	}
+	if got := sheets.EditText(0, 0, 1); got != "" {
+		t.Fatalf("discarded edit survived: %q", got)
+	}
+	if got := sheets.EditText(0, 0, 0); got != "hello" {
+		t.Fatalf("opened cell = %q", got)
+	}
+	if rec.events[len(rec.events)-2] != EventDocReset {
+		t.Fatalf("expected doc:reset before state, got %v", rec.events[len(rec.events)-3:])
+	}
+
+	// Save choice in the prompt saves first.
+	sheets.SetCell(0, 5, 5, "1")
+	dlg.choice = ChoiceSave
+	if !docs.ConfirmClose() {
+		t.Fatal("save-then-close should proceed")
+	}
+	if docs.State().Dirty {
+		t.Fatal("ConfirmClose with Save should save")
+	}
+
+	if err := docs.OpenPath(filepath.Join(dir, "missing.wwx")); err == nil || len(dlg.errors) == 0 {
+		t.Fatal("opening a missing file should report an error")
+	}
+}
+
 // A typical viewport fetch: ~40 rows x ~15 cols plus prefetch ring
 // spans about 3x3 blocks.
 func BenchmarkGetBlocksViewport(b *testing.B) {
-	s := newTestService()
+	sess, _ := newTestSession(true)
+	s := NewSheetService(sess)
 	refs := make([]BlockRef, 0, 9)
 	for r := 10; r < 13; r++ {
 		for c := 0; c < 3; c++ {

@@ -1,10 +1,8 @@
-// Package service is the thin Wails-bound layer over internal packages.
-// Keep logic out of here so it can be tested without Wails.
 package service
 
 import (
-	"sync"
-
+	"ww-excel/internal/command"
+	"ww-excel/internal/document"
 	"ww-excel/internal/model"
 )
 
@@ -29,6 +27,13 @@ type BlockDTO struct {
 	Cells []CellDTO `json:"cells"`
 }
 
+// BlocksResult carries the document version the blocks were read at, so
+// the frontend can drop results that raced with an edit.
+type BlocksResult struct {
+	Version uint64     `json:"version"`
+	Blocks  []BlockDTO `json:"blocks"`
+}
+
 type SheetInfo struct {
 	Name      string `json:"name"`
 	Rows      int    `json:"rows"`
@@ -39,61 +44,154 @@ type SheetInfo struct {
 	BlockCols int    `json:"blockCols"`
 }
 
+type CellPos struct {
+	Row int `json:"row"`
+	Col int `json:"col"`
+}
+
 type SheetService struct {
-	mu sync.RWMutex
-	wb *model.Workbook
+	s *Session
 }
 
-func NewSheetService(wb *model.Workbook) *SheetService {
-	return &SheetService{wb: wb}
+func NewSheetService(s *Session) *SheetService {
+	return &SheetService{s: s}
 }
 
-func (s *SheetService) sheet(index int) *model.Sheet {
-	if index < 0 || index >= len(s.wb.Sheets) {
+func sheetAt(d *document.Document, index int) *model.Sheet {
+	sheets := d.Workbook().Sheets
+	if index < 0 || index >= len(sheets) {
 		return nil
 	}
-	return s.wb.Sheets[index]
+	return sheets[index]
+}
+
+func validCell(row, col int) bool {
+	return row >= 0 && row < model.MaxRows && col >= 0 && col < model.MaxCols
+}
+
+func toModelRanges(ranges []RangeDTO) []model.Range {
+	out := make([]model.Range, len(ranges))
+	for i, r := range ranges {
+		out[i] = r.model().Clamp()
+	}
+	return out
 }
 
 // Info returns grid dimensions and block geometry for a sheet.
 func (s *SheetService) Info(sheet int) SheetInfo {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	info := SheetInfo{
 		Rows:      model.MaxRows,
 		Cols:      model.MaxCols,
 		BlockRows: model.BlockRows,
 		BlockCols: model.BlockCols,
 	}
-	if sh := s.sheet(sheet); sh != nil {
-		info.Name = sh.Name
-		info.UsedRows, info.UsedCols = sh.UsedRange()
-	}
+	s.s.read(func(d *document.Document) {
+		if sh := sheetAt(d, sheet); sh != nil {
+			info.Name = sh.Name
+			info.UsedRows, info.UsedCols = sh.UsedRange()
+		}
+	})
 	return info
 }
 
 // GetBlocks returns the requested blocks in one call. Empty blocks are
 // returned with no cells so the frontend can mark them as loaded.
-func (s *SheetService) GetBlocks(sheet int, refs []BlockRef) []BlockDTO {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	sh := s.sheet(sheet)
-	out := make([]BlockDTO, 0, len(refs))
-	for _, ref := range refs {
-		dto := BlockDTO{Row: ref.Row, Col: ref.Col, Cells: []CellDTO{}}
-		if sh != nil {
-			if b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)}); b != nil {
-				dto.Cells = make([]CellDTO, 0, b.Count())
-				b.Each(func(r, c int, cell model.Cell) {
-					dto.Cells = append(dto.Cells, CellDTO{
-						R: r, C: c, V: cell.Display(), N: cell.Kind == model.KindNumber,
+func (s *SheetService) GetBlocks(sheet int, refs []BlockRef) BlocksResult {
+	res := BlocksResult{Blocks: make([]BlockDTO, 0, len(refs))}
+	s.s.read(func(d *document.Document) {
+		res.Version = d.Version()
+		sh := sheetAt(d, sheet)
+		for _, ref := range refs {
+			dto := BlockDTO{Row: ref.Row, Col: ref.Col, Cells: []CellDTO{}}
+			if sh != nil {
+				if b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)}); b != nil {
+					dto.Cells = make([]CellDTO, 0, b.Count())
+					b.Each(func(r, c int, cell model.Cell) {
+						dto.Cells = append(dto.Cells, CellDTO{
+							R: r, C: c, V: cell.Display(), N: cell.Kind == model.KindNumber,
+						})
 					})
-				})
+				}
 			}
+			res.Blocks = append(res.Blocks, dto)
 		}
-		out = append(out, dto)
+	})
+	return res
+}
+
+// EditText returns the text to show when editing a cell (F2).
+func (s *SheetService) EditText(sheet, row, col int) string {
+	var text string
+	s.s.read(func(d *document.Document) {
+		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) {
+			text = sh.Get(row, col).EditText()
+		}
+	})
+	return text
+}
+
+// SetCell commits typed text into one cell.
+func (s *SheetService) SetCell(sheet, row, col int, text string) {
+	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+		if sheetAt(d, sheet) == nil || !validCell(row, col) {
+			return command.Effect{}, false
+		}
+		return d.Exec(command.EnterText(d.Workbook(), sheet, row, col, text))
+	})
+}
+
+// Fill writes text into every cell of the ranges (⌘Enter).
+func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string) error {
+	var err error
+	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+		if sheetAt(d, sheet) == nil {
+			return command.Effect{}, false
+		}
+		var cmd command.Command
+		cmd, err = command.FillRanges(sheet, toModelRanges(ranges), text)
+		if err != nil {
+			return command.Effect{}, false
+		}
+		return d.Exec(cmd)
+	})
+	return err
+}
+
+// Clear empties the ranges (Delete key).
+func (s *SheetService) Clear(sheet int, ranges []RangeDTO) {
+	s.s.change(false, func(d *document.Document) (command.Effect, bool) {
+		if sheetAt(d, sheet) == nil {
+			return command.Effect{}, false
+		}
+		return d.Exec(command.ClearRanges(d.Workbook(), sheet, toModelRanges(ranges)))
+	})
+}
+
+func (s *SheetService) Undo() bool {
+	return s.s.change(true, func(d *document.Document) (command.Effect, bool) { return d.Undo() })
+}
+
+func (s *SheetService) Redo() bool {
+	return s.s.change(true, func(d *document.Document) (command.Effect, bool) { return d.Redo() })
+}
+
+// DataEdge returns the ⌘+arrow target from (row, col).
+func (s *SheetService) DataEdge(sheet, row, col, dr, dc int) CellPos {
+	pos := CellPos{Row: row, Col: col}
+	if !validCell(row, col) || abs(dr)+abs(dc) != 1 {
+		return pos
 	}
-	return out
+	s.s.read(func(d *document.Document) {
+		if sh := sheetAt(d, sheet); sh != nil {
+			pos.Row, pos.Col = sh.DataEdge(row, col, dr, dc)
+		}
+	})
+	return pos
+}
+
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

@@ -1,17 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { FpsMeter, type Samples } from '../grid/perf';
+  import type { SheetMode } from '../input/keymap';
   import type { BlockCache } from '../stores/viewportCache';
 
   interface Props {
     sheetName: string;
+    mode: SheetMode;
     cache?: BlockCache;
     drawTimes?: Samples;
     benchBusy: boolean;
     onbench: () => void;
   }
 
-  let { sheetName, cache, drawTimes, benchBusy, onbench }: Props = $props();
+  let { sheetName, mode, cache, drawTimes, benchBusy, onbench }: Props = $props();
+
+  const MODE_LABEL: Record<SheetMode, string> = { ready: '就緒', enter: '輸入', edit: '編輯' };
 
   let fps = $state(0);
   let drawP95 = $state(0);
@@ -36,7 +40,8 @@
 </script>
 
 <footer class="status">
-  <div class="tabs">
+  <div class="left">
+    <span class="mode">{MODE_LABEL[mode]}</span>
     <span class="tab active">{sheetName}</span>
   </div>
   <div class="hud">
@@ -44,7 +49,7 @@
     <span title="Grid draw time, p95">draw {drawP95.toFixed(1)} ms</span>
     <span title="Last GetBlocks round trip">fetch {fetchMs.toFixed(1)} ms</span>
     <span title="Blocks cached in the frontend">{blocks} blocks</span>
-    <button onclick={onbench} disabled={benchBusy}>{benchBusy ? '量測中…' : '效能量測'}</button>
+    <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? '量測中…' : '效能量測'}</button>
   </div>
 </footer>
 
@@ -60,9 +65,15 @@
     font-size: 11px;
     color: var(--chrome-muted);
   }
-  .tabs {
+  .left {
     display: flex;
+    align-items: center;
     height: 100%;
+    gap: 8px;
+  }
+  .mode {
+    min-width: 32px;
+    color: var(--chrome-text);
   }
   .tab {
     display: flex;

@@ -24,6 +24,15 @@ export interface BlockRef {
 }
 
 /**
+ * BlocksResult carries the document version the blocks were read at, so
+ * the frontend can drop results that raced with an edit.
+ */
+export interface BlocksResult {
+    "version": number;
+    "blocks": BlockDTO[] | null;
+}
+
+/**
  * CellDTO is a single non-empty cell inside a block. R and C are offsets
  * within the block; short JSON keys keep the payload small.
  */
@@ -38,10 +47,61 @@ export interface CellDTO {
     "n"?: boolean;
 }
 
+export interface CellPos {
+    "row": number;
+    "col": number;
+}
+
+/**
+ * CellsChanged is the single event emitted per edit, undo or redo.
+ */
+export interface CellsChanged {
+    "sheet": number;
+    "version": number;
+    "cells": ChangedCell[] | null;
+
+    /**
+     * Invalidate means the change was too large to list; drop cached
+     * blocks and refetch.
+     */
+    "invalidate"?: boolean;
+    "usedRows": number;
+    "usedCols": number;
+
+    /**
+     * Select is set for undo/redo: Excel selects the affected area.
+     */
+    "select"?: RangeDTO | null;
+}
+
+export interface ChangedCell {
+    "row": number;
+    "col": number;
+    "v": string;
+    "n"?: boolean;
+}
+
+export interface DocState {
+    "name": string;
+    "path": string;
+    "dirty": boolean;
+    "canUndo": boolean;
+    "canRedo": boolean;
+    "undoLabel": string;
+    "redoLabel": string;
+}
+
 export interface MemStats {
     "heapAllocMB": number;
     "sysMB": number;
     "numGC": number;
+}
+
+export interface RangeDTO {
+    "r0": number;
+    "c0": number;
+    "r1": number;
+    "c1": number;
 }
 
 export interface SheetInfo {

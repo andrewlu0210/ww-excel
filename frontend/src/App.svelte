@@ -1,30 +1,37 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { runBench } from './bench/runBench';
-  import { benchApi, sheetApi, type SheetInfo } from './bridge/sheet';
-  import Grid from './components/Grid.svelte';
+  import { runSelfTest } from './bench/selfTest';
+  import { benchApi, documentApi, sheetApi, type SheetInfo } from './bridge/sheet';
+  import Sheet from './components/Sheet.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import { cellAddress } from './grid/layout';
-  import type { CellPos } from './grid/renderer';
+  import { single, type CellPos } from './grid/selection';
+  import type { SheetMode } from './input/keymap';
 
   const SHEET = 0;
 
   let info = $state<SheetInfo>();
-  let active = $state<CellPos>({ row: 0, col: 0 });
-  let grid = $state<ReturnType<typeof Grid>>();
+  let sheetView = $state<ReturnType<typeof Sheet>>();
+  let mode = $state<SheetMode>('ready');
+  let formulaText = $state('');
+  let activeCell = $state<CellPos>({ row: 0, col: 0 });
+  let sheetName = $state('');
   let benchBusy = $state(false);
   let report = $state('');
 
-  let activeText = $derived(grid?.cache.cell(active.row, active.col)?.text ?? '');
+  let grid = $derived(sheetView?.getGrid());
 
   async function bench(): Promise<string> {
-    if (!grid || !info) return '';
+    const g = sheetView?.getGrid();
+    if (!g || !info) return '';
     benchBusy = true;
     try {
       const data = `${info.usedRows.toLocaleString()} used rows × ${info.usedCols.toLocaleString()} used cols（含邊界標記）`;
-      return await runBench(grid, grid.cache, data);
+      return await runBench(g, g.cache, data);
     } finally {
       benchBusy = false;
+      sheetView?.focus();
     }
   }
 
@@ -32,53 +39,69 @@
     report = await bench();
   }
 
-  const nextFrames = (n: number) =>
-    new Promise<void>((resolve) => {
-      const step = () => (--n <= 0 ? resolve() : requestAnimationFrame(step));
-      requestAnimationFrame(step);
-    });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   // Visual checks for bench mode: top-left with a selection, and the
   // bottom-right corner of the grid.
-  async function saveSnapshots(): Promise<void> {
-    if (!grid) return;
-    active = { row: 2, col: 1 };
-    await new Promise((r) => setTimeout(r, 200));
-    await nextFrames(2);
-    await benchApi.snapshot('snapshot-origin', grid.snapshot());
+  async function saveBenchSnapshots(): Promise<void> {
+    const g = sheetView?.getGrid();
+    if (!g || !sheetView) return;
+    sheetView.setSelectionForTest(single({ row: 2, col: 1 }));
+    g.scrollToOrigin();
+    await wait(300);
+    await benchApi.snapshot('snapshot-origin', g.snapshot());
 
-    const { width, height } = grid.contentSize();
-    active = { row: 1_048_575, col: 16_383 };
-    await grid.runScrollBench(1, () => ({ x: width, y: height }));
-    await new Promise((r) => setTimeout(r, 200));
-    await grid.runScrollBench(1, () => ({ x: width, y: height }));
-    await benchApi.snapshot('snapshot-end', grid.snapshot());
-    active = { row: 0, col: 0 };
-    grid.scrollToOrigin();
+    const { width, height } = g.contentSize();
+    sheetView.setSelectionForTest(single({ row: 1_048_575, col: 16_383 }));
+    await g.runScrollBench(1, () => ({ x: width, y: height }));
+    await wait(200);
+    await g.runScrollBench(1, () => ({ x: width, y: height }));
+    await benchApi.snapshot('snapshot-end', g.snapshot());
+    sheetView.setSelectionForTest(single({ row: 0, col: 0 }));
+    g.scrollToOrigin();
   }
 
-  onMount(async () => {
-    info = await sheetApi.info(SHEET);
-    if (await benchApi.benchMode()) {
-      // Let the first frames settle before measuring.
-      await new Promise((r) => setTimeout(r, 1000));
-      const md = await bench();
-      await saveSnapshots();
-      await benchApi.report(md);
-    }
+  onMount(() => {
+    const offs = [
+      documentApi.onMenu((action) => void sheetView?.runMenu(action)),
+      documentApi.onState((st) => (sheetName = st.name)),
+    ];
+
+    void (async () => {
+      info = await sheetApi.info(SHEET);
+      sheetName = (await documentApi.state()).name;
+
+      if (await benchApi.benchMode()) {
+        await wait(1000); // let the first frames settle
+        const md = await bench();
+        await saveBenchSnapshots();
+        await benchApi.report(md);
+      } else if (await benchApi.selfTestMode()) {
+        await wait(500);
+        // Watchdog: a hung step must still produce a report and quit.
+        const timeout = wait(60_000).then(() => ({ markdown: '# v0.2 Self-test\n\n❌ 逾時（60 秒）：有步驟沒有完成。\n', failed: 1 }));
+        const result = await Promise.race([runSelfTest(sheetView!, SHEET), timeout]);
+        const g = sheetView!.getGrid()!;
+        await benchApi.snapshot('selftest', g.snapshot());
+        await benchApi.report(result.markdown);
+      }
+    })();
+
+    return () => offs.forEach((off) => off());
   });
 </script>
 
 <main class="app">
   <header class="formula-bar">
-    <div class="name-box">{cellAddress(active.row, active.col)}</div>
+    <div class="name-box">{cellAddress(activeCell.row, activeCell.col)}</div>
     <div class="fx">fx</div>
-    <input class="formula" value={activeText} readonly placeholder="v0.2 起可編輯" />
+    <!-- Read-only until formula-bar editing arrives with v0.3 point mode. -->
+    <input class="formula" value={formulaText} readonly tabindex="-1" onfocus={() => sheetView?.focus()} />
   </header>
 
   {#if info}
-    <Grid bind:this={grid} sheet={SHEET} {info} {active} onselect={(pos) => (active = pos)} />
-    <StatusBar sheetName={info.name} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench} />
+    <Sheet bind:this={sheetView} sheet={SHEET} {info} bind:mode bind:formulaText bind:activeCell />
+    <StatusBar {sheetName} {mode} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench} />
   {/if}
 
   {#if report}
@@ -86,7 +109,12 @@
       <div class="report-head">
         <strong>效能量測結果</strong>
         <button onclick={() => navigator.clipboard.writeText(report)}>複製 Markdown</button>
-        <button onclick={() => (report = '')}>關閉</button>
+        <button
+          onclick={() => {
+            report = '';
+            sheetView?.focus();
+          }}>關閉</button
+        >
       </div>
       <pre>{report}</pre>
     </div>

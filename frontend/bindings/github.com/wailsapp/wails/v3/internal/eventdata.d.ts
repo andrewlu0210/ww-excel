@@ -13,6 +13,10 @@ declare module "@wailsio/runtime" {
     namespace Events {
         interface CustomEvents {
             "bench:block": service$0.BenchEvent;
+            "cells:changed": service$0.CellsChanged;
+            "doc:reset": service$0.DocState;
+            "doc:state": service$0.DocState;
+            "menu:action": string;
         }
     }
 }

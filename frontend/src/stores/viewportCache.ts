@@ -1,4 +1,4 @@
-import type { BlockDTO, BlockRef } from '../bridge/sheet';
+import type { BlockDTO, BlockRef, BlocksResult, CellsChanged } from '../bridge/sheet';
 
 export interface CellView {
   text: string;
@@ -16,7 +16,7 @@ interface CachedBlock {
   cells: (CellView | undefined)[];
 }
 
-type Fetcher = (refs: BlockRef[]) => Promise<BlockDTO[]>;
+type Fetcher = (refs: BlockRef[]) => Promise<BlocksResult>;
 
 export interface FetchStat {
   blocks: number;
@@ -24,11 +24,16 @@ export interface FetchStat {
 }
 
 // Caches blocks around the viewport. ensure() batches every missing block
-// (visible + prefetch ring) into a single backend call.
+// (visible + prefetch ring) into a single backend call. Edits arrive as
+// diffs; a fetch answered at an older document version than the latest
+// diff is discarded and refetched on the next draw.
 export class BlockCache {
   private blocks = new Map<number, CachedBlock>();
   private pending = new Set<number>();
   private lastFetches: FetchStat[] = [];
+  private version = 0;
+  // Bumped by reset() so fetches from a previous document are ignored.
+  private generation = 0;
 
   onUpdate: () => void = () => {};
 
@@ -97,16 +102,39 @@ export class BlockCache {
 
   private async load(refs: BlockRef[]): Promise<void> {
     const t0 = performance.now();
+    const gen = this.generation;
     try {
       const result = await this.fetcher(refs);
-      for (const dto of result) this.store(dto);
+      if (gen !== this.generation) return;
+      if (result.version >= this.version) {
+        for (const dto of result.blocks ?? []) this.store(dto);
+      }
       this.recordFetch({ blocks: refs.length, ms: performance.now() - t0 });
     } catch (err) {
       console.error('GetBlocks failed', err);
     } finally {
-      for (const ref of refs) this.pending.delete(this.key(ref.row, ref.col));
+      if (gen === this.generation) {
+        for (const ref of refs) this.pending.delete(this.key(ref.row, ref.col));
+      }
     }
     this.evict();
+    this.onUpdate();
+  }
+
+  // Applies an edit diff. Cells in blocks that are not cached are
+  // skipped; they will be fetched fresh when needed.
+  applyDiff(diff: CellsChanged): void {
+    this.version = Math.max(this.version, diff.version);
+    if (diff.invalidate) {
+      this.blocks.clear();
+    } else {
+      for (const c of diff.cells ?? []) {
+        const block = this.blocks.get(this.key(Math.floor(c.row / this.blockRows), Math.floor(c.col / this.blockCols)));
+        if (!block) continue;
+        const i = (c.row % this.blockRows) * this.blockCols + (c.col % this.blockCols);
+        block.cells[i] = c.v === '' ? undefined : { text: c.v, numeric: c.n === true };
+      }
+    }
     this.onUpdate();
   }
 
@@ -135,7 +163,12 @@ export class BlockCache {
     if (this.lastFetches.length > 200) this.lastFetches.shift();
   }
 
-  clear(): void {
+  // Drops everything, e.g. when another document is opened.
+  reset(): void {
+    this.generation++;
     this.blocks.clear();
+    this.pending.clear();
+    this.version = 0;
+    this.onUpdate();
   }
 }

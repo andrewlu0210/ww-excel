@@ -17,7 +17,9 @@
   --header-line: #d0d0d0;
   --header-active-bg: #d3f0e0;
   --header-active-text: #0e5c2f;
+  --header-full-bg: #a9dbbd;
   --accent: #107c41;
+  --selection-fill: rgb(16 124 65 / 0.12);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,7 +38,9 @@
     --header-line: #3d3d3d;
     --header-active-bg: #1f3b2b;
     --header-active-text: #8fdcaf;
+    --header-full-bg: #2b5c40;
     --accent: #3fb878;
+    --selection-fill: rgb(63 184 120 / 0.2);
   }
 }
 

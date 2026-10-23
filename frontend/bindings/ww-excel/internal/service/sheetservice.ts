@@ -10,10 +10,38 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * Clear empties the ranges (Delete key).
+ */
+export function Clear(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2111196366, sheet, ranges);
+}
+
+/**
+ * DataEdge returns the ⌘+arrow target from (row, col).
+ */
+export function DataEdge(sheet: number, row: number, col: number, dr: number, dc: number): $CancellablePromise<$models.CellPos> {
+    return $Call.ByID(3175328864, sheet, row, col, dr, dc);
+}
+
+/**
+ * EditText returns the text to show when editing a cell (F2).
+ */
+export function EditText(sheet: number, row: number, col: number): $CancellablePromise<string> {
+    return $Call.ByID(1782003686, sheet, row, col);
+}
+
+/**
+ * Fill writes text into every cell of the ranges (⌘Enter).
+ */
+export function Fill(sheet: number, ranges: $models.RangeDTO[] | null, text: string): $CancellablePromise<void> {
+    return $Call.ByID(2396490820, sheet, ranges, text);
+}
+
+/**
  * GetBlocks returns the requested blocks in one call. Empty blocks are
  * returned with no cells so the frontend can mark them as loaded.
  */
-export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null): $CancellablePromise<$models.BlockDTO[] | null> {
+export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null): $CancellablePromise<$models.BlocksResult> {
     return $Call.ByID(3691041957, sheet, refs);
 }
 
@@ -22,4 +50,19 @@ export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null): $Canc
  */
 export function Info(sheet: number): $CancellablePromise<$models.SheetInfo> {
     return $Call.ByID(3398240161, sheet);
+}
+
+export function Redo(): $CancellablePromise<boolean> {
+    return $Call.ByID(547917765);
+}
+
+/**
+ * SetCell commits typed text into one cell.
+ */
+export function SetCell(sheet: number, row: number, col: number, text: string): $CancellablePromise<void> {
+    return $Call.ByID(4134490611, sheet, row, col, text);
+}
+
+export function Undo(): $CancellablePromise<boolean> {
+    return $Call.ByID(3900349779);
 }
