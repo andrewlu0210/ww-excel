@@ -13,6 +13,13 @@ import * as formula$0 from "../formula/models.js";
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+/**
+ * AddChart places a chart at a cell and returns its ID.
+ */
+export function AddChart(sheet: number, row: number, col: number, w: number, h: number, chart: $models.ChartDTO): $CancellablePromise<number> {
+    return $Call.ByID(349585112, sheet, row, col, w, h, chart);
+}
+
 export function AddCondFormat(sheet: number, ranges: $models.RangeDTO[] | null, rule: $models.CFRuleDTO): $CancellablePromise<void> {
     return $Call.ByID(1008702819, sheet, ranges, rule);
 }
@@ -23,6 +30,27 @@ export function AddCondFormat(sheet: number, ranges: $models.RangeDTO[] | null, 
  */
 export function AutoFitColumn(sheet: number, col: number): $CancellablePromise<$models.TextSample[] | null> {
     return $Call.ByID(508441899, sheet, col);
+}
+
+/**
+ * ChartData evaluates a chart's series for drawing.
+ */
+export function ChartData(sheet: number, id: number): $CancellablePromise<$models.ChartDataDTO> {
+    return $Call.ByID(2972784791, sheet, id);
+}
+
+/**
+ * ChartFromSelection suggests a chart for the selected data.
+ */
+export function ChartFromSelection(sheet: number, sel: $models.RangeDTO, typ: string): $CancellablePromise<$models.ChartDTO | null> {
+    return $Call.ByID(3468303399, sheet, sel, typ);
+}
+
+/**
+ * ChartPreview evaluates a chart that is not placed yet (insert dialog).
+ */
+export function ChartPreview(sheet: number, chart: $models.ChartDTO): $CancellablePromise<$models.ChartDataDTO> {
+    return $Call.ByID(2296462521, sheet, chart);
 }
 
 /**
@@ -90,6 +118,10 @@ export function DataEdge(sheet: number, row: number, col: number, dr: number, dc
 
 export function DeleteCondFormat(sheet: number, index: number): $CancellablePromise<void> {
     return $Call.ByID(3473322353, sheet, index);
+}
+
+export function DeleteObjects(sheet: number, ids: number[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3661374410, sheet, ids);
 }
 
 /**
@@ -206,6 +238,20 @@ export function Merge(sheet: number, rg: $models.RangeDTO, center: boolean): $Ca
 }
 
 /**
+ * ObjectImage returns a picture as a data URL.
+ */
+export function ObjectImage(sheet: number, id: number): $CancellablePromise<string> {
+    return $Call.ByID(859057787, sheet, id);
+}
+
+/**
+ * PageSetup returns a sheet's print settings.
+ */
+export function PageSetup(sheet: number): $CancellablePromise<$models.PageSetupDTO> {
+    return $Call.ByID(16217975, sheet);
+}
+
+/**
  * Paste pastes at the selection. text is the clipboard text from a paste
  * event, or nil to read the system clipboard. Text matching our last
  * copy pastes that clip (formulas, formats); other text is entered as
@@ -229,6 +275,14 @@ export function PasteSpecial(sheet: number, sel: $models.RangeDTO, mode: string,
  */
 export function PreviewFormat(sheet: number, row: number, col: number, code: string): $CancellablePromise<string> {
     return $Call.ByID(3688061788, sheet, row, col, code);
+}
+
+/**
+ * PrintPreview renders a sheet to PDF for the preview. charts maps
+ * chart object IDs to PNG data URLs drawn by the frontend.
+ */
+export function PrintPreview(sheet: number, charts: { [_ in `${number}`]?: string } | null): $CancellablePromise<$models.PreviewResult> {
+    return $Call.ByID(3689525392, sheet, charts);
 }
 
 export function Redo(): $CancellablePromise<boolean> {
@@ -276,6 +330,10 @@ export function SetFilter(sheet: number, col: number, shown: string[] | null, al
  */
 export function SetNote(sheet: number, row: number, col: number, text: string): $CancellablePromise<void> {
     return $Call.ByID(3493409311, sheet, row, col, text);
+}
+
+export function SetPageSetup(sheet: number, p: $models.PageSetupDTO): $CancellablePromise<void> {
+    return $Call.ByID(751057473, sheet, p);
 }
 
 /**
@@ -364,6 +422,14 @@ export function Undo(): $CancellablePromise<boolean> {
 
 export function Unmerge(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
     return $Call.ByID(3017305422, sheet, ranges);
+}
+
+/**
+ * UpdateObject moves, resizes or edits an object. A nil chart keeps the
+ * current one.
+ */
+export function UpdateObject(sheet: number, o: $models.ObjectDTO, label: string): $CancellablePromise<void> {
+    return $Call.ByID(4131350511, sheet, o, label);
 }
 
 /**

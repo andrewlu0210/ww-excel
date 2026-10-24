@@ -232,8 +232,9 @@ type LayoutDTO struct {
 	Filter       *RangeDTO `json:"filter"`
 	FilteredCols []int     `json:"filteredCols"`
 	// Notes (red triangles) and tables.
-	Notes  []NoteDTO  `json:"notes"`
-	Tables []TableDTO `json:"tables"`
+	Notes   []NoteDTO   `json:"notes"`
+	Tables  []TableDTO  `json:"tables"`
+	Objects []ObjectDTO `json:"objects"`
 	// Styles the caller does not know yet (IDs >= the known count).
 	Styles []StyleDTO `json:"styles"`
 }
@@ -244,7 +245,10 @@ func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 		Rows: []SizeDTO{}, Cols: []SizeDTO{}, RowStyles: []StyleRefDTO{}, ColStyles: []StyleRefDTO{}, Merges: []RangeDTO{},
 		Styles:     stylesSince(wb, knownStyles),
 		FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols, FilteredCols: []int{},
-		Notes: []NoteDTO{}, Tables: []TableDTO{},
+		Notes: []NoteDTO{}, Tables: []TableDTO{}, Objects: []ObjectDTO{},
+	}
+	for _, o := range l.Objects {
+		out.Objects = append(out.Objects, objectDTO(o))
 	}
 	for pos, n := range l.Notes {
 		out.Notes = append(out.Notes, NoteDTO{Row: pos[0], Col: pos[1], Author: n.Author, Text: n.Text})

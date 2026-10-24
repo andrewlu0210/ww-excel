@@ -2,6 +2,8 @@
 // layout fetches and diff events, and are never removed while a document
 // is open. Render info (CSS font, colors) is derived once per style.
 import type { StyleDTO } from '../bridge/sheet';
+import { ensureFont, onFontsLoaded } from './fontLoader';
+import { fontFamilies } from './fonts';
 
 export interface StyleRender {
   dto: StyleDTO;
@@ -16,7 +18,10 @@ const FALLBACK = `"PingFang TC", "Heiti TC", -apple-system, sans-serif`;
 
 export function fontCss(f: StyleDTO['font'], zoom = 1): { css: string; px: number } {
   const px = Math.max(1, (f.size || 11) * PT_TO_PX * zoom);
-  const family = f.name ? `"${f.name.replace(/"/g, '')}", ${FALLBACK}` : FALLBACK;
+  // Each family is tried in turn, per character: Chinese text in a Latin
+  // font falls through to a Chinese one, as in Excel.
+  const names = f.name ? fontFamilies(f.name).map((n) => `"${n.replace(/"/g, '')}"`) : [];
+  const family = names.length > 0 ? `${names.join(', ')}, ${FALLBACK}` : FALLBACK;
   return { css: `${f.italic ? 'italic ' : ''}${f.bold ? '700 ' : ''}${px.toFixed(2)}px ${family}`, px };
 }
 
@@ -43,9 +48,18 @@ export class StyleStore {
     return this.version;
   }
 
+  constructor() {
+    // A font arriving later changes how cells look: redraw.
+    onFontsLoaded(() => {
+      this.version++;
+      for (const fn of this.listeners) fn();
+    });
+  }
+
   merge(styles: readonly StyleDTO[] | null | undefined): void {
     if (!styles || styles.length === 0) return;
     for (const s of styles) {
+      if (s.font.name) for (const f of fontFamilies(s.font.name)) void ensureFont(f);
       const { css, px } = fontCss(s.font);
       this.list[s.id] = {
         dto: s,

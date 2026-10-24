@@ -63,6 +63,8 @@ func main() {
 	a.docs.OpenWindow = func(doc *document.Document) { a.openWindow(doc) }
 	a.docs.FocusPath = a.focusPath
 	a.docs.Opened = a.recent.Add
+	a.docs.PrintPDF = printPDF
+	service.FontSource = fontData
 
 	a.app = application.New(application.Options{
 		Name:        "WW Excel",
@@ -74,6 +76,9 @@ func main() {
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
+			// Print previews are PDFs rendered on demand; fonts the page
+			// cannot use directly are served from CoreText.
+			Middleware: application.ChainMiddleware(service.PrintHandler, service.FontHandler),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -301,6 +306,11 @@ func buildMenu(a *docApp) *appMenus {
 	file.Add("關閉視窗").SetAccelerator("CmdOrCtrl+W").OnClick(send("close"))
 	file.Add("儲存").SetAccelerator("CmdOrCtrl+S").OnClick(send("save"))
 	file.Add("另存新檔…").SetAccelerator("CmdOrCtrl+Shift+S").OnClick(send("saveAs"))
+	file.AddSeparator()
+	file.Add("版面設定…").OnClick(send("pageSetup"))
+	file.Add("列印預覽…").OnClick(send("printPreview"))
+	file.Add("列印…").SetAccelerator("CmdOrCtrl+P").OnClick(send("print"))
+	file.Add("匯出為 PDF…").OnClick(send("exportPDF"))
 
 	edit := root.AddSubmenu("編輯")
 	m.undo = edit.Add("復原").SetAccelerator("CmdOrCtrl+Z").OnClick(send("undo")).SetEnabled(false)
@@ -338,6 +348,9 @@ func buildMenu(a *docApp) *appMenus {
 	insert.AddSeparator()
 	insert.Add("表格…").SetAccelerator("CmdOrCtrl+T").OnClick(send("insertTable"))
 	insert.Add("註解").SetAccelerator("Shift+F2").OnClick(send("insertNote"))
+	insert.AddSeparator()
+	insert.Add("圖表…").OnClick(send("insertChart"))
+	insert.Add("圖片…").OnClick(send("insertPicture"))
 
 	format := root.AddSubmenu("格式")
 	format.Add("儲存格格式…").SetAccelerator("CmdOrCtrl+1").OnClick(send("formatCells"))

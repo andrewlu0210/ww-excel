@@ -66,7 +66,15 @@ export type MenuAction =
   | 'insertTable'
   | 'tableTotals'
   | 'renameTable'
-  | 'convertTable';
+  | 'convertTable'
+  // v0.7
+  | 'insertChart'
+  | 'editChart'
+  | 'insertPicture'
+  | 'pageSetup'
+  | 'printPreview'
+  | 'print'
+  | 'exportPDF';
 
 // Menu actions that also apply while a cell is being edited; the rest
 // (clipboard, fill, ...) leave the key to the text field.
@@ -165,6 +173,8 @@ function menuShortcut(e: KeyLike): MenuAction | null {
       return e.shiftKey ? 'replace' : null;
     case 't':
       return e.shiftKey ? null : 'insertTable';
+    case 'p':
+      return e.shiftKey ? null : 'print';
     case '+':
     case '=':
       return e.shiftKey || key === '+' ? 'insertCells' : null;

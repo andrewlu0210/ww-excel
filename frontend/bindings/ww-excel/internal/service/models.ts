@@ -140,6 +140,27 @@ export interface ChangedCell {
     "bc"?: string;
 }
 
+export interface ChartDTO {
+    "type": string;
+    "title": string;
+    "series": ChartSeriesDTO[] | null;
+    "legend": string;
+    "xTitle": string;
+    "yTitle": string;
+    "stacked": boolean;
+}
+
+export interface ChartDataDTO {
+    "categories": string[] | null;
+    "series": SeriesDataDTO[] | null;
+}
+
+export interface ChartSeriesDTO {
+    "name": string;
+    "categories": string;
+    "values": string;
+}
+
 /**
  * CopyResult is what ⌘C put on the clipboard.
  */
@@ -276,6 +297,7 @@ export interface LayoutDTO {
      */
     "notes": NoteDTO[] | null;
     "tables": TableDTO[] | null;
+    "objects": ObjectDTO[] | null;
 
     /**
      * Styles the caller does not know yet (IDs >= the known count).
@@ -308,6 +330,44 @@ export interface NoteDTO {
 }
 
 /**
+ * ObjectDTO is a chart or picture. Pictures are fetched separately
+ * (ObjectImage); ImageKey changes when the picture does.
+ */
+export interface ObjectDTO {
+    "id": number;
+    "kind": string;
+    "row": number;
+    "col": number;
+    "dx": number;
+    "dy": number;
+    "w": number;
+    "h": number;
+    "chart": ChartDTO | null;
+    "imageKey": string;
+}
+
+export interface PageSetupDTO {
+    "paper": string;
+    "landscape": boolean;
+    "top": number;
+    "bottom": number;
+    "left": number;
+    "right": number;
+    "header": number;
+    "footer": number;
+    "scale": number;
+    "fitWide": number;
+    "fitTall": number;
+    "printArea": RangeDTO | null;
+    "gridlines": boolean;
+    "headings": boolean;
+    "centerH": boolean;
+    "centerV": boolean;
+    "headerText": string;
+    "footerText": string;
+}
+
+/**
  * PasteResult is the area a paste wrote, selected afterwards.
  */
 export interface PasteResult {
@@ -319,11 +379,25 @@ export interface PasteResult {
     "moved": boolean;
 }
 
+/**
+ * PreviewResult is a rendered preview: its URL and page count.
+ */
+export interface PreviewResult {
+    "url": string;
+    "pages": number;
+}
+
 export interface RangeDTO {
     "r0": number;
     "c0": number;
     "r1": number;
     "c1": number;
+}
+
+export interface SeriesDataDTO {
+    "name": string;
+    "values": (number | null)[] | null;
+    "x": (number | null)[] | null;
 }
 
 /**

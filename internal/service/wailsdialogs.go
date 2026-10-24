@@ -50,6 +50,27 @@ func (w WailsDialogs) PickSave(suggestedName string) (string, error) {
 	return d.PromptForSingleSelection()
 }
 
+func (w WailsDialogs) PickImage() (string, error) {
+	d := application.Get().Dialog.OpenFile().
+		CanChooseFiles(true).
+		AddFilter("圖片（*.png, *.jpg, *.gif）", "*.png;*.jpg;*.jpeg;*.gif")
+	if win := w.window(); win != nil {
+		d.AttachToWindow(win)
+	}
+	return d.PromptForSingleSelection()
+}
+
+func (w WailsDialogs) PickPDF(suggestedName string) (string, error) {
+	d := application.Get().Dialog.SaveFile().
+		SetFilename(suggestedName).
+		CanCreateDirectories(true).
+		SetMessage("匯出為 PDF")
+	if win := w.window(); win != nil {
+		d.AttachToWindow(win)
+	}
+	return d.PromptForSingleSelection()
+}
+
 func (w WailsDialogs) Confirm(title, message, ok string) bool {
 	// The unattended self-test cannot click; it confirms everything.
 	if os.Getenv("WW_SELFTEST") == "1" {

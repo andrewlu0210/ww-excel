@@ -1,5 +1,6 @@
 // Text measurement and wrapping for cell rendering, cached because the
 // same strings are drawn every frame.
+import { fontEpoch } from '../stores/fontLoader';
 
 export type Measure = (text: string) => number;
 
@@ -50,10 +51,18 @@ function isCJK(ch: string): boolean {
 export class TextCache {
   private widths = new Map<string, number>();
   private wraps = new Map<string, string[]>();
+  private epoch = fontEpoch;
 
   constructor(private ctx: CanvasRenderingContext2D) {}
 
   width(font: string, text: string): number {
+    if (this.epoch !== fontEpoch) {
+      // A font finished loading: widths measured with the fallback are
+      // wrong now.
+      this.epoch = fontEpoch;
+      this.widths.clear();
+      this.wraps.clear();
+    }
     const key = font + '\u0000' + text;
     let w = this.widths.get(key);
     if (w === undefined) {

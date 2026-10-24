@@ -13,8 +13,13 @@ import type {
   CellsChanged,
   ChangedCell,
   CFRuleDTO,
+  ChartDataDTO,
+  ChartDTO,
   CopyResult,
   DocState,
+  ObjectDTO,
+  PageSetupDTO,
+  PreviewResult,
   NameDTO,
   NoteDTO,
   TableDTO,
@@ -38,6 +43,11 @@ import type {
 import type { MenuAction } from '../input/keymap';
 
 export type {
+  ChartDataDTO,
+  ChartDTO,
+  ObjectDTO,
+  PageSetupDTO,
+  PreviewResult,
   CFRuleDTO,
   NameDTO,
   NoteDTO,
@@ -218,6 +228,21 @@ export const sheetApi = {
   convertTable: (sheet: number, name: string): Promise<string | null> =>
     rejected(SheetService.ConvertTable(sheet, name)),
 
+  // ---- v0.7 ----
+  chartFromSelection: (sheet: number, sel: RangeDTO, type: string) => failed(SheetService.ChartFromSelection(sheet, sel, type)),
+  addChart: (sheet: number, row: number, col: number, w: number, h: number, chart: ChartDTO) =>
+    failed(SheetService.AddChart(sheet, row, col, w, h, chart)),
+  updateObject: (sheet: number, o: ObjectDTO, label: string): Promise<string | null> =>
+    rejected(SheetService.UpdateObject(sheet, o, label)),
+  deleteObjects: (sheet: number, ids: number[]): Promise<string | null> => rejected(SheetService.DeleteObjects(sheet, ids)),
+  objectImage: (sheet: number, id: number): Promise<string> => SheetService.ObjectImage(sheet, id),
+  chartData: (sheet: number, id: number): Promise<ChartDataDTO> => SheetService.ChartData(sheet, id),
+  chartPreview: (sheet: number, chart: ChartDTO): Promise<ChartDataDTO> => SheetService.ChartPreview(sheet, chart),
+  pageSetup: (sheet: number): Promise<PageSetupDTO> => SheetService.PageSetup(sheet),
+  setPageSetup: (sheet: number, p: PageSetupDTO): Promise<string | null> => rejected(SheetService.SetPageSetup(sheet, p)),
+  // charts: chart object ID -> PNG data URL, drawn by the frontend.
+  printPreview: (sheet: number, charts: Record<number, string>) => failed(SheetService.PrintPreview(sheet, charts)),
+
   onCellsChanged(cb: (e: CellsChanged) => void): () => void {
     return on('cells:changed', cb);
   },
@@ -256,6 +281,11 @@ export const documentApi = {
     rejected(DocumentService.SetName(oldName, oldScope, n)),
   deleteName: (name: string, scope: number): Promise<string | null> => rejected(DocumentService.DeleteName(name, scope)),
   resolve: (sheet: number, text: string): Promise<TargetDTO> => DocumentService.Resolve(sheet, text),
+  insertPicture: (sheet: number, row: number, col: number): Promise<string | null> =>
+    rejected(DocumentService.InsertPicture(sheet, row, col)),
+  exportPDF: (sheet: number, charts: Record<number, string>) => failed(DocumentService.ExportPDF(sheet, charts)),
+  printSheet: (sheet: number, charts: Record<number, string>): Promise<string | null> =>
+    rejected(DocumentService.PrintSheet(sheet, charts)),
 
   onState(cb: (s: DocState) => void): () => void {
     return on('doc:state', cb);

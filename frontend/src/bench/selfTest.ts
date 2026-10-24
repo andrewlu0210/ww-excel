@@ -5,7 +5,8 @@
 import { benchApi, documentApi, sheetApi, type FormatPatch, type PasteMode } from '../bridge/sheet';
 import type { MenuAction } from '../input/keymap';
 import type { Range } from '../grid/selection';
-import { styleStore } from '../stores/styles';
+import { ensureFont } from '../stores/fontLoader';
+import { fontCss, styleStore } from '../stores/styles';
 import type { CellPos, Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import type { BlockCache } from '../stores/viewportCache';
@@ -33,6 +34,9 @@ export interface SheetDriver {
   dragFillHandle(to: CellPos): void;
   // v0.6
   goToName(text: string): Promise<void>;
+  // v0.7
+  chartImages(): Record<number, string>;
+  getObjects(): { id: number; kind: string; row: number; col: number; w: number; h: number }[];
 }
 
 interface Check {
@@ -283,6 +287,7 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await formatTests(sheet, { key, type, goTo, step, expect, expectCell });
   await productivityTests(sheet, { key, type, goTo, step, expect, expectCell });
   await dataTests(sheet, { key, type, goTo, step, expect, expectCell });
+  await outputTests(sheet, { key, type, goTo, step, expect, expectCell });
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
@@ -698,6 +703,31 @@ async function dataTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   await step();
   expect('名稱方塊跳到位址', sheet.getSelection().active.row === 4 && sheet.getSelection().active.col === 2, JSON.stringify(sheet.getSelection().active));
 
+  // 43b. Chinese fonts resolve to installed macOS fonts (a missing
+  // font silently falls back to the default one).
+  for (const name of ['Kaiti TC', 'BiauKaiTC', 'LiSong Pro']) await ensureFont(name);
+  const canvas = document.createElement('canvas').getContext('2d')!;
+  const widthIn = (name: string) => {
+    canvas.font = fontCss({ name, size: 20, bold: false, italic: false, underline: false, strike: false, color: '' }).css;
+    return canvas.measureText('中文 Ag 字型').width.toFixed(2);
+  };
+  const widths = ['PingFang TC', 'Songti TC', 'Kaiti TC', '新細明體', '標楷體'].map(widthIn);
+  expect('中文字型會套用（宋體、楷體與蘋方字寬不同）', new Set(widths.slice(0, 3)).size === 3, widths.join(' '));
+  expect('Windows 中文字型對應到 macOS 字型', widths[3] !== widths[0] && widths[4] !== widths[0], widths.join(' '));
+  // A picture of each Chinese font, from row 200.
+  const fontRows = ['PingFang TC', 'Songti TC', 'Kaiti TC', 'BiauKaiTC', 'LiSong Pro', 'Yuanti TC', 'Xingkai TC', '新細明體', '標楷體'];
+  for (let i = 0; i < fontRows.length; i++) {
+    await sheetApi.setCell(0, 200 + i, 0, `${fontRows[i]}：永和中文字型 ABC 123`);
+    sheet.setSelectionForTest(area(200 + i, 0));
+    await sheet.applyFormat({ fontName: fontRows[i], fontSize: 16, label: '字型' });
+  }
+  sheet.setSelectionForTest(area(215, 0));
+  await step();
+  sheet.setSelectionForTest(area(199, 0));
+  await new Promise((r) => setTimeout(r, 800));
+  const fontGrid = sheet.getGrid() as unknown as { snapshot(): string } | undefined;
+  if (fontGrid) await benchApi.snapshot('selftest-fonts', fontGrid.snapshot());
+
   // 44. Notes.
   await sheetApi.setNote(0, 60, 1, '記得核對');
   await step();
@@ -774,4 +804,76 @@ async function dataTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   await new Promise((r) => setTimeout(r, 300));
   const grid = sheet.getGrid() as unknown as { snapshot(): string } | undefined;
   if (grid) await benchApi.snapshot('selftest-data', grid.snapshot());
+}
+
+// v0.7: charts, floating objects, page setup and the PDF preview.
+// Runs on sheet 0 of the reopened v0.6 file, from row 80.
+async function outputTests(sheet: SheetDriver, h: Helpers): Promise<void> {
+  const { step, expect } = h;
+  const set = async (row: number, col: number, text: string) => {
+    await sheetApi.setCell(0, row, col, text);
+    await step();
+  };
+  const rows = [['月份', '收入', '支出'], ['一月', '100', '80'], ['二月', '150', '90'], ['三月', '120', '70']];
+  for (let r = 0; r < rows.length; r++) for (let c = 0; c < 3; c++) await set(80 + r, c, rows[r][c]);
+
+  // 49. A chart built from the data: series by column, names from row 1.
+  const suggested = await sheetApi.chartFromSelection(0, { r0: 80, c0: 0, r1: 83, c1: 2 }, 'column');
+  const series = suggested.value?.series ?? [];
+  expect('從資料建立圖表', series.length === 2 && series[0].values.endsWith('$B$82:$B$84') && series[0].categories.endsWith('$A$82:$A$84'), JSON.stringify(suggested));
+  const added = await sheetApi.addChart(0, 80, 4, 480, 288, { ...suggested.value!, title: '收支' });
+  await step();
+  const id = added.value ?? 0;
+  const data = await sheetApi.chartData(0, id);
+  expect('圖表資料', data.series?.[1]?.name === '支出' && data.series?.[0]?.values?.[1] === 150 && data.categories?.[2] === '三月', JSON.stringify(data));
+  await set(81, 1, '200');
+  expect('圖表跟著資料更新', (await sheetApi.chartData(0, id)).series?.[0]?.values?.[0] === 200, '');
+  await new Promise((r) => setTimeout(r, 200));
+  const objs = sheet.getObjects();
+  expect('物件層顯示圖表', objs.some((o) => o.id === id && o.kind === 'chart'), JSON.stringify(objs));
+  const png = sheet.chartImages()[id] ?? '';
+  expect('圖表畫成圖片（列印用）', png.startsWith('data:image/png;base64,') && png.length > 2000, `${png.length} bytes`);
+
+  // 50. Moving and resizing, then inserting rows above moves it down.
+  const full = ((await sheetApi.layout(0, 0)).objects ?? []).find((x) => x.id === id)!;
+  await sheetApi.updateObject(0, { ...full, row: 81, col: 5, dx: 10, dy: 4, w: 400, h: 240, chart: null }, '移動物件');
+  await step();
+  let layout = await sheetApi.layout(0, 0);
+  let chart = (layout.objects ?? []).find((x) => x.id === id);
+  expect('移動並調整圖表', chart?.row === 81 && chart.col === 5 && chart.w === 400 && chart.chart?.title === '收支', JSON.stringify(chart));
+  await sheetApi.shift(0, true, 75, 2);
+  await step();
+  layout = await sheetApi.layout(0, 0);
+  chart = (layout.objects ?? []).find((x) => x.id === id);
+  expect('插入列時圖表下移、參照調整', chart?.row === 83 && !!chart.chart?.series?.[0]?.values.endsWith('$B$84:$B$86'), JSON.stringify(chart?.chart?.series));
+  expect('插入列後圖表資料不變', (await sheetApi.chartData(0, id)).series?.[0]?.values?.[0] === 200, '');
+
+  // 51. Page setup and the PDF preview served by the asset server.
+  const ps = await sheetApi.pageSetup(0);
+  expect('預設版面設定', ps.paper === 'A4' && !ps.landscape && ps.scale === 100, JSON.stringify(ps));
+  await sheetApi.setPageSetup(0, { ...ps, landscape: true, printArea: { r0: 82, c0: 0, r1: 95, c1: 12 }, gridlines: true, headerText: '&A' });
+  await step();
+  const prev = await sheetApi.printPreview(0, sheet.chartImages());
+  expect('產生預覽 PDF', !prev.error && (prev.value?.pages ?? 0) >= 1 && !!prev.value?.url.startsWith('/print/'), JSON.stringify(prev));
+  if (prev.value) {
+    const res = await fetch(prev.value.url);
+    const head = new TextDecoder().decode((await res.arrayBuffer()).slice(0, 5));
+    expect('預覽 PDF 可以載入', res.ok && res.headers.get('content-type') === 'application/pdf' && head === '%PDF-', `${res.status} ${res.headers.get('content-type')} ${head}`);
+  }
+
+  // 52. xlsx round trip of the chart and page setup.
+  const path = await benchApi.saveCopy('selftest-v07.xlsx');
+  await documentApi.openPath(path);
+  await step();
+  await step();
+  layout = await sheetApi.layout(0, 0);
+  const back = (layout.objects ?? []).find((x) => x.kind === 'chart');
+  expect('xlsx 存讀：圖表', back?.row === 83 && back.chart?.type === 'column' && back.chart.series?.length === 2 && back.chart.title === '收支', JSON.stringify(back));
+  const ps2 = await sheetApi.pageSetup(0);
+  expect('xlsx 存讀：版面設定', ps2.landscape && ps2.printArea?.r0 === 82 && ps2.headerText === '&A', JSON.stringify(ps2));
+
+  // The chart as drawn (objects are DOM, not part of the grid snapshot).
+  await new Promise((r) => setTimeout(r, 300));
+  const drawn = Object.values(sheet.chartImages())[0];
+  if (drawn) await benchApi.snapshot('selftest-chart', drawn);
 }

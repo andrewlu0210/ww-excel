@@ -630,6 +630,13 @@
     scroller.scrollTo(0, 0);
   }
 
+  // The cell under a point in host coordinates, and that cell's
+  // rectangle (for anchoring dragged objects).
+  export function cellAtPoint(x: number, y: number): { pos: CellPos; rect: Rect } {
+    const pos = posAt(x, y);
+    return { pos, rect: cellRect(pos) };
+  }
+
   export function freeze(): { rows: number; cols: number } {
     return look.freeze;
   }

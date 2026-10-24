@@ -6,7 +6,9 @@
     benchApi,
     documentApi,
     sheetApi,
+    type ChartDTO,
     type DocState,
+    type PageSetupDTO,
     type FindOptionsDTO,
     type FormatPatch,
     type HitDTO,
@@ -15,7 +17,10 @@
     type StyleDTO,
     type ValidationDTO,
   } from './bridge/sheet';
+  import ChartDialog from './components/ChartDialog.svelte';
   import CondFormatDialog from './components/CondFormatDialog.svelte';
+  import PageSetupDialog from './components/PageSetupDialog.svelte';
+  import PrintPreview from './components/PrintPreview.svelte';
   import FindPanel from './components/FindPanel.svelte';
   import NameManager from './components/NameManager.svelte';
   import TableDialog from './components/TableDialog.svelte';
@@ -57,6 +62,10 @@
   let shiftDialog = $state<{ insert: boolean } | null>(null);
   // v0.6 dialogs.
   let names = $state<string[]>([]);
+  // v0.7 dialogs.
+  let chartDialog = $state<{ editing: boolean; initial: ChartDTO; id: number; at: { row: number; col: number } } | null>(null);
+  let pageSetupDialog = $state<{ initial: PageSetupDTO; reopenPreview: boolean } | null>(null);
+  let preview = $state<{ url: string; pages: number } | null>(null);
   // A formula being edited while visiting other sheets.
   let crossEdit = $state<CrossEdit | null>(null);
   let nameDialog = $state<{ startNew: boolean; ref: string } | null>(null);
@@ -148,6 +157,27 @@
       case 'insertTable':
         void openTable();
         break;
+      case 'insertChart':
+        void openChart();
+        break;
+      case 'editChart': {
+        const id = sheetView?.getSelectedObject();
+        const o = sheetView?.getObjects().find((x) => x.id === id);
+        if (o?.chart) chartDialog = { editing: true, initial: o.chart, id: o.id, at: { row: o.row, col: o.col } };
+        break;
+      }
+      case 'pageSetup':
+        void openPageSetup(false);
+        break;
+      case 'printPreview':
+        void openPreview();
+        break;
+      case 'print':
+        void printSheet();
+        break;
+      case 'exportPDF':
+        void exportPDF();
+        break;
       case 'renameTable': {
         const t = sheetView?.getActiveTable();
         if (t) tableDialog = { renaming: t.name };
@@ -172,6 +202,64 @@
     const info = await sheetApi.tableRange(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 });
     if (!info.ok) return notify('請選取資料範圍中的儲存格再建立表格。');
     tableDialog = { range: info.range, header: info.header, styles: await sheetApi.tableStyles() };
+  }
+
+  async function openChart(): Promise<void> {
+    const sel = sheetView?.getSelection();
+    if (!sel) return;
+    const r = current(sel);
+    const res = await sheetApi.chartFromSelection(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 }, 'column');
+    if (res.error || !res.value) return notify(res.error ?? '請先選取要做成圖表的資料。');
+    // Excel puts a new chart next to its data.
+    chartDialog = { editing: false, initial: res.value, id: 0, at: { row: r.r0, col: r.c1 + 2 } };
+  }
+
+  async function suggestChart(type: string): Promise<ChartDTO | null> {
+    const sel = sheetView?.getSelection();
+    if (!sel) return null;
+    const r = current(sel);
+    const res = await sheetApi.chartFromSelection(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 }, type);
+    return res.value;
+  }
+
+  async function applyChart(chart: ChartDTO): Promise<string | null> {
+    const d = chartDialog;
+    if (!d) return null;
+    let err: string | null;
+    if (d.editing) {
+      const o = sheetView?.getObjects().find((x) => x.id === d.id);
+      if (!o) return '圖表不存在';
+      err = await sheetApi.updateObject(active, { ...o, chart }, '編輯圖表');
+    } else {
+      const res = await sheetApi.addChart(active, d.at.row, d.at.col, 480, 288, chart);
+      err = res.error;
+      if (!err && res.value) sheetView?.selectObject(res.value);
+    }
+    if (!err) {
+      chartDialog = null;
+      sheetView?.focus();
+    }
+    return err;
+  }
+
+  async function openPageSetup(reopenPreview: boolean): Promise<void> {
+    pageSetupDialog = { initial: await sheetApi.pageSetup(active), reopenPreview };
+  }
+
+  async function openPreview(): Promise<void> {
+    const res = await sheetApi.printPreview(active, sheetView?.chartImages() ?? {});
+    if (res.error || !res.value) return notify(res.error);
+    preview = res.value;
+  }
+
+  async function printSheet(): Promise<void> {
+    notify(await documentApi.printSheet(active, sheetView?.chartImages() ?? {}));
+  }
+
+  async function exportPDF(): Promise<void> {
+    const res = await documentApi.exportPDF(active, sheetView?.chartImages() ?? {});
+    if (res.error) notify(res.error);
+    else if (res.value) notify('已匯出 PDF。');
   }
 
   // The name box went to another sheet.
@@ -537,6 +625,66 @@
         onclose={closeTable}
       />
     {/if}
+  {/if}
+
+  {#if chartDialog}
+    <ChartDialog
+      editing={chartDialog.editing}
+      initial={chartDialog.initial}
+      suggest={suggestChart}
+      preview={(c) => sheetApi.chartPreview(active, c)}
+      onapply={applyChart}
+      onclose={() => {
+        chartDialog = null;
+        sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if pageSetupDialog}
+    <PageSetupDialog
+      initial={pageSetupDialog.initial}
+      selection={(() => {
+        const r = sheetView ? current(sheetView.getSelection()) : { r0: 0, c0: 0, r1: 0, c1: 0 };
+        return { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 };
+      })()}
+      onapply={async (p) => {
+        const err = await sheetApi.setPageSetup(active, p);
+        if (!err) {
+          const reopen = pageSetupDialog?.reopenPreview;
+          pageSetupDialog = null;
+          if (reopen) await openPreview();
+          else sheetView?.focus();
+        }
+        return err;
+      }}
+      onclose={() => {
+        const reopen = pageSetupDialog?.reopenPreview;
+        pageSetupDialog = null;
+        if (reopen) void openPreview();
+        else sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if preview}
+    <PrintPreview
+      url={preview.url}
+      pages={preview.pages}
+      onprint={() => {
+        preview = null;
+        void printSheet();
+      }}
+      onexport={() => void exportPDF()}
+      onsetup={() => {
+        preview = null;
+        void openPageSetup(true);
+      }}
+      onclose={() => {
+        preview = null;
+        sheetView?.focus();
+      }}
+    />
   {/if}
 
   {#if report}

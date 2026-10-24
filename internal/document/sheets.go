@@ -162,10 +162,13 @@ func (d *Document) RenameSheetCommand(index int, name string) (command.Command, 
 	}
 	edits := d.rewriteFormulas(nil, func(n ast.Node) (ast.Node, bool) { return ast.RenameSheet(n, old, name) })
 	var names nameState
+	var objects objectsState
 	return &command.Func{
 		Name: "重新命名工作表",
 		DoFn: func(wb *model.Workbook) command.Effect {
 			names = d.saveNames()
+			objects = d.saveObjects()
+			d.adjustObjectFormulas(func(n ast.Node, _ string) (ast.Node, bool) { return ast.RenameSheet(n, old, name) })
 			d.adjustNames(func(n ast.Node, _ string) (ast.Node, bool) { return ast.RenameSheet(n, old, name) })
 			sh.Name = name
 			eff := structural()
@@ -176,6 +179,7 @@ func (d *Document) RenameSheetCommand(index int, name string) (command.Command, 
 		UndoFn: func(wb *model.Workbook) command.Effect {
 			sh.Name = old
 			names.restore(wb)
+			objects.restore(wb)
 			eff := structural()
 			eff.Names = len(wb.Names) > 0
 			eff.Others = applyEdits(wb, edits, true)

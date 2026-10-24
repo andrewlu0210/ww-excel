@@ -488,6 +488,12 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 	if err := w.tables(sh, old.Tables, l.Tables); err != nil {
 		return err
 	}
+	if err := w.objects(sh, old.Objects, l.Objects); err != nil {
+		return err
+	}
+	if err := w.pageSetup(sh, old.PageSetup, l.PageSetup); err != nil {
+		return err
+	}
 	if !reflect.DeepEqual(l.Validations, old.Validations) {
 		if err := writeValidations(f, sh.Name, l.Validations); err != nil {
 			return err

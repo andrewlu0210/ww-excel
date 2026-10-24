@@ -13,6 +13,8 @@
     documentApi,
     sheetApi,
     type CellsChanged,
+    type ChartDataDTO,
+    type ObjectDTO,
     type CopyResult,
     type FilterValueDTO,
     type FormatPatch,
@@ -31,7 +33,7 @@
   import { fillCopy, fillTarget, sameRange } from '../grid/fill';
   import { cellAddress, colName } from '../grid/layout';
   import { areaOf, expand, mergeAt, snap, stepStart } from '../grid/merges';
-  import { metrics, REF_COLORS, type Highlight } from '../grid/renderer';
+  import { HEADER_H, metrics, REF_COLORS, type Highlight } from '../grid/renderer';
   import { LINE_HEIGHT, TextCache } from '../grid/text';
   import { styleStore } from '../stores/styles';
   import {
@@ -64,7 +66,9 @@
     type SheetMode,
   } from '../input/keymap';
   import type { ContextRequest, GridPointer, ResizeRequest } from '../input/pointer';
+  import { drawChart, LIGHT_THEME } from '../charts/render';
   import FilterMenu from './FilterMenu.svelte';
+  import ObjectLayer, { toChartData } from './ObjectLayer.svelte';
   import Grid from './Grid.svelte';
 
   interface Props {
@@ -156,6 +160,81 @@
 
   function notify(message: string | null | undefined): void {
     if (message) onnotify?.(message);
+  }
+
+  // ---- v0.7: floating objects ----
+
+  let selectedObject = $state<number | null>(null);
+  // Bumped on every redraw so object positions follow scrolling.
+  let viewTick = $state(0);
+  let chartData = $state(new Map<number, ChartDataDTO>());
+  let images = $state(new Map<string, string>());
+  let objects = $derived(layout?.objects ?? []);
+
+  function objectRect(o: ObjectDTO): { x: number; y: number; w: number; h: number } {
+    const rc = grid?.areaRect({ r0: o.row, c0: o.col, r1: o.row, c1: o.col }) ?? { x: 0, y: 0, w: 0, h: 0 };
+    return { x: rc.x + o.dx, y: rc.y + o.dy, w: o.w, h: o.h };
+  }
+
+  // Chart data and pictures for the objects on this sheet.
+  let objectsToken = 0;
+  async function refreshObjects(): Promise<void> {
+    const token = ++objectsToken;
+    const list = objects;
+    const data = new Map<number, ChartDataDTO>();
+    for (const o of list) {
+      if (o.kind === 'chart') data.set(o.id, await sheetApi.chartData(sheet, o.id));
+      else if (o.imageKey && !images.has(o.imageKey)) {
+        const url = await sheetApi.objectImage(sheet, o.id);
+        if (url) images = new Map(images).set(o.imageKey, url);
+      }
+    }
+    if (token === objectsToken) chartData = data;
+  }
+
+  let chartTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleChartRefresh(): void {
+    if (!objects.some((o) => o.kind === 'chart')) return;
+    clearTimeout(chartTimer);
+    chartTimer = setTimeout(() => void refreshObjects(), 80);
+  }
+
+  // A dragged object was dropped: anchor it to the cell under its
+  // top-left corner.
+  function commitObject(o: ObjectDTO, rect: { x: number; y: number; w: number; h: number }, label: string): void {
+    if (!grid) return;
+    const at = grid.cellAtPoint(rect.x + 0.5, rect.y + 0.5);
+    const next = { ...o, row: at.pos.row, col: at.pos.col, dx: Math.max(0, rect.x - at.rect.x), dy: Math.max(0, rect.y - at.rect.y), w: rect.w, h: rect.h, chart: null };
+    void serial(() => sheetApi.updateObject(sheet, next, label)).then(notify);
+  }
+
+  export function getObjects(): ObjectDTO[] {
+    return objects;
+  }
+
+  export function getSelectedObject(): number | null {
+    return selectedObject;
+  }
+
+  export function selectObject(id: number | null): void {
+    selectedObject = id;
+  }
+
+  // Charts as PNG data URLs (2x), for printing.
+  export function chartImages(): Record<number, string> {
+    const out: Record<number, string> = {};
+    for (const o of objects) {
+      if (o.kind !== 'chart' || !o.chart) continue;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(o.w * 2);
+      canvas.height = Math.round(o.h * 2);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      ctx.scale(2, 2);
+      drawChart(ctx, o.w, o.h, o.chart, toChartData(chartData.get(o.id)), LIGHT_THEME);
+      out[o.id] = canvas.toDataURL('image/png');
+    }
+    return out;
   }
 
   // ---- v0.6 state ----
@@ -678,6 +757,21 @@
       if (a && performEdit(a)) e.preventDefault();
       return;
     }
+    if (selectedObject !== null) {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        const id = selectedObject;
+        selectedObject = null;
+        void serial(() => sheetApi.deleteObjects(sheet, [id])).then(notify);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        selectedObject = null;
+        return;
+      }
+      selectedObject = null;
+    }
     if (onDropdownKey(e)) {
       e.preventDefault();
       return;
@@ -880,6 +974,7 @@
       return;
     }
     if (e.kind === 'down' && editing) commit('stay');
+    if (e.kind === 'down') selectedObject = null;
     tabStartCol = null;
     contextMenu = null;
     const sel = selection;
@@ -933,6 +1028,8 @@
 
   function onCellsChanged(d: CellsChanged): void {
     styleStore.merge(d.styles);
+    // Charts may show data from any sheet.
+    scheduleChartRefresh();
     if (d.sheet !== sheet) return;
     grid?.cache.applyDiff(d);
     styleTick++;
@@ -953,6 +1050,8 @@
   async function loadLayout(): Promise<void> {
     layout = await sheetApi.layout(sheet, styleStore.known);
     styleTick++;
+    if (selectedObject !== null && !objects.some((o) => o.id === selectedObject)) selectedObject = null;
+    void refreshObjects();
   }
 
   onMount(() => {
@@ -1090,6 +1189,21 @@
       case 'clearAllCondFormats':
         if (editing) commit('stay');
         notify(await serial(() => sheetApi.clearCondFormats(sheet, [])));
+        return true;
+      case 'insertPicture': {
+        if (editing) commit('stay');
+        const { row, col } = selection.active;
+        notify(await documentApi.insertPicture(sheet, row, col));
+        return true;
+      }
+      case 'insertChart':
+      case 'editChart':
+      case 'pageSetup':
+      case 'printPreview':
+      case 'print':
+      case 'exportPDF':
+        if (editing) commit('stay');
+        onappaction?.(action);
         return true;
       case 'defineName':
       case 'nameManager':
@@ -1764,13 +1878,38 @@
     onpointer={onPointer}
     onresize={onResize}
     onautofit={(r) => void autofitOne(r.rows, r.index)}
-    onviewport={layoutEditor}
+    onviewport={() => {
+      layoutEditor();
+      viewTick++;
+    }}
     {copyRange}
     {fillPreview}
     onfilterbutton={(e) => void onFilterButton(e)}
     oncontext={onContext}
     onhover={onHover}
   >
+    {#if objects.length > 0}
+      <ObjectLayer
+        {objects}
+        rectOf={objectRect}
+        tick={viewTick}
+        left={metrics.headerW}
+        top={HEADER_H}
+        selected={selectedObject}
+        {chartData}
+        {images}
+        onselect={(id) => {
+          if (editing) commit('stay');
+          selectedObject = id;
+          focus();
+        }}
+        oncommit={commitObject}
+        onedit={(id) => {
+          selectedObject = id;
+          onappaction?.('editChart');
+        }}
+      />
+    {/if}
     <textarea
       bind:this={editor}
       class="cell-editor"

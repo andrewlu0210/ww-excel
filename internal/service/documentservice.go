@@ -24,6 +24,10 @@ type Dialogs interface {
 	PickOpen() (string, error)
 	// PickSave returns "" when cancelled.
 	PickSave(suggestedName string) (string, error)
+	// PickImage asks for a picture file; PickPDF for where to export a
+	// PDF. Both return "" when cancelled.
+	PickImage() (string, error)
+	PickPDF(suggestedName string) (string, error)
 	ShowError(title, message string)
 	ShowWarning(title, message string)
 	// Confirm asks an OK/Cancel question; true means OK.
@@ -42,6 +46,8 @@ type DocumentService struct {
 	FocusPath func(path string) bool
 	// Opened is called after a file is opened or saved (recent files).
 	Opened func(path string)
+	// PrintPDF shows the system print dialog for a PDF file (set by main).
+	PrintPDF func(path string)
 }
 
 func NewDocumentService(src Sessions, dialogs Dialogs) *DocumentService {

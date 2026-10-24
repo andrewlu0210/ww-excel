@@ -39,6 +39,9 @@ type Layout struct {
 	Validations []Validation
 	CondFormats []CFRule
 	Tables      []Table
+	// Charts and pictures, and the print settings (nil = defaults).
+	Objects   []Object
+	PageSetup *PageSetup
 }
 
 // Note is a cell note (Excel's classic comment).
@@ -91,6 +94,15 @@ func (l Layout) Clone() Layout {
 	out.Validations = cloneValidations(l.Validations)
 	out.CondFormats = cloneCF(l.CondFormats)
 	out.Tables = append([]Table(nil), l.Tables...)
+	out.Objects = cloneObjects(l.Objects)
+	if l.PageSetup != nil {
+		ps := *l.PageSetup
+		if ps.PrintArea != nil {
+			a := *ps.PrintArea
+			ps.PrintArea = &a
+		}
+		out.PageSetup = &ps
+	}
 	return out
 }
 

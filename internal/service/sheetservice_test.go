@@ -315,6 +315,8 @@ type fakeDialogs struct {
 func (f *fakeDialogs) AskSave(string) SaveChoice         { f.asked++; return f.choice }
 func (f *fakeDialogs) PickOpen() (string, error)         { return f.openPath, nil }
 func (f *fakeDialogs) PickSave(string) (string, error)   { return f.savePath, nil }
+func (f *fakeDialogs) PickImage() (string, error)        { return f.openPath, nil }
+func (f *fakeDialogs) PickPDF(string) (string, error)    { return f.savePath, nil }
 func (f *fakeDialogs) ShowError(title, msg string)       { f.errors = append(f.errors, title+": "+msg) }
 func (f *fakeDialogs) ShowWarning(title, message string) {}
 func (f *fakeDialogs) Confirm(title, message, ok string) bool {

@@ -33,6 +33,10 @@ func Read(path string) (*model.Workbook, *excelize.File, error) {
 	wb, err := load(f, raw)
 	if err == nil {
 		readTables(f, wb, rawTableTotals(path))
+		readDrawings(path, wb)
+		for _, sh := range wb.Sheets {
+			sh.Layout.PageSetup = readPageSetup(f, sh.Name, wb)
+		}
 	}
 	if err != nil {
 		f.Close()

@@ -76,6 +76,7 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 
 	var snap formulaSnapshot
 	var names nameState
+	var objects objectsState
 	var removed []model.CellAt
 	var layoutBefore model.Layout
 	shift := &command.Shift{Rows: rows, At: at, Count: count}
@@ -85,10 +86,14 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 		DoFn: func(wb *model.Workbook) command.Effect {
 			snap = d.snapshotFormulas()
 			names = d.saveNames()
+			objects = d.saveObjects()
 			layoutBefore = sh.Layout.Clone()
 			removed = sh.Shift(rows, at, count)
 			eff := command.Effect{Sheet: sheet, LayoutChanged: true, Shift: shift}
 			eff.Others = d.adjustFormulas(ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
+			d.adjustObjectFormulas(func(n ast.Node, sheet string) (ast.Node, bool) {
+				return ast.Adjust(n, sheet, ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
+			})
 			adjustRuleFormulas(sh, func(n ast.Node) (ast.Node, bool) {
 				return ast.Adjust(n, sh.Name, ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
 			})
@@ -109,6 +114,7 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 			}
 			snap.restore()
 			names.restore(wb)
+			objects.restore(wb)
 			sh.Layout = layoutBefore.Clone()
 			inverse := &command.Shift{Rows: rows, At: at, Count: -count}
 			eff := command.Effect{Sheet: sheet, LayoutChanged: true, Shift: inverse, Others: map[int][]command.CellRef{}, Names: len(wb.Names) > 0}

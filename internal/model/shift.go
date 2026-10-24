@@ -161,6 +161,25 @@ func (l *Layout) shift(rows bool, at, count int) {
 		}
 	}
 	l.Tables = tables
+	for i := range l.Objects {
+		a := &l.Objects[i].Anchor
+		k := &a.Col
+		if rows {
+			k = &a.Row
+		}
+		if n, keep := shiftIndex(*k, at, count); keep {
+			*k = n
+		} else {
+			*k = at // its cell was deleted: the object moves up/left
+		}
+	}
+	if ps := l.PageSetup; ps != nil && ps.PrintArea != nil {
+		if rs := shiftRanges([]Range{*ps.PrintArea}, rows, at, count); len(rs) == 1 {
+			ps.PrintArea = &rs[0]
+		} else {
+			ps.PrintArea = nil
+		}
+	}
 	if len(l.Notes) > 0 {
 		notes := make(map[[2]int]Note, len(l.Notes))
 		for pos, n := range l.Notes {

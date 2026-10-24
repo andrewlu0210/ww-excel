@@ -2,6 +2,7 @@
   // The 常用 (Home) toolbar. Buttons keep keyboard focus on the sheet:
   // pointerdown is prevented and selects hand focus back after a change.
   import type { FormatPatch, StyleDTO } from '../bridge/sheet';
+  import { FONT_CHOICES, fontFamilies, fontLabel } from '../stores/fonts';
   import ColorPicker from './ColorPicker.svelte';
 
   interface Props {
@@ -15,7 +16,6 @@
 
   let { style, merged, onformat, onmerge, onclear, onnumberdialog }: Props = $props();
 
-  const fonts = ['Calibri', 'Aptos', 'Arial', 'Helvetica', 'Times New Roman', 'Courier New', 'Menlo', 'PingFang TC', '新細明體', '微軟正黑體', '標楷體'];
   const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
   const numberFormats: { label: string; code: string }[] = [
     { label: '通用格式', code: '' },
@@ -78,8 +78,8 @@
     title="字型"
     onchange={(e) => onformat({ fontName: e.currentTarget.value, label: '字型' })}
   >
-    {#if !fonts.includes(font)}<option value={font}>{font}</option>{/if}
-    {#each fonts as f (f)}<option value={f}>{f}</option>{/each}
+    {#if !FONT_CHOICES.some((f) => f.value === font)}<option value={font}>{fontLabel(font)}</option>{/if}
+    {#each FONT_CHOICES as f (f.value)}<option value={f.value} style:font-family={fontFamilies(f.value).map((n) => `"${n}"`).join(', ')}>{f.label}</option>{/each}
   </select>
   <select
     class="size"
@@ -203,13 +203,17 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    height: 36px;
+    min-height: 36px;
     padding: 0 8px;
     background: var(--chrome-bg);
     border-bottom: 1px solid var(--chrome-border);
     font-size: 12px;
-    overflow-x: auto;
+    /* Wrap instead of scrolling: overflow other than visible would clip
+       the color palettes and menus that drop down from the toolbar. */
+    flex-wrap: wrap;
     flex-shrink: 0;
+    position: relative;
+    z-index: 25;
   }
   .group {
     display: flex;

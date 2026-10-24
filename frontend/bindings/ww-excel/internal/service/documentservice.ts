@@ -10,6 +10,13 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * AddPictureFile places a picture file at a cell (also used by tests).
+ */
+export function AddPictureFile(sheet: number, row: number, col: number, path: string): $CancellablePromise<void> {
+    return $Call.ByID(1002978804, sheet, row, col, path);
+}
+
+/**
  * AddSheet inserts a new sheet (工作表N) at index and returns its index.
  */
 export function AddSheet(index: number): $CancellablePromise<number> {
@@ -33,6 +40,21 @@ export function DeleteName(name: string, scope: number): $CancellablePromise<voi
  */
 export function DeleteSheet(index: number): $CancellablePromise<boolean> {
     return $Call.ByID(2222027513, index);
+}
+
+/**
+ * ExportPDF renders a sheet and saves it where the user chooses.
+ */
+export function ExportPDF(sheet: number, charts: { [_ in `${number}`]?: string } | null): $CancellablePromise<boolean> {
+    return $Call.ByID(1343606919, sheet, charts);
+}
+
+/**
+ * InsertPicture asks for a picture file and places it at a cell, at
+ * most 480 px wide.
+ */
+export function InsertPicture(sheet: number, row: number, col: number): $CancellablePromise<void> {
+    return $Call.ByID(912057014, sheet, row, col);
 }
 
 export function MoveSheet($from: number, to: number): $CancellablePromise<void> {
@@ -75,6 +97,13 @@ export function OpenFile(path: string): $CancellablePromise<boolean> {
  */
 export function OpenPath(path: string): $CancellablePromise<void> {
     return $Call.ByID(1593076422, path);
+}
+
+/**
+ * PrintSheet renders a sheet and opens the system print dialog for it.
+ */
+export function PrintSheet(sheet: number, charts: { [_ in `${number}`]?: string } | null): $CancellablePromise<void> {
+    return $Call.ByID(1871596183, sheet, charts);
 }
 
 /**

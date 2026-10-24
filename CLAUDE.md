@@ -7,9 +7,9 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.6 完成**（2026-10-24），下一步是 v0.7（視覺化與輸出）
+- 目前階段：**v0.7 完成**（2026-10-24），下一步是 v1.0（正式版打磨）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
-- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、Svelte 5、Vite 8、vitest 5
+- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
 
 ## 常用指令
 
@@ -241,9 +241,19 @@ ww-excel/
 - 留到後續版本：表格的計算欄自動填滿、標題改名時同步改寫公式、表格樣式的完整清單與首欄／末欄強調、條件式格式的圖示集、名稱管理員的篩選、`INDIRECT` 的 R1C1
 
 ### v0.7 — 視覺化與輸出
-- [ ] 圖表（長條、折線、圓餅、散佈），與資料連動
-- [ ] 浮動物件層（圖片、圖表的拖曳與縮放）
-- [ ] 列印預覽、匯出 PDF、版面設定
+- [x] 圖表（長條、折線、圓餅、散佈），與資料連動（另有橫條、區域圖與堆疊）
+- [x] 浮動物件層（圖片、圖表的拖曳與縮放）
+- [x] 列印預覽、匯出 PDF、版面設定
+- **驗收**：self-test 149/149 ✅；PDF 版面與圖表外觀以 sips 轉圖檢查 ✅；原生列印對話框、Excel 開啟圖表 → 待手動確認
+- 設計重點：
+  - 物件（`model.Object`：圖表或圖片）和版面設定（`model.PageSetup`）放在 `Layout`，錨定在儲存格加像素位移，插入刪除列欄時跟著移動；圖表的數列參照和其他公式一樣調整，跨工作表的參照用快照還原
+  - 圖表資料由 Go 計算（`ChartData`），繪製在前端（`frontend/src/charts/render.ts`，Office 配色、1-2-2.5-5 刻度）；同一份繪製程式也產生列印用的 PNG，交給 Go 放進 PDF
+  - 物件層是疊在格線上的 DOM（`ObjectLayer.svelte`），位置在每次重繪時依錨點重算；拖曳只改前端，放開時才換算成新的錨點送 Go
+  - xlsx：excelize 只能寫圖表，所以讀檔時直接解析 `drawings`／`charts` XML（`rawdrawings.go`），Excel 建立的圖表和圖片也能顯示；寫檔時只重寫有變動的物件（依錨點儲存格刪除後重加）。版面設定讀寫紙張、方向、縮放、邊界、頁首頁尾與 `_xlnm.Print_Area`
+  - 字型：WebKit 不讓網頁使用 macOS 的「可下載字型」（楷體、標楷體、儷宋等，放在 `/System/Library/AssetsV2`），只有蘋方、宋體、黑體等內建字型可直接用。前端偵測字型無法使用時，從 `/fonts/<字型>.ttf` 取得（Go 用 CoreText 讀出字型表組成 TTF，`fonts_darwin.go`），再以 `FontFace` 載入。Windows 字型名稱（新細明體、微軟正黑體、標楷體…）對應到 macOS 的同類字型（`frontend/src/stores/fonts.ts`），儲存格仍保留原名稱
+  - 列印：Go 依版面設定分頁（先下後右）並用 gopdf 產生 PDF（填色、框線、格線、欄列標題、合併、文字溢出、換行、頁首頁尾代碼）。預覽透過 asset server 的 middleware 提供 `/print/<token>.pdf`，用 WebKit 內建的 PDF 檢視器顯示；「列印」用 cgo 呼叫 PDFKit 開原生列印對話框（`print_darwin.go`）
+- 已知限制：PDF 一律用 Arial Unicode（不依儲存格字型）；中文粗體是重複描繪模擬；「列印格線」「列印欄列標題」不寫進 xlsx（excelize 沒有對應的 API）；修改過的 Excel 圖表會簡化成我們支援的格式（顏色、標籤等會遺失）；讀不懂的圖表（組合圖、股價圖）不顯示但原地存檔會保留；分頁不支援手動分頁符號與標題列重複
+- 留到後續版本：圖表格式設定（顏色、資料標籤、座標軸範圍）、組合圖、手動分頁與分頁預覽、標題列重複列印、整本活頁簿輸出 PDF、圖片裁切與旋轉
 
 ### v1.0 — 正式版打磨
 - [ ] 效能調校（大檔開啟、記憶體、重算並行化）
