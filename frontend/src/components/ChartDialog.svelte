@@ -1,6 +1,7 @@
 <script lang="ts">
   // 插入 › 圖表… and editing a chart (double-click): type, titles,
   // legend and the series references, with a live preview.
+  import { t } from '../i18n';
   import { onMount } from 'svelte';
   import type { ChartDataDTO, ChartDTO } from '../bridge/sheet';
   import { drawChart, LIGHT_THEME } from '../charts/render';
@@ -24,12 +25,12 @@
   let data = $state<ChartDataDTO | null>(null);
 
   const types = [
-    { value: 'column', label: '直條圖' },
-    { value: 'bar', label: '橫條圖' },
-    { value: 'line', label: '折線圖' },
-    { value: 'area', label: '區域圖' },
-    { value: 'pie', label: '圓形圖' },
-    { value: 'scatter', label: 'XY 散佈圖' },
+    { value: 'column', label: t('直條圖') },
+    { value: 'bar', label: t('橫條圖') },
+    { value: 'line', label: t('折線圖') },
+    { value: 'area', label: t('區域圖') },
+    { value: 'pie', label: t('圓形圖') },
+    { value: 'scatter', label: t('XY 散佈圖') },
   ];
 
   onMount(() => {
@@ -77,56 +78,56 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label="圖表" style="width: 720px">
-    <h2>{editing ? '編輯圖表' : '插入圖表'}</h2>
-    <div class="types" role="radiogroup" aria-label="圖表類型">
+  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('圖表')} style="width: 720px">
+    <h2>{editing ? t('編輯圖表') : t('插入圖表')}</h2>
+    <div class="types" role="radiogroup" aria-label={t('圖表類型')}>
       {#each types as t (t.value)}
         <button role="radio" aria-checked={chart.type === t.value} class:on={chart.type === t.value} onclick={() => void changeType(t.value)}>{t.label}</button>
       {/each}
     </div>
     <div class="body">
       <div class="fields">
-        <label>標題 <input type="text" bind:value={chart.title} /></label>
+        <label>{t('標題')} <input type="text" bind:value={chart.title} /></label>
         <label>
-          圖例
+          {t('圖例')}
           <select bind:value={chart.legend}>
-            <option value="right">右</option>
-            <option value="bottom">下</option>
-            <option value="top">上</option>
-            <option value="none">不顯示</option>
+            <option value="right">{t('右')}</option>
+            <option value="bottom">{t('下')}</option>
+            <option value="top">{t('上')}</option>
+            <option value="none">{t('不顯示')}</option>
           </select>
         </label>
         {#if chart.type !== 'pie'}
-          <label>橫軸標題 <input type="text" bind:value={chart.xTitle} /></label>
-          <label>縱軸標題 <input type="text" bind:value={chart.yTitle} /></label>
+          <label>{t('橫軸標題')} <input type="text" bind:value={chart.xTitle} /></label>
+          <label>{t('縱軸標題')} <input type="text" bind:value={chart.yTitle} /></label>
         {/if}
         {#if ['column', 'bar', 'area'].includes(chart.type)}
-          <label class="check"><input type="checkbox" bind:checked={chart.stacked} /> 堆疊</label>
+          <label class="check"><input type="checkbox" bind:checked={chart.stacked} /> {t('堆疊')}</label>
         {/if}
       </div>
-      <canvas bind:this={canvas} style="width: 360px; height: 216px" aria-label="預覽"></canvas>
+      <canvas bind:this={canvas} style="width: 360px; height: 216px" aria-label={t('預覽')}></canvas>
     </div>
     <div class="series">
-      <div class="head"><span>數列名稱</span><span>{chart.type === 'scatter' ? 'X 值' : '類別'}</span><span>值</span><span></span></div>
+      <div class="head"><span>{t('數列名稱')}</span><span>{chart.type === 'scatter' ? t('X 值') : t('類別')}</span><span>{t('值')}</span><span></span></div>
       {#each chart.series ?? [] as s, i (i)}
         <div class="row">
           <input type="text" bind:value={s.name} />
           <input type="text" bind:value={s.categories} />
-          <input type="text" bind:value={s.values} placeholder="=工作表1!$B$2:$B$10" />
-          <button aria-label="移除數列" onclick={() => chart.series?.splice(i, 1)}>－</button>
+          <input type="text" bind:value={s.values} placeholder={t('=工作表1!$B$2:$B$10')} />
+          <button aria-label={t('移除數列')} onclick={() => chart.series?.splice(i, 1)}>{t('－')}</button>
         </div>
       {/each}
       <div>
         <button
           onclick={() => (chart.series = [...(chart.series ?? []), { name: '', categories: chart.series?.[0]?.categories ?? '', values: '' }])}
-          >＋ 新增數列</button
+          >{t('＋ 新增數列')}</button
         >
       </div>
     </div>
     {#if error}<div class="error" role="alert">{error}</div>{/if}
     <div class="dlg-actions">
-      <button onclick={onclose}>取消</button>
-      <button class="primary" onclick={() => void apply()}>確定</button>
+      <button onclick={onclose}>{t('取消')}</button>
+      <button class="primary" onclick={() => void apply()}>{t('確定')}</button>
     </div>
   </div>
 </div>

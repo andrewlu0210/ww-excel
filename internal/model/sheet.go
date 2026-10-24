@@ -159,13 +159,55 @@ func KeyOf(row, col int) BlockKey {
 	return BlockKey{Row: int32(row / BlockRows), Col: int32(col / BlockCols)}
 }
 
+// Block holds the cells of a BlockRows × BlockCols area sparsely: idx
+// maps a position to its slot in cells (0 = empty), so a block with a
+// few used columns costs little more than its cells.
 type Block struct {
-	cells [BlockRows * BlockCols]Cell
+	idx   [BlockRows * BlockCols]uint16
+	cells []Cell
 	count int
 }
 
 // Cell returns the cell at the given offset within the block.
-func (b *Block) Cell(r, c int) Cell { return b.cells[r*BlockCols+c] }
+func (b *Block) Cell(r, c int) Cell {
+	if j := b.idx[r*BlockCols+c]; j != 0 {
+		return b.cells[j-1]
+	}
+	return Cell{}
+}
+
+// set stores a cell at index i and reports whether it was empty.
+func (b *Block) set(i int, cell Cell) (wasEmpty bool) {
+	j := b.idx[i]
+	if j == 0 {
+		if cell.IsEmpty() {
+			return true
+		}
+		b.cells = append(b.cells, cell)
+		b.idx[i] = uint16(len(b.cells))
+		return true
+	}
+	wasEmpty = b.cells[j-1].IsEmpty()
+	b.cells[j-1] = cell
+	return wasEmpty
+}
+
+// compact drops the slots of cells that became empty.
+func (b *Block) compact() {
+	cells := make([]Cell, 0, b.count)
+	for i, j := range b.idx {
+		if j == 0 {
+			continue
+		}
+		if c := b.cells[j-1]; !c.IsEmpty() {
+			cells = append(cells, c)
+			b.idx[i] = uint16(len(cells))
+		} else {
+			b.idx[i] = 0
+		}
+	}
+	b.cells = cells
+}
 
 // Count reports how many non-empty cells the block holds.
 func (b *Block) Count() int { return b.count }
@@ -175,9 +217,9 @@ func (b *Block) Each(fn func(r, c int, cell Cell)) {
 	if b.count == 0 {
 		return
 	}
-	for i := range b.cells {
-		if !b.cells[i].IsEmpty() {
-			fn(i/BlockCols, i%BlockCols, b.cells[i])
+	for i, j := range b.idx {
+		if j != 0 && !b.cells[j-1].IsEmpty() {
+			fn(i/BlockCols, i%BlockCols, b.cells[j-1])
 		}
 	}
 }
@@ -220,8 +262,7 @@ func (s *Sheet) Set(row, col int, cell Cell) {
 	}
 
 	i := (row%BlockRows)*BlockCols + col%BlockCols
-	wasEmpty := b.cells[i].IsEmpty()
-	b.cells[i] = cell
+	wasEmpty := b.set(i, cell)
 
 	switch {
 	case wasEmpty && !cell.IsEmpty():
@@ -230,6 +271,8 @@ func (s *Sheet) Set(row, col int, cell Cell) {
 		b.count--
 		if b.count == 0 {
 			delete(s.blocks, key)
+		} else if len(b.cells) > 64 && b.count < len(b.cells)/2 {
+			b.compact()
 		}
 	}
 

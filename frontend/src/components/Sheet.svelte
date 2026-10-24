@@ -8,6 +8,7 @@
   // the first keystroke of 注音/倉頡 is captured and the candidate window
   // appears next to the cell. The formula bar is a second input showing
   // the same text; whichever one has focus is the "active input".
+  import { t } from '../i18n';
   import { onMount, untrack } from 'svelte';
   import {
     documentApi,
@@ -59,6 +60,7 @@
   import {
     arrowCommit,
     editAction,
+    enterThen,
     idleAction,
     type Action,
     type EditMode,
@@ -140,7 +142,7 @@
 
   // Function autocomplete and parameter hint. Defined names are offered
   // too, marked with this category.
-  const NAME_CATEGORY = '名稱';
+  const NAME_CATEGORY = t('名稱');
   let functions: FuncInfo[] = [];
   let funcByName = new Map<string, FuncInfo>();
   let suggestions = $state<FuncInfo[]>([]);
@@ -329,6 +331,37 @@
 
   // ---- Selection ----
 
+  // ---- VoiceOver ----
+  // The editor textarea keeps the focus, so screen readers learn about
+  // the active cell from a live region: its address and value, or the
+  // selected range. Updates are debounced so holding an arrow key does
+  // not queue an announcement per cell.
+  let announcement = $state('');
+  let announceTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const sel = selection;
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => {
+      announcement = describeSelection(sel);
+    }, 150);
+    return () => clearTimeout(announceTimer);
+  });
+
+  function describeSelection(sel: Selection): string {
+    const a = sel.active;
+    const addr = cellAddress(a.row, a.col);
+    const value = grid?.cache.cell(a.row, a.col)?.text ?? '';
+    const cell = value ? `${addr} ${value}` : t('%s 空白', addr);
+    if (isSingleCell(sel)) return cell;
+    const rg = sel.ranges[sel.ranges.length - 1];
+    const range = `${cellAddress(rg.r0, rg.c0)}:${cellAddress(rg.r1, rg.c1)}`;
+    return t('已選取 %s，%s', range, cell);
+  }
+
+  export function getAnnouncement(): string {
+    return announcement;
+  }
+
   function setSelection(sel: Selection, reveal: CellPos = sel.active): void {
     selection = sel;
     grid?.scrollIntoView(reveal);
@@ -405,9 +438,11 @@
       case 'docEnd':
         moved({ row: Math.max(0, used.rows - 1), col: Math.max(0, used.cols - 1) }, a.extend);
         break;
-      case 'enter':
-        advance('down', a.backward);
+      case 'enter': {
+        const then = enterThen(a.backward);
+        if (then !== 'stay') advance(then === 'down' || then === 'up' ? 'down' : 'right', then === 'up' || then === 'left');
         break;
+      }
       case 'tab':
         advance('right', a.backward);
         break;
@@ -848,7 +883,7 @@
     const prefix = w?.word.toUpperCase() ?? '';
     const nameItems: FuncInfo[] = names
       .filter((n) => n.toUpperCase().startsWith(prefix))
-      .map((n) => ({ name: n, sig: '', desc: '名稱', category: NAME_CATEGORY }));
+      .map((n) => ({ name: n, sig: '', desc: t('名稱'), category: NAME_CATEGORY }));
     const next = w ? [...nameItems, ...functions.filter((f) => f.name.startsWith(prefix))].slice(0, 10) : [];
     const exact = next.length === 1 && next[0].name.toUpperCase() === prefix;
     suggestions = exact ? [] : next;
@@ -1105,7 +1140,7 @@
       case 'pasteSpecial':
         if (editing) commit('stay');
         if (await sheetApi.hasClip()) onappaction?.('pasteSpecial');
-        else notify('請先複製儲存格，再使用選擇性貼上。');
+        else notify(t('請先複製儲存格，再使用選擇性貼上。'));
         return true;
       case 'fillDown':
       case 'fillRight': {
@@ -1240,7 +1275,7 @@
 
   function single1(): Range | null {
     if (selection.ranges.length > 1) {
-      notify('無法對多重選取範圍執行此命令。');
+      notify(t('無法對多重選取範圍執行此命令。'));
       return null;
     }
     return current(selection);
@@ -1361,7 +1396,7 @@
     else if (action === 'freezeFirstCol') cols = 1;
     else if (action === 'freezePanes' && fz.rows === 0 && fz.cols === 0) {
       ({ row: rows, col: cols } = selection.active);
-      if (rows === 0 && cols === 0) return notify('請選取要凍結的列下方、欄右方的儲存格。');
+      if (rows === 0 && cols === 0) return notify(t('請選取要凍結的列下方、欄右方的儲存格。'));
     }
     grid?.scrollToOrigin();
     notify(await serial(() => sheetApi.freeze(sheet, rows, cols)));
@@ -1379,7 +1414,7 @@
 
   async function quickSort(desc: boolean): Promise<void> {
     const info = await sortInfo();
-    if (!info.ok) return notify('請選取資料範圍中的儲存格再排序。');
+    if (!info.ok) return notify(t('請選取資料範圍中的儲存格再排序。'));
     const col = Math.max(info.range.c0, Math.min(selection.active.col, info.range.c1));
     await sortRange(info.range, [{ col, desc }], info.header);
   }
@@ -1389,7 +1424,7 @@
     const out = [];
     for (let c = rg.c0; c <= rg.c1 && out.length < 200; c++) {
       const text = header ? grid?.cache.cell(rg.r0, c)?.text : '';
-      out.push({ col: c, label: text ? text : `欄 ${colName(c)}` });
+      out.push({ col: c, label: text ? text : t('欄 %s', colName(c)) });
     }
     return out;
   }
@@ -1417,7 +1452,7 @@
     if (editing) commit('stay');
     const values = await sheetApi.filterValues(sheet, e.col);
     const base = root.getBoundingClientRect();
-    filterMenu = { col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: `欄 ${colName(e.col)}` };
+    filterMenu = { col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: t('欄 %s', colName(e.col)) };
   }
 
   async function applyFilter(shown: string[] | null): Promise<void> {
@@ -1454,53 +1489,53 @@
   let contextItems = $derived.by((): MenuItem[] => {
     if (!contextMenu) return [];
     const clip: MenuItem[] = [
-      { label: '剪下', action: 'cut', key: '⌘X' },
-      { label: '拷貝', action: 'copy', key: '⌘C' },
-      { label: '貼上', action: 'paste', key: '⌘V' },
-      { label: '選擇性貼上…', action: 'pasteSpecial', key: '⌃⌘V' },
+      { label: t('剪下'), action: 'cut', key: '⌘X' },
+      { label: t('拷貝'), action: 'copy', key: '⌘C' },
+      { label: t('貼上'), action: 'paste', key: '⌘V' },
+      { label: t('選擇性貼上…'), action: 'pasteSpecial', key: '⌃⌘V' },
       null,
     ];
     if (contextMenu.area === 'row' || contextMenu.area === 'col') {
       const rows = contextMenu.area === 'row';
       return [
         ...clip,
-        { label: rows ? '插入列' : '插入欄', action: rows ? 'insertRows' : 'insertCols' },
-        { label: rows ? '刪除列' : '刪除欄', action: rows ? 'deleteRows' : 'deleteCols' },
-        { label: '清除內容', action: 'clearContents' },
+        { label: rows ? t('插入列') : t('插入欄'), action: rows ? 'insertRows' : 'insertCols' },
+        { label: rows ? t('刪除列') : t('刪除欄'), action: rows ? 'deleteRows' : 'deleteCols' },
+        { label: t('清除內容'), action: 'clearContents' },
         null,
-        { label: rows ? '自動調整列高' : '自動調整欄寬', action: rows ? 'autofitRows' : 'autofitCols' },
-        { label: '隱藏', action: rows ? 'hideRows' : 'hideCols' },
-        { label: '取消隱藏', action: rows ? 'unhideRows' : 'unhideCols' },
+        { label: rows ? t('自動調整列高') : t('自動調整欄寬'), action: rows ? 'autofitRows' : 'autofitCols' },
+        { label: t('隱藏'), action: rows ? 'hideRows' : 'hideCols' },
+        { label: t('取消隱藏'), action: rows ? 'unhideRows' : 'unhideCols' },
       ];
     }
     const hasNote = notes.has(selection.active.row * 16384 + selection.active.col);
     const noteItems: MenuItem[] = hasNote
       ? [
-          { label: '編輯註解', action: 'insertNote' },
-          { label: '刪除註解', action: 'deleteNote' },
+          { label: t('編輯註解'), action: 'insertNote' },
+          { label: t('刪除註解'), action: 'deleteNote' },
         ]
-      : [{ label: '插入註解', action: 'insertNote', key: '⇧F2' }];
+      : [{ label: t('插入註解'), action: 'insertNote', key: '⇧F2' }];
     const tableItems: MenuItem[] = activeTable
       ? [
           null,
-          { label: activeTable.totals ? '移除合計列' : '加入合計列', action: 'tableTotals' },
-          { label: '重新命名表格…', action: 'renameTable' },
-          { label: '轉換為範圍', action: 'convertTable' },
+          { label: activeTable.totals ? t('移除合計列') : t('加入合計列'), action: 'tableTotals' },
+          { label: t('重新命名表格…'), action: 'renameTable' },
+          { label: t('轉換為範圍'), action: 'convertTable' },
         ]
       : [];
     return [
       ...clip,
       ...noteItems,
       null,
-      { label: '插入…', action: 'insertCells', key: '⇧⌘=' },
-      { label: '刪除…', action: 'deleteCells', key: '⌘-' },
-      { label: '清除內容', action: 'clearContents' },
+      { label: t('插入…'), action: 'insertCells', key: '⇧⌘=' },
+      { label: t('刪除…'), action: 'deleteCells', key: '⌘-' },
+      { label: t('清除內容'), action: 'clearContents' },
       null,
-      { label: '遞增排序', action: 'sortAsc' },
-      { label: '遞減排序', action: 'sortDesc' },
-      { label: '篩選', action: 'filter', key: '⇧⌘F' },
+      { label: t('遞增排序'), action: 'sortAsc' },
+      { label: t('遞減排序'), action: 'sortDesc' },
+      { label: t('篩選'), action: 'filter', key: '⇧⌘F' },
       null,
-      { label: '儲存格格式…', action: 'formatCells', key: '⌘1' },
+      { label: t('儲存格格式…'), action: 'formatCells', key: '⌘1' },
       ...tableItems,
     ];
   });
@@ -1639,7 +1674,7 @@
 
   async function toggleFont(attr: 'bold' | 'italic' | 'underline'): Promise<void> {
     const on = !(activeStyle?.font[attr] ?? false);
-    const label = { bold: '粗體', italic: '斜體', underline: '底線' }[attr];
+    const label = { bold: t('粗體'), italic: t('斜體'), underline: t('底線') }[attr];
     await applyFormat({ [attr]: on, label });
   }
 
@@ -1826,7 +1861,7 @@
     <input
       bind:this={nameBox}
       class="name-box"
-      aria-label="名稱方塊"
+      aria-label={t('名稱方塊')}
       list="defined-names"
       spellcheck="false"
       value={nameBoxFocused ? nameBoxText : address}
@@ -1859,7 +1894,7 @@
       spellcheck="false"
       autocomplete="off"
       autocapitalize="off"
-      aria-label="公式列"
+      aria-label={t('公式列')}
       onfocus={onBarFocus}
       onkeydown={onKeyDown}
       oninput={onInput}
@@ -1917,7 +1952,7 @@
       spellcheck="false"
       autocomplete="off"
       autocapitalize="off"
-      aria-label="儲存格編輯器"
+      aria-label={t('儲存格編輯器')}
       onfocus={onEditorFocus}
       onkeydown={onKeyDown}
       oninput={onInput}
@@ -1926,6 +1961,7 @@
       oncompositionstart={onCompositionStart}
     ></textarea>
   </Grid>
+  <div class="sr-only" role="status" aria-live="polite">{announcement}</div>
 
   {#if contextMenu}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1987,7 +2023,7 @@
       class="dropdown-button"
       style:left="{at.x - 2}px"
       style:top="{at.bottom - 18}px"
-      aria-label="選擇清單中的值"
+      aria-label={t('選擇清單中的值')}
       onpointerdown={(e) => {
         e.preventDefault();
         if (dropdown) dropdown = null;
@@ -1997,7 +2033,7 @@
   {/if}
   {#if dropdown}
     {@const at = besideCell(selection.active)}
-    <ul class="dropdown-list" role="listbox" aria-label="清單" style:left="{at.x - 120}px" style:top="{at.bottom + 1}px">
+    <ul class="dropdown-list" role="listbox" aria-label={t('清單')} style:left="{at.x - 120}px" style:top="{at.bottom + 1}px">
       {#each dropdown.values as v, i (i)}
         <li
           role="option"
@@ -2008,7 +2044,7 @@
             pickDropdown(v);
           }}
         >
-          {v || '（空白）'}
+          {v || t('（空白）')}
         </li>
       {/each}
     </ul>
@@ -2033,7 +2069,7 @@
       <textarea
         bind:this={noteInput}
         bind:value={noteEdit.text}
-        aria-label="註解"
+        aria-label={t('註解')}
         rows="4"
         onkeydown={(e) => {
           if (e.key === 'Escape') {
@@ -2046,8 +2082,8 @@
         }}
       ></textarea>
       <div class="note-actions">
-        <button onclick={() => void saveNote(null)}>取消</button>
-        <button class="primary" onclick={() => void saveNote(noteEdit?.text ?? '')}>儲存</button>
+        <button onclick={() => void saveNote(null)}>{t('取消')}</button>
+        <button class="primary" onclick={() => void saveNote(noteEdit?.text ?? '')}>{t('儲存')}</button>
       </div>
     </div>
   {/if}
@@ -2056,7 +2092,7 @@
     <div class="popups" style:left="{popupPos.x}px" style:top="{popupPos.y}px">
       {#if editError}
         <div class="popup error" role="alert">
-          <strong>{editText.startsWith('=') ? '公式有問題' : '輸入的值無效'}</strong>
+          <strong>{editText.startsWith('=') ? t('公式有問題') : t('輸入的值無效')}</strong>
           <span>{editError}</span>
         </div>
       {/if}
@@ -2069,7 +2105,7 @@
         </div>
       {/if}
       {#if suggestions.length > 0 && !editError}
-        <ul class="popup suggestions" role="listbox" aria-label="函數">
+        <ul class="popup suggestions" role="listbox" aria-label={t('函數')}>
           {#each suggestions as f, i (f.name)}
             <li
               role="option"
@@ -2091,6 +2127,14 @@
 </div>
 
 <style>
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .sheet {
     position: relative;
     display: flex;

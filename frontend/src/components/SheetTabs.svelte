@@ -1,6 +1,7 @@
 <script lang="ts">
   // Sheet tabs: click to switch, double-click to rename, right-click for
   // a menu, drag to reorder, + to add.
+  import { t } from '../i18n';
   import { tick } from 'svelte';
 
   interface Props {
@@ -75,7 +76,7 @@
   onpointerdown={(e) => menu && !(e.target as Element).closest?.('.tab-menu') && (menu = null)}
 />
 
-<div class="tabs" role="tablist" aria-label="工作表">
+<div class="tabs" role="tablist" aria-label={t('工作表')}>
   {#each sheets as name, i (i + ':' + name)}
     {#if renaming === i}
       <span class="tab active editing">
@@ -83,7 +84,7 @@
           bind:this={input}
           bind:value={draft}
           spellcheck="false"
-          aria-label="工作表名稱"
+          aria-label={t('工作表名稱')}
           onkeydown={(e) => {
             if (e.key === 'Enter') void finishRename(true);
             if (e.key === 'Escape') void finishRename(false);
@@ -112,17 +113,17 @@
       >
     {/if}
   {/each}
-  <button class="add" tabindex="-1" title="新增工作表 (⇧F11)" onpointerdown={(e) => e.preventDefault()} onclick={onadd}>＋</button>
+  <button class="add" tabindex="-1" title={t('新增工作表 (⇧F11)')} onpointerdown={(e) => e.preventDefault()} onclick={onadd}>{t('＋')}</button>
 </div>
 
 {#if menu}
   {@const i = menu.i}
   <ul class="tab-menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
-    <li><button role="menuitem" onclick={() => { menu = null; onadd(); }}>插入工作表</button></li>
-    <li><button role="menuitem" onclick={() => void startRename(i)}>重新命名</button></li>
-    <li><button role="menuitem" disabled={sheets.length <= 1} onclick={() => { menu = null; ondelete(i); }}>刪除</button></li>
-    <li><button role="menuitem" disabled={i === 0} onclick={() => { menu = null; onmove(i, i - 1); }}>左移</button></li>
-    <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => { menu = null; onmove(i, i + 1); }}>右移</button></li>
+    <li><button role="menuitem" onclick={() => { menu = null; onadd(); }}>{t('插入工作表')}</button></li>
+    <li><button role="menuitem" onclick={() => void startRename(i)}>{t('重新命名')}</button></li>
+    <li><button role="menuitem" disabled={sheets.length <= 1} onclick={() => { menu = null; ondelete(i); }}>{t('刪除')}</button></li>
+    <li><button role="menuitem" disabled={i === 0} onclick={() => { menu = null; onmove(i, i - 1); }}>{t('左移')}</button></li>
+    <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => { menu = null; onmove(i, i + 1); }}>{t('右移')}</button></li>
   </ul>
 {/if}
 

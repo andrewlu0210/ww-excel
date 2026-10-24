@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n';
   import { onMount, untrack, type Snippet } from 'svelte';
   import { sheetApi, type LayoutDTO, type SheetInfo } from '../bridge/sheet';
   import { AxisLayout } from '../grid/layout';
@@ -565,6 +566,7 @@
       schedule();
     };
     media.addEventListener('change', onTheme);
+    window.addEventListener('ww-theme', onTheme);
 
     return () => {
       destroyed = true;
@@ -572,6 +574,7 @@
       offStyles();
       ro.disconnect();
       media.removeEventListener('change', onTheme);
+      window.removeEventListener('ww-theme', onTheme);
       cancelAnimationFrame(raf);
       cancelAnimationFrame(autoRaf);
     };
@@ -658,7 +661,7 @@
   <div
     class="scroller"
     role="application"
-    aria-label="工作表格線"
+    aria-label={t('工作表格線')}
     bind:this={scroller}
     onscroll={onScroll}
     onpointerdown={onPointerDown}

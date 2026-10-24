@@ -71,6 +71,45 @@
   }
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* Forced by 偏好設定 › 外觀. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --app-bg: #1e1e1e;
+  --chrome-bg: #262626;
+  --chrome-border: #3a3a3a;
+  --chrome-text: #e8e8e8;
+  --chrome-muted: #9a9a9a;
+
+  --grid-bg: #1b1b1b;
+  --grid-line: #333333;
+  --cell-text: #e6e6e6;
+  --header-bg: #262626;
+  --header-text: #b4b4b4;
+  --header-line: #3d3d3d;
+  --header-active-bg: #1f3b2b;
+  --header-active-text: #8fdcaf;
+  --header-full-bg: #2b5c40;
+  --accent: #3fb878;
+  --selection-fill: rgb(63 184 120 / 0.2);
+
+  --ref-1: #6ea0ff;
+  --ref-2: #ff7a70;
+  --ref-3: #c08af0;
+  --ref-4: #52c784;
+  --ref-5: #e3b04b;
+  --ref-6: #4cc4d2;
+  --ref-7: #f06d9f;
+
+  --popup-bg: #2b2b2b;
+  --popup-border: #474747;
+  --popup-active: #24412f;
+  --error-fg: #ff8a80;
+}
+
 * {
   box-sizing: border-box;
 }

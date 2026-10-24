@@ -3,10 +3,12 @@
 
 import * as BenchService from "./benchservice.js";
 import * as DocumentService from "./documentservice.js";
+import * as SettingsService from "./settingsservice.js";
 import * as SheetService from "./sheetservice.js";
 export {
     BenchService,
     DocumentService,
+    SettingsService,
     SheetService
 };
 
@@ -52,5 +54,6 @@ export type {
     TableDTO,
     TargetDTO,
     TextSample,
+    UISettings,
     ValidationDTO
 } from "./models.js";

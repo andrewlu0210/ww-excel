@@ -1,6 +1,7 @@
 package formula
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -282,5 +283,21 @@ func BenchmarkRangeSums10k(b *testing.B) {
 		v++
 		sh.Set(5000, 0, model.NumberCell(v))
 		e.Update([]Key{{Row: 5000, Col: 0}})
+	}
+}
+
+// BenchmarkRebuild100k recalculates 100,000 independent formulas, the
+// case parallel waves speed up (e.g. opening a large file).
+func BenchmarkRebuild100k(b *testing.B) {
+	wb := &model.Workbook{Sheets: []*model.Sheet{model.NewSheet("Sheet1")}}
+	sh := wb.Sheets[0]
+	for r := 0; r < 100_000; r++ {
+		sh.Set(r, 0, model.NumberCell(float64(r)))
+		sh.Set(r, 1, model.FormulaCell(fmt.Sprintf("A%d*2+ROUND(A%d/3,2)", r+1, r+1)))
+	}
+	e := New(wb)
+	b.ResetTimer()
+	for b.Loop() {
+		e.Rebuild()
 	}
 }

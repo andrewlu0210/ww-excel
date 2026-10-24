@@ -1,5 +1,6 @@
 <script lang="ts">
   // 公式 › 定義名稱 / 名稱管理員: list, add, edit and delete names.
+  import { t } from '../i18n';
   import { onMount } from 'svelte';
   import { documentApi, type NameDTO } from '../bridge/sheet';
 
@@ -53,47 +54,47 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && (edit ? (edit = null) : onclose())} />
 
 <div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label="名稱管理員" style="width: 560px">
-    <h2>名稱管理員</h2>
+  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('名稱管理員')} style="width: 560px">
+    <h2>{t('名稱管理員')}</h2>
     {#if edit}
-      <label>名稱 <input type="text" bind:value={edit.n.name} /></label>
+      <label>{t('名稱')} <input type="text" bind:value={edit.n.name} /></label>
       <label>
-        範圍
+        {t('範圍')}
         <select bind:value={edit.n.scope}>
-          <option value={-1}>活頁簿</option>
+          <option value={-1}>{t('活頁簿')}</option>
           {#each sheets as s, i (i)}<option value={i}>{s}</option>{/each}
         </select>
       </label>
-      <label>參照到 <input type="text" bind:value={edit.n.refersTo} /></label>
-      <label>註解 <input type="text" bind:value={edit.n.comment} /></label>
+      <label>{t('參照到')} <input type="text" bind:value={edit.n.refersTo} /></label>
+      <label>{t('註解')} <input type="text" bind:value={edit.n.comment} /></label>
       {#if error}<div class="error" role="alert">{error}</div>{/if}
       <div class="dlg-actions">
-        <button onclick={() => (edit = null)}>取消</button>
-        <button class="primary" onclick={() => void save()}>確定</button>
+        <button onclick={() => (edit = null)}>{t('取消')}</button>
+        <button class="primary" onclick={() => void save()}>{t('確定')}</button>
       </div>
     {:else}
       <table>
-        <thead><tr><th>名稱</th><th>參照到</th><th>範圍</th><th></th></tr></thead>
+        <thead><tr><th>{t('名稱')}</th><th>{t('參照到')}</th><th>{t('範圍')}</th><th></th></tr></thead>
         <tbody>
           {#each list as n (n.name + n.scope)}
             <tr>
               <td>{n.name}</td>
               <td class="ref">{n.refersTo}</td>
-              <td>{n.scope < 0 ? '活頁簿' : sheets[n.scope]}</td>
+              <td>{n.scope < 0 ? t('活頁簿') : sheets[n.scope]}</td>
               <td class="row-actions">
-                <button onclick={() => startEdit(n)}>編輯</button>
-                <button onclick={() => void remove(n)}>刪除</button>
+                <button onclick={() => startEdit(n)}>{t('編輯')}</button>
+                <button onclick={() => void remove(n)}>{t('刪除')}</button>
               </td>
             </tr>
           {:else}
-            <tr><td colspan="4" class="empty">還沒有定義任何名稱</td></tr>
+            <tr><td colspan="4" class="empty">{t('還沒有定義任何名稱')}</td></tr>
           {/each}
         </tbody>
       </table>
       {#if error}<div class="error" role="alert">{error}</div>{/if}
       <div class="dlg-actions">
-        <button onclick={() => startEdit(null)}>新增…</button>
-        <button class="primary" onclick={onclose}>關閉</button>
+        <button onclick={() => startEdit(null)}>{t('新增…')}</button>
+        <button class="primary" onclick={onclose}>{t('關閉')}</button>
       </div>
     {/if}
   </div>

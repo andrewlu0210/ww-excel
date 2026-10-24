@@ -13,6 +13,7 @@ import (
 
 	"ww-excel/internal/command"
 	"ww-excel/internal/formula"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/io/csvfile"
 	"ww-excel/internal/io/wwx"
 	"ww-excel/internal/io/xlsxfile"
@@ -45,6 +46,9 @@ type Document struct {
 	history *command.History
 	calc    *formula.Engine
 	path    string
+	// title replaces UntitledName for documents without a path, e.g.
+	// recovered ones.
+	title string
 	// version increases on every change so the frontend can discard
 	// block fetches that raced with an edit.
 	version uint64
@@ -68,7 +72,9 @@ type Document struct {
 }
 
 func New() *Document {
-	return FromWorkbook(model.NewWorkbook(), "")
+	wb := model.NewWorkbook()
+	wb.Sheets[0].Name = i18n.T(DefaultSheetPrefix) + "1"
+	return FromWorkbook(wb, "")
 }
 
 // FromWorkbook wraps a workbook and calculates all its formulas.
@@ -76,6 +82,15 @@ func FromWorkbook(wb *model.Workbook, path string) *Document {
 	d := &Document{wb: wb, history: command.NewHistory(0), calc: formula.New(wb), path: path, Now: time.Now}
 	d.calc.Rebuild()
 	d.resetChanges()
+	return d
+}
+
+// Recovered wraps a workbook restored from an autosave snapshot. It has
+// no path (saving asks where) and stays dirty until saved.
+func Recovered(wb *model.Workbook, title string) *Document {
+	d := FromWorkbook(wb, "")
+	d.title = title
+	d.history.MarkUnsaved()
 	return d
 }
 
@@ -238,6 +253,9 @@ func (d *Document) TakeWarning() string {
 // Name is the file name shown in the title bar.
 func (d *Document) Name() string {
 	if d.path == "" {
+		if d.title != "" {
+			return d.title
+		}
 		return UntitledName
 	}
 	return filepath.Base(d.path)

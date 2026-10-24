@@ -9,6 +9,7 @@ import (
 
 	"ww-excel/internal/command"
 	"ww-excel/internal/formula/ast"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
 )
 
@@ -37,7 +38,7 @@ func (d *Document) ValidateSheetName(name string, except int) error {
 // NextSheetName returns the first unused 工作表N.
 func (d *Document) NextSheetName() string {
 	for n := len(d.wb.Sheets) + 1; ; n++ {
-		name := fmt.Sprintf("%s%d", DefaultSheetPrefix, n)
+		name := fmt.Sprintf("%s%d", i18n.T(DefaultSheetPrefix), n)
 		if d.wb.SheetIndex(name) < 0 {
 			return name
 		}

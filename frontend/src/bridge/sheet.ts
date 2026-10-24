@@ -1,7 +1,8 @@
 // The only module that touches generated Wails bindings. Wails3 is still
 // in beta, so keep binding/event usage behind these wrappers.
 import { Events, Window } from '@wailsio/runtime';
-import { BenchService, DocumentService, SheetService } from '../../bindings/ww-excel/internal/service';
+import { BenchService, DocumentService, SettingsService, SheetService } from '../../bindings/ww-excel/internal/service';
+import type { Settings } from '../../bindings/ww-excel/internal/settings/models';
 import type { FuncInfo } from '../../bindings/ww-excel/internal/formula/models';
 import type {
   BenchEvent,
@@ -39,10 +40,14 @@ import type {
   SheetInfo,
   StyleDTO,
   TextSample,
+  UISettings,
 } from '../../bindings/ww-excel/internal/service/models';
 import type { MenuAction } from '../input/keymap';
+import { tr } from '../i18n';
 
 export type {
+  Settings,
+  UISettings,
   ChartDataDTO,
   ChartDTO,
   ObjectDTO,
@@ -102,7 +107,7 @@ async function failed<T>(p: Promise<T>): Promise<{ value: T | null; error: strin
   try {
     return { value: await p, error: null };
   } catch (err) {
-    return { value: null, error: err instanceof Error ? err.message : String(err) };
+    return { value: null, error: tr(err instanceof Error ? err.message : String(err)) };
   }
 }
 
@@ -127,12 +132,13 @@ export const sheetApi = {
   // notice: it was entered but the user should see a message.
   async setCell(sheet: number, row: number, col: number, text: string): Promise<{ error: string | null; notice: string | null }> {
     const res = await failed(SheetService.SetCell(sheet, row, col, text));
-    return { error: res.error, notice: res.value?.notice || null };
+    return { error: res.error, notice: res.value?.notice ? tr(res.value.notice) : null };
   },
   fill: (sheet: number, ranges: RangeDTO[], text: string, activeRow: number, activeCol: number): Promise<string | null> =>
     rejected(SheetService.Fill(sheet, ranges, text, activeRow, activeCol)),
   async functions(): Promise<FuncInfo[]> {
-    return (await SheetService.Functions()) ?? [];
+    const list = (await SheetService.Functions()) ?? [];
+    return list.map((f) => ({ ...f, desc: tr(f.desc), category: tr(f.category) }));
   },
   clear: (sheet: number, ranges: RangeDTO[], mode: 'contents' | 'formats' | 'all' = 'contents'): Promise<void> =>
     SheetService.Clear(sheet, ranges, mode),
@@ -256,7 +262,7 @@ async function rejected(p: Promise<void>): Promise<string | null> {
     await p;
     return null;
   } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+    return tr(err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -299,6 +305,13 @@ export const documentApi = {
   onMenu(cb: (action: MenuAction) => void): () => void {
     return on('menu:action', cb);
   },
+};
+
+export const settingsApi = {
+  get: (): Promise<UISettings> => SettingsService.Get(),
+  set: (s: Settings): Promise<UISettings> => SettingsService.Set(s),
+  dictionary: async (): Promise<Record<string, string>> => ((await SettingsService.Dictionary()) ?? {}) as Record<string, string>,
+  onChanged: (cb: (s: UISettings) => void) => on<UISettings>('settings:changed', cb),
 };
 
 export const benchApi = {

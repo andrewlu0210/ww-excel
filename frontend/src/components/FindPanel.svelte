@@ -1,5 +1,6 @@
 <script lang="ts">
   // 尋找與取代 (⌘F / ⇧⌘H): a non-modal panel; the sheet keeps working.
+  import { t } from '../i18n';
   import { onMount } from 'svelte';
   import type { FindOptionsDTO, HitDTO } from '../bridge/sheet';
   import { cellAddress } from '../grid/layout';
@@ -43,7 +44,7 @@
   async function findAll(): Promise<void> {
     if (text === '') return;
     hits = await onfindall(opt());
-    message = hits.length === 0 ? '找不到符合的資料。' : `找到 ${hits.length >= 1000 ? '1,000+' : hits.length} 個儲存格`;
+    message = hits.length === 0 ? t('找不到符合的資料。') : t('找到 %s 個儲存格', hits.length >= 1000 ? '1,000+' : hits.length);
   }
 
   onMount(() => input.focus());
@@ -58,34 +59,34 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<div class="dlg panel" role="dialog" aria-label="尋找與取代" tabindex="-1" onkeydown={onKey}>
+<div class="dlg panel" role="dialog" aria-label={t('尋找與取代')} tabindex="-1" onkeydown={onKey}>
   <div class="head">
     <div class="tabs" role="tablist">
-      <button role="tab" aria-selected={!replaceMode} class:on={!replaceMode} onclick={() => (replaceMode = false)}>尋找</button>
-      <button role="tab" aria-selected={replaceMode} class:on={replaceMode} onclick={() => (replaceMode = true)}>取代</button>
+      <button role="tab" aria-selected={!replaceMode} class:on={!replaceMode} onclick={() => (replaceMode = false)}>{t('尋找')}</button>
+      <button role="tab" aria-selected={replaceMode} class:on={replaceMode} onclick={() => (replaceMode = true)}>{t('取代')}</button>
     </div>
-    <button class="close" aria-label="關閉" onclick={onclose}>✕</button>
+    <button class="close" aria-label={t('關閉')} onclick={onclose}>✕</button>
   </div>
-  <label>尋找目標 <input type="text" bind:this={input} bind:value={text} /></label>
+  <label>{t('尋找目標')} <input type="text" bind:this={input} bind:value={text} /></label>
   {#if replaceMode}
-    <label>取代成 <input type="text" bind:value={withText} /></label>
+    <label>{t('取代成')} <input type="text" bind:value={withText} /></label>
   {/if}
   <div class="options">
-    <label><input type="checkbox" bind:checked={matchCase} /> 大小寫須相符</label>
-    <label><input type="checkbox" bind:checked={wholeCell} /> 儲存格內容須完全相符</label>
-    <label><input type="checkbox" bind:checked={inFormulas} disabled={replaceMode} /> 搜尋公式</label>
-    <label><input type="checkbox" bind:checked={allSheets} /> 整個活頁簿</label>
+    <label><input type="checkbox" bind:checked={matchCase} /> {t('大小寫須相符')}</label>
+    <label><input type="checkbox" bind:checked={wholeCell} /> {t('儲存格內容須完全相符')}</label>
+    <label><input type="checkbox" bind:checked={inFormulas} disabled={replaceMode} /> {t('搜尋公式')}</label>
+    <label><input type="checkbox" bind:checked={allSheets} /> {t('整個活頁簿')}</label>
   </div>
   {#if message}<div class="message" role="status">{message}</div>{/if}
   <div class="dlg-actions">
     {#if replaceMode}
-      <button disabled={busy || !text} onclick={() => void run(() => onreplace({ ...opt(), inFormulas: true }, withText, true))}>全部取代</button>
-      <button disabled={busy || !text} onclick={() => void run(() => onreplace({ ...opt(), inFormulas: true }, withText, false))}>取代</button>
+      <button disabled={busy || !text} onclick={() => void run(() => onreplace({ ...opt(), inFormulas: true }, withText, true))}>{t('全部取代')}</button>
+      <button disabled={busy || !text} onclick={() => void run(() => onreplace({ ...opt(), inFormulas: true }, withText, false))}>{t('取代')}</button>
     {:else}
-      <button disabled={busy || !text} onclick={() => void findAll()}>全部尋找</button>
+      <button disabled={busy || !text} onclick={() => void findAll()}>{t('全部尋找')}</button>
     {/if}
-    <button disabled={busy || !text} onclick={() => void run(() => onfind(opt(), false))}>上一個</button>
-    <button class="primary" disabled={busy || !text} onclick={() => void run(() => onfind(opt(), true))}>找下一個</button>
+    <button disabled={busy || !text} onclick={() => void run(() => onfind(opt(), false))}>{t('上一個')}</button>
+    <button class="primary" disabled={busy || !text} onclick={() => void run(() => onfind(opt(), true))}>{t('找下一個')}</button>
   </div>
   {#if hits && hits.length > 0 && !replaceMode}
     <ul class="hits">

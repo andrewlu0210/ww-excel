@@ -8,6 +8,7 @@ import (
 
 	"ww-excel/internal/command"
 	"ww-excel/internal/formula/ast"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
 )
 
@@ -24,7 +25,7 @@ func rebuild(sheet int) command.Command {
 // NextTableName returns the first unused 表格N.
 func (d *Document) NextTableName() string {
 	for n := 1; ; n++ {
-		name := fmt.Sprintf("表格%d", n)
+		name := fmt.Sprintf(i18n.T("表格%d"), n)
 		if t, _ := d.wb.FindTable(name); t == nil && d.wb.LookupName(name, nil) == nil {
 			return name
 		}
@@ -81,7 +82,7 @@ func (d *Document) CreateTableCommand(sheet int, rg model.Range, hasHeaders bool
 			}
 		}
 		for c := rg.C0; c <= rg.C1; c++ {
-			changes = append(changes, command.CellChange{Row: rg.R0, Col: c, After: model.StringCell(fmt.Sprintf("欄%d", c-rg.C0+1))})
+			changes = append(changes, command.CellChange{Row: rg.R0, Col: c, After: model.StringCell(fmt.Sprintf(i18n.T("欄%d"), c-rg.C0+1))})
 		}
 		rg.R1++
 	} else {
@@ -92,7 +93,7 @@ func (d *Document) CreateTableCommand(sheet int, rg model.Range, hasHeaders bool
 			name := cell.Display()
 			base := name
 			if base == "" {
-				base = fmt.Sprintf("欄%d", c-rg.C0+1)
+				base = fmt.Sprintf(i18n.T("欄%d"), c-rg.C0+1)
 			}
 			name = base
 			for i := 2; seen[strings.ToLower(name)]; i++ {
@@ -283,7 +284,7 @@ func (d *Document) ToggleTotalsCommand(sheet int, name string) (command.Command,
 			return nil, err
 		}
 		if rg.C1 > rg.C0 {
-			changes = append(changes, command.CellChange{Row: row, Col: rg.C0, After: model.StringCell("合計")})
+			changes = append(changes, command.CellChange{Row: row, Col: rg.C0, After: model.StringCell(i18n.T("合計"))})
 		}
 		changes = append(changes, command.CellChange{Row: row, Col: rg.C1, After: model.Cell{F: f}})
 	}
@@ -332,7 +333,7 @@ func (d *Document) ExpandTableCommand(sheet, row, col int) command.Command {
 			}
 			if h := sh.Get(t.Range.R0, col); !h.HasContent() || row == t.Range.R0 {
 				if row != t.Range.R0 {
-					name := fmt.Sprintf("欄%d", col-t.Range.C0+1)
+					name := fmt.Sprintf(i18n.T("欄%d"), col-t.Range.C0+1)
 					header = &command.SetCells{Sheet: sheet, Changes: []command.CellChange{{Row: t.Range.R0, Col: col, After: model.Cell{Kind: model.KindString, Str: name, S: h.S}}}}
 				}
 			}

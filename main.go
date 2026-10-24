@@ -3,24 +3,38 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"ww-excel/internal/document"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
+	"ww-excel/internal/recovery"
 	"ww-excel/internal/service"
+	"ww-excel/internal/settings"
+	"ww-excel/internal/update"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
+
+// Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
+var (
+	version = "1.0.0"
+	// updateRepo is the GitHub repository whose releases are checked.
+	updateRepo = "andrewlu0210/ww-excel"
+)
 
 func init() {
 	// Registered events get strongly typed TS bindings.
@@ -31,15 +45,18 @@ func init() {
 	application.RegisterEvent[service.DocState](service.EventDocState)
 	application.RegisterEvent[service.DocState](service.EventDocReset)
 	application.RegisterEvent[string](service.EventMenuAction)
+	application.RegisterEvent[service.UISettings](service.EventSettingsChanged)
 }
 
 // docApp owns the document windows: one session and window per document.
 type docApp struct {
-	app    *application.App
-	hub    *service.Hub
-	docs   *service.DocumentService
-	menus  *appMenus
-	recent *service.RecentFiles
+	app      *application.App
+	hub      *service.Hub
+	docs     *service.DocumentService
+	menus    *appMenus
+	recent   *service.RecentFiles
+	settings *service.SettingsService
+	autosave *service.Autosaver
 
 	mu      sync.Mutex
 	windows map[uint]*docWindow
@@ -57,6 +74,22 @@ type docWindow struct {
 func main() {
 	a := &docApp{hub: service.NewHub(), windows: map[uint]*docWindow{}}
 	a.recent = service.LoadRecent(service.DefaultRecentPath())
+	// The unattended modes must not touch the user's preferences or
+	// recovery snapshots.
+	settingsPath, recoveryDir := settings.DefaultPath(), recovery.DefaultDir()
+	preferred := preferredLanguages()
+	if unattended() {
+		tmp, _ := os.MkdirTemp("", "ww-excel-test")
+		settingsPath, recoveryDir = filepath.Join(tmp, "settings.json"), filepath.Join(tmp, "Recovery")
+		// The checks compare Chinese UI text; WW_LANG=en previews the
+		// English UI (the checks on text then fail).
+		preferred = []string{"zh-Hant-TW"}
+		if l := os.Getenv("WW_LANG"); l != "" {
+			preferred = []string{l}
+		}
+	}
+	a.settings = service.NewSettingsService(settings.Load(settingsPath), preferred)
+	a.autosave = service.NewAutosaver(recovery.New(recoveryDir), a.hub)
 	dialogs := service.WailsDialogs{Window: func() application.Window { return a.app.Window.Current() }}
 	sheets := service.NewSheetService(a.hub)
 	a.docs = service.NewDocumentService(a.hub, dialogs)
@@ -72,6 +105,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(sheets),
 			application.NewService(a.docs),
+			application.NewService(a.settings),
 			application.NewService(service.NewBenchService(sheets, a.docs)),
 		},
 		Assets: application.AssetOptions{
@@ -86,15 +120,35 @@ func main() {
 		// ⌘Q does not pass through the windows' closing hooks, so ask
 		// about each unsaved document here, then quit.
 		ShouldQuit: a.shouldQuit,
+		// A normal quit leaves no recovery snapshots behind.
+		OnShutdown: func() {
+			for _, s := range a.hub.All() {
+				a.autosave.Forget(s)
+			}
+		},
 	})
 	service.ConnectClipboard(sheets, a.app.Clipboard.SetText, a.app.Clipboard.Text)
 
-	a.menus = buildMenu(a)
-	a.app.Menu.Set(a.menus.root)
+	a.setMenus()
 	a.recent.OnChange = func(files []string) { a.menus.setRecent(a, files) }
-	a.menus.setRecent(a, a.recent.List())
+	a.settings.Changed = a.settingsChanged
 
 	first := a.openWindow(initialDocument())
+
+	stopAutosave := make(chan struct{})
+	defer close(stopAutosave)
+	go a.autosave.Run(func() time.Duration {
+		return time.Duration(a.settings.Get().AutoRecoverMinutes) * time.Minute
+	}, stopAutosave)
+
+	a.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		setAppearance(a.settings.Get().Appearance)
+		// Offer the snapshots of a session that crashed.
+		go service.Recover(a.docs, service.WindowContext(first.win), a.autosave.Store)
+		if a.settings.Get().CheckUpdates && !unattended() {
+			go a.checkUpdates(false)
+		}
+	})
 
 	// Files from the command line or from Finder (double-click, drop on
 	// the Dock icon) open like 檔案 > 開啟.
@@ -187,8 +241,80 @@ func (a *docApp) forget(id uint) {
 	delete(a.windows, id)
 	a.mu.Unlock()
 	if w != nil {
+		a.autosave.Forget(w.session)
 		w.session.Close()
 	}
+}
+
+// setMenus (re)builds the menu bar in the current language.
+func (a *docApp) setMenus() {
+	a.menus = buildMenu(a)
+	a.app.Menu.Set(a.menus.root)
+	a.menus.setRecent(a, a.recent.List())
+}
+
+// settingsChanged applies new preferences to the app and every window.
+func (a *docApp) settingsChanged(old, cur service.UISettings) {
+	if old.Appearance != cur.Appearance {
+		setAppearance(cur.Appearance)
+	}
+	if old.Lang != cur.Lang {
+		application.InvokeSync(a.setMenus)
+		a.mu.Lock()
+		for _, w := range a.windows {
+			st := w.session.State()
+			w.win.SetTitle(windowTitle(st))
+		}
+		a.mu.Unlock()
+		if w := a.app.Window.Current(); w != nil {
+			if dw := a.windowFor(w); dw != nil {
+				a.menus.update(dw.session.State())
+			}
+		}
+	}
+	a.app.Event.Emit(service.EventSettingsChanged, cur)
+}
+
+// checkUpdates looks for a newer release. At launch (manual false) it
+// stays quiet unless there is one; from the menu it always answers.
+func (a *docApp) checkUpdates(manual bool) {
+	rel, err := update.Latest(context.Background(), http.DefaultClient, updateRepo)
+	if errors.Is(err, update.ErrNoRelease) {
+		// Nothing published yet: the running version is the newest.
+		rel, err = update.Release{Version: version}, nil
+	}
+	if err != nil {
+		if manual {
+			a.app.Dialog.Warning().SetTitle(T("無法檢查更新")).SetMessage(err.Error()).Show()
+		}
+		return
+	}
+	if !update.Newer(rel.Version, version) {
+		if manual {
+			a.app.Dialog.Info().SetTitle(T("已是最新版本")).SetMessage(fmt.Sprintf(T("WW Excel %s 是目前最新的版本。"), version)).Show()
+		}
+		return
+	}
+	// Dialogs are shown from this goroutine, like service.WailsDialogs.
+	d := a.app.Dialog.Question().
+		SetTitle(fmt.Sprintf(T("有新版本：WW Excel %s"), rel.Version)).
+		SetMessage(fmt.Sprintf(T("您目前使用的是 %s。要前往下載頁面嗎？"), version))
+	dl := d.AddButton(T("下載")).OnClick(func() { _ = a.app.Browser.OpenURL(rel.URL) })
+	later := d.AddButton(T("稍後"))
+	d.SetDefaultButton(dl).SetCancelButton(later)
+	d.Show()
+}
+
+// unattended reports the bench and self-test modes, which must not
+// touch the user's settings or show unexpected dialogs.
+func unattended() bool {
+	return os.Getenv("WW_SELFTEST") == "1" || os.Getenv("WW_BENCH") == "1"
+}
+
+func (a *docApp) windowFor(w application.Window) *docWindow {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.windows[w.ID()]
 }
 
 func (a *docApp) shouldQuit() bool {
@@ -274,7 +400,7 @@ func initialDocument() *document.Document {
 
 func windowTitle(st service.DocState) string {
 	if st.Dirty {
-		return st.Name + " — 已編輯"
+		return st.Name + i18n.T(" — 已編輯")
 	}
 	return st.Name
 }
@@ -295,101 +421,115 @@ func buildMenu(a *docApp) *appMenus {
 	}
 
 	root := a.app.NewMenu()
-	root.AddRole(application.AppMenu)
+	app := root.AddSubmenu("WW Excel")
+	app.AddRole(application.About)
+	app.AddSeparator()
+	app.Add(T("偏好設定…")).SetAccelerator("CmdOrCtrl+,").OnClick(send("preferences"))
+	app.AddSeparator()
+	app.AddRole(application.ServicesMenu)
+	app.AddSeparator()
+	app.AddRole(application.Hide)
+	app.AddRole(application.HideOthers)
+	app.AddRole(application.UnHide)
+	app.AddSeparator()
+	app.AddRole(application.Quit)
 
-	file := root.AddSubmenu("檔案")
-	file.Add("新增活頁簿").SetAccelerator("CmdOrCtrl+N").OnClick(send("new"))
-	file.Add("開啟…").SetAccelerator("CmdOrCtrl+O").OnClick(send("open"))
+	file := root.AddSubmenu(T("檔案"))
+	file.Add(T("新增活頁簿")).SetAccelerator("CmdOrCtrl+N").OnClick(send("new"))
+	file.Add(T("開啟…")).SetAccelerator("CmdOrCtrl+O").OnClick(send("open"))
 	m := &appMenus{root: root}
-	m.recent = file.AddSubmenu("最近使用的檔案")
+	m.recent = file.AddSubmenu(T("最近使用的檔案"))
 	file.AddSeparator()
-	file.Add("關閉視窗").SetAccelerator("CmdOrCtrl+W").OnClick(send("close"))
-	file.Add("儲存").SetAccelerator("CmdOrCtrl+S").OnClick(send("save"))
-	file.Add("另存新檔…").SetAccelerator("CmdOrCtrl+Shift+S").OnClick(send("saveAs"))
+	file.Add(T("關閉視窗")).SetAccelerator("CmdOrCtrl+W").OnClick(send("close"))
+	file.Add(T("儲存")).SetAccelerator("CmdOrCtrl+S").OnClick(send("save"))
+	file.Add(T("另存新檔…")).SetAccelerator("CmdOrCtrl+Shift+S").OnClick(send("saveAs"))
 	file.AddSeparator()
-	file.Add("版面設定…").OnClick(send("pageSetup"))
-	file.Add("列印預覽…").OnClick(send("printPreview"))
-	file.Add("列印…").SetAccelerator("CmdOrCtrl+P").OnClick(send("print"))
-	file.Add("匯出為 PDF…").OnClick(send("exportPDF"))
+	file.Add(T("版面設定…")).OnClick(send("pageSetup"))
+	file.Add(T("列印預覽…")).OnClick(send("printPreview"))
+	file.Add(T("列印…")).SetAccelerator("CmdOrCtrl+P").OnClick(send("print"))
+	file.Add(T("匯出為 PDF…")).OnClick(send("exportPDF"))
 
-	edit := root.AddSubmenu("編輯")
-	m.undo = edit.Add("復原").SetAccelerator("CmdOrCtrl+Z").OnClick(send("undo")).SetEnabled(false)
-	m.redo = edit.Add("重做").SetAccelerator("CmdOrCtrl+Shift+Z").OnClick(send("redo")).SetEnabled(false)
+	edit := root.AddSubmenu(T("編輯"))
+	m.undo = edit.Add(T("復原")).SetAccelerator("CmdOrCtrl+Z").OnClick(send("undo")).SetEnabled(false)
+	m.redo = edit.Add(T("重做")).SetAccelerator("CmdOrCtrl+Shift+Z").OnClick(send("redo")).SetEnabled(false)
 	edit.AddSeparator()
 	edit.AddRole(application.Cut)
 	edit.AddRole(application.Copy)
 	edit.AddRole(application.Paste)
-	edit.Add("選擇性貼上…").SetAccelerator("CmdOrCtrl+Ctrl+V").OnClick(send("pasteSpecial"))
-	edit.Add("全選").SetAccelerator("CmdOrCtrl+A").OnClick(send("selectAll"))
+	edit.Add(T("選擇性貼上…")).SetAccelerator("CmdOrCtrl+Ctrl+V").OnClick(send("pasteSpecial"))
+	edit.Add(T("全選")).SetAccelerator("CmdOrCtrl+A").OnClick(send("selectAll"))
 	edit.AddSeparator()
-	fill := edit.AddSubmenu("填滿")
-	fill.Add("向下").SetAccelerator("CmdOrCtrl+D").OnClick(send("fillDown"))
-	fill.Add("向右").SetAccelerator("CmdOrCtrl+R").OnClick(send("fillRight"))
-	clear := edit.AddSubmenu("清除")
-	clear.Add("全部").OnClick(send("clearAll"))
-	clear.Add("格式").OnClick(send("clearFormats"))
-	clear.Add("內容").OnClick(send("clearContents"))
-	edit.Add("刪除…").SetAccelerator("CmdOrCtrl+-").OnClick(send("deleteCells"))
+	fill := edit.AddSubmenu(T("填滿"))
+	fill.Add(T("向下")).SetAccelerator("CmdOrCtrl+D").OnClick(send("fillDown"))
+	fill.Add(T("向右")).SetAccelerator("CmdOrCtrl+R").OnClick(send("fillRight"))
+	clear := edit.AddSubmenu(T("清除"))
+	clear.Add(T("全部")).OnClick(send("clearAll"))
+	clear.Add(T("格式")).OnClick(send("clearFormats"))
+	clear.Add(T("內容")).OnClick(send("clearContents"))
+	edit.Add(T("刪除…")).SetAccelerator("CmdOrCtrl+-").OnClick(send("deleteCells"))
 	edit.AddSeparator()
-	edit.Add("尋找…").SetAccelerator("CmdOrCtrl+F").OnClick(send("find"))
-	edit.Add("取代…").SetAccelerator("CmdOrCtrl+Shift+H").OnClick(send("replace"))
+	edit.Add(T("尋找…")).SetAccelerator("CmdOrCtrl+F").OnClick(send("find"))
+	edit.Add(T("取代…")).SetAccelerator("CmdOrCtrl+Shift+H").OnClick(send("replace"))
 
-	view := root.AddSubmenu("檢視")
-	view.Add("凍結窗格").OnClick(send("freezePanes"))
-	view.Add("凍結頂端列").OnClick(send("freezeTopRow"))
-	view.Add("凍結第一欄").OnClick(send("freezeFirstCol"))
-	view.Add("取消凍結窗格").OnClick(send("unfreeze"))
+	view := root.AddSubmenu(T("檢視"))
+	view.Add(T("凍結窗格")).OnClick(send("freezePanes"))
+	view.Add(T("凍結頂端列")).OnClick(send("freezeTopRow"))
+	view.Add(T("凍結第一欄")).OnClick(send("freezeFirstCol"))
+	view.Add(T("取消凍結窗格")).OnClick(send("unfreeze"))
 
-	insert := root.AddSubmenu("插入")
-	insert.Add("儲存格…").SetAccelerator("CmdOrCtrl+Shift+=").OnClick(send("insertCells"))
-	insert.Add("列").OnClick(send("insertRows"))
-	insert.Add("欄").OnClick(send("insertCols"))
-	insert.Add("工作表").SetAccelerator("Shift+F11").OnClick(send("insertSheet"))
+	insert := root.AddSubmenu(T("插入"))
+	insert.Add(T("儲存格…")).SetAccelerator("CmdOrCtrl+Shift+=").OnClick(send("insertCells"))
+	insert.Add(T("列")).OnClick(send("insertRows"))
+	insert.Add(T("欄")).OnClick(send("insertCols"))
+	insert.Add(T("工作表")).SetAccelerator("Shift+F11").OnClick(send("insertSheet"))
 	insert.AddSeparator()
-	insert.Add("表格…").SetAccelerator("CmdOrCtrl+T").OnClick(send("insertTable"))
-	insert.Add("註解").SetAccelerator("Shift+F2").OnClick(send("insertNote"))
+	insert.Add(T("表格…")).SetAccelerator("CmdOrCtrl+T").OnClick(send("insertTable"))
+	insert.Add(T("註解")).SetAccelerator("Shift+F2").OnClick(send("insertNote"))
 	insert.AddSeparator()
-	insert.Add("圖表…").OnClick(send("insertChart"))
-	insert.Add("圖片…").OnClick(send("insertPicture"))
+	insert.Add(T("圖表…")).OnClick(send("insertChart"))
+	insert.Add(T("圖片…")).OnClick(send("insertPicture"))
 
-	format := root.AddSubmenu("格式")
-	format.Add("儲存格格式…").SetAccelerator("CmdOrCtrl+1").OnClick(send("formatCells"))
+	format := root.AddSubmenu(T("格式"))
+	format.Add(T("儲存格格式…")).SetAccelerator("CmdOrCtrl+1").OnClick(send("formatCells"))
 	format.AddSeparator()
-	format.Add("粗體").SetAccelerator("CmdOrCtrl+B").OnClick(send("bold"))
-	format.Add("斜體").SetAccelerator("CmdOrCtrl+I").OnClick(send("italic"))
-	format.Add("底線").SetAccelerator("CmdOrCtrl+U").OnClick(send("underline"))
+	format.Add(T("粗體")).SetAccelerator("CmdOrCtrl+B").OnClick(send("bold"))
+	format.Add(T("斜體")).SetAccelerator("CmdOrCtrl+I").OnClick(send("italic"))
+	format.Add(T("底線")).SetAccelerator("CmdOrCtrl+U").OnClick(send("underline"))
 	format.AddSeparator()
-	cf := format.AddSubmenu("設定格式化的條件")
-	cf.Add("新增規則…").OnClick(send("condFormat"))
-	cf.Add("管理規則…").OnClick(send("condFormatManager"))
+	cf := format.AddSubmenu(T("設定格式化的條件"))
+	cf.Add(T("新增規則…")).OnClick(send("condFormat"))
+	cf.Add(T("管理規則…")).OnClick(send("condFormatManager"))
 	cf.AddSeparator()
-	cf.Add("清除所選儲存格的規則").OnClick(send("clearCondFormats"))
-	cf.Add("清除整張工作表的規則").OnClick(send("clearAllCondFormats"))
+	cf.Add(T("清除所選儲存格的規則")).OnClick(send("clearCondFormats"))
+	cf.Add(T("清除整張工作表的規則")).OnClick(send("clearAllCondFormats"))
 	format.AddSeparator()
-	rows := format.AddSubmenu("列")
-	rows.Add("自動調整列高").OnClick(send("autofitRows"))
-	rows.Add("隱藏").SetAccelerator("Ctrl+9").OnClick(send("hideRows"))
-	rows.Add("取消隱藏").SetAccelerator("Ctrl+Shift+9").OnClick(send("unhideRows"))
-	cols := format.AddSubmenu("欄")
-	cols.Add("自動調整欄寬").OnClick(send("autofitCols"))
-	cols.Add("隱藏").SetAccelerator("Ctrl+0").OnClick(send("hideCols"))
-	cols.Add("取消隱藏").SetAccelerator("Ctrl+Shift+0").OnClick(send("unhideCols"))
+	rows := format.AddSubmenu(T("列"))
+	rows.Add(T("自動調整列高")).OnClick(send("autofitRows"))
+	rows.Add(T("隱藏")).SetAccelerator("Ctrl+9").OnClick(send("hideRows"))
+	rows.Add(T("取消隱藏")).SetAccelerator("Ctrl+Shift+9").OnClick(send("unhideRows"))
+	cols := format.AddSubmenu(T("欄"))
+	cols.Add(T("自動調整欄寬")).OnClick(send("autofitCols"))
+	cols.Add(T("隱藏")).SetAccelerator("Ctrl+0").OnClick(send("hideCols"))
+	cols.Add(T("取消隱藏")).SetAccelerator("Ctrl+Shift+0").OnClick(send("unhideCols"))
 
-	formulas := root.AddSubmenu("公式")
-	formulas.Add("定義名稱…").OnClick(send("defineName"))
-	formulas.Add("名稱管理員…").SetAccelerator("CmdOrCtrl+F3").OnClick(send("nameManager"))
+	formulas := root.AddSubmenu(T("公式"))
+	formulas.Add(T("定義名稱…")).OnClick(send("defineName"))
+	formulas.Add(T("名稱管理員…")).SetAccelerator("CmdOrCtrl+F3").OnClick(send("nameManager"))
 
-	data := root.AddSubmenu("資料")
-	data.Add("排序…").OnClick(send("sort"))
-	data.Add("遞增排序").OnClick(send("sortAsc"))
-	data.Add("遞減排序").OnClick(send("sortDesc"))
+	data := root.AddSubmenu(T("資料"))
+	data.Add(T("排序…")).OnClick(send("sort"))
+	data.Add(T("遞增排序")).OnClick(send("sortAsc"))
+	data.Add(T("遞減排序")).OnClick(send("sortDesc"))
 	data.AddSeparator()
-	data.Add("篩選").SetAccelerator("CmdOrCtrl+Shift+F").OnClick(send("filter"))
+	data.Add(T("篩選")).SetAccelerator("CmdOrCtrl+Shift+F").OnClick(send("filter"))
 	data.AddSeparator()
-	data.Add("資料驗證…").OnClick(send("dataValidation"))
-	data.Add("清除資料驗證").OnClick(send("clearValidation"))
+	data.Add(T("資料驗證…")).OnClick(send("dataValidation"))
+	data.Add(T("清除資料驗證")).OnClick(send("clearValidation"))
 
 	root.AddRole(application.WindowMenu)
+
+	help := root.AddSubmenu(T("說明"))
+	help.Add(T("檢查更新…")).OnClick(func(*application.Context) { go a.checkUpdates(true) })
 	return m
 }
 
@@ -397,7 +537,7 @@ func buildMenu(a *docApp) *appMenus {
 func (m *appMenus) setRecent(a *docApp, files []string) {
 	m.recent.Clear()
 	if len(files) == 0 {
-		m.recent.Add("（無）").SetEnabled(false)
+		m.recent.Add(T("（無）")).SetEnabled(false)
 	}
 	for _, path := range files {
 		path := path
@@ -410,7 +550,7 @@ func (m *appMenus) setRecent(a *docApp, files []string) {
 	}
 	if len(files) > 0 {
 		m.recent.AddSeparator()
-		m.recent.Add("清除最近使用的檔案").OnClick(func(*application.Context) { a.recent.Clear() })
+		m.recent.Add(T("清除最近使用的檔案")).OnClick(func(*application.Context) { a.recent.Clear() })
 	}
 	m.root.Update()
 }
@@ -423,10 +563,13 @@ func (m *appMenus) update(st service.DocState) {
 
 func withAction(verb, label string) string {
 	if label == "" {
-		return verb
+		return T(verb)
 	}
-	return verb + "「" + label + "」"
+	return fmt.Sprintf(T(verb+"「%s」"), T(label))
 }
+
+// T translates a UI string (menus are rebuilt when the language changes).
+func T(s string) string { return i18n.T(s) }
 
 func envInt(key string, def int) int {
 	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {

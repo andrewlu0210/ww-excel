@@ -2,6 +2,7 @@
   // Floating charts and pictures over the grid. Positions come from the
   // sheet (cell anchor + offset); dragging moves or resizes an object
   // locally and reports the final rectangle when the pointer is released.
+  import { t } from '../i18n';
   import type { ChartDataDTO, ObjectDTO } from '../bridge/sheet';
   import { drawChart, LIGHT_THEME } from '../charts/render';
 
@@ -90,7 +91,7 @@
     drag = null;
     const o = objects.find((x) => x.id === d.id);
     const moved = d.now.x !== d.start.x || d.now.y !== d.start.y || d.now.w !== d.start.w || d.now.h !== d.start.h;
-    if (o && moved) oncommit(o, d.now, d.edges === 'move' ? '移動物件' : '調整物件大小');
+    if (o && moved) oncommit(o, d.now, d.edges === 'move' ? t('移動物件') : t('調整物件大小'));
   }
 
   // Draws a chart into its canvas whenever size or data change.

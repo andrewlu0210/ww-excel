@@ -1,8 +1,6 @@
 package xlsxfile
 
 import (
-	"html"
-	"sort"
 	"strings"
 
 	"github.com/xuri/excelize/v2"
@@ -56,37 +54,6 @@ func ptr(s string) *string {
 	return &s
 }
 
-func readValidations(f *excelize.File, sheet string) []model.Validation {
-	dvs, err := f.GetDataValidations(sheet)
-	if err != nil {
-		return nil
-	}
-	var out []model.Validation
-	for _, dv := range dvs {
-		v := model.Validation{
-			Ranges:      parseSqref(dv.Sqref),
-			Type:        dv.Type,
-			Operator:    dv.Operator,
-			Formula1:    strings.TrimPrefix(html.UnescapeString(dv.Formula1), "="),
-			Formula2:    strings.TrimPrefix(html.UnescapeString(dv.Formula2), "="),
-			AllowBlank:  dv.AllowBlank,
-			NoDropdown:  dv.ShowDropDown, // OOXML: showDropDown means hide it
-			ErrorStyle:  str(dv.ErrorStyle),
-			ErrorTitle:  str(dv.ErrorTitle),
-			Error:       str(dv.Error),
-			PromptTitle: str(dv.PromptTitle),
-			Prompt:      str(dv.Prompt),
-		}
-		if v.Type == "" || v.Type == "none" || len(v.Ranges) == 0 {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
-}
-
-// xmlEscape escapes formula text for element content. Quotes stay as
-// they are: excelize does not decode &#34; when reading.
 func xmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
@@ -149,62 +116,6 @@ func rgb(s string) string {
 		s = s[2:]
 	}
 	return s
-}
-
-func readCondFormats(f *excelize.File, sheet string) []model.CFRule {
-	byRef, err := f.GetConditionalFormats(sheet)
-	if err != nil {
-		return nil
-	}
-	refs := make([]string, 0, len(byRef))
-	for ref := range byRef {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-	var out []model.CFRule
-	for _, ref := range refs {
-		ranges := parseSqref(ref)
-		for _, o := range byRef[ref] {
-			r := model.CFRule{Ranges: ranges, Type: o.Type, StopIfTrue: o.StopIfTrue}
-			switch o.Type {
-			case "cell":
-				r.Op = cfOps[o.Criteria]
-				r.Value1 = o.Value
-				if r.Op == "between" || r.Op == "notBetween" {
-					r.Value1, r.Value2 = o.MinValue, o.MaxValue
-				}
-			case "formula":
-				r.Value1 = o.Criteria
-				if r.Value1 == "" {
-					r.Value1 = o.Value
-				}
-			case "top", "bottom":
-				r.Value1, r.Percent = o.Value, o.Percent
-			case "average":
-				r.Below = !o.AboveAverage
-			case "text":
-				r.Op, r.Value1 = cfOps[o.Criteria], o.Value
-			case "2_color_scale":
-				r.Colors = []string{rgb(o.MinColor), rgb(o.MaxColor)}
-			case "3_color_scale":
-				r.Colors = []string{rgb(o.MinColor), rgb(o.MidColor), rgb(o.MaxColor)}
-			case "data_bar":
-				r.Colors = []string{rgb(o.BarColor)}
-			case "duplicate", "unique", "blanks", "no_blanks", "errors", "no_errors":
-			default:
-				continue // icon sets, time periods: not supported (kept only if untouched)
-			}
-			r.Value1 = strings.TrimPrefix(r.Value1, "=")
-			r.Value2 = strings.TrimPrefix(r.Value2, "=")
-			if o.Format != nil {
-				if st, err := f.GetConditionalStyle(*o.Format); err == nil && st != nil {
-					r.Format = cfFormatOf(st)
-				}
-			}
-			out = append(out, r)
-		}
-	}
-	return out
 }
 
 func cfFormatOf(st *excelize.Style) model.CFFormat {

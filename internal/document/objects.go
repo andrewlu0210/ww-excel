@@ -9,6 +9,7 @@ import (
 	"ww-excel/internal/formula/ast"
 	"ww-excel/internal/formula/eval"
 	"ww-excel/internal/formula/parser"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
 )
 
@@ -120,7 +121,7 @@ type SeriesData struct {
 func (d *Document) ChartData(sheet int, c *model.Chart, display DisplayFunc) ChartData {
 	var out ChartData
 	for i, s := range c.Series {
-		sd := SeriesData{Name: fmt.Sprintf("數列%d", i+1)}
+		sd := SeriesData{Name: fmt.Sprintf(i18n.T("數列%d"), i+1)}
 		if s.Name != "" {
 			if names := d.chartTexts(sheet, s.Name, display); len(names) > 0 {
 				sd.Name = strings.Join(names, " ")

@@ -1,6 +1,7 @@
 <script lang="ts">
   // The 常用 (Home) toolbar. Buttons keep keyboard focus on the sheet:
   // pointerdown is prevented and selects hand focus back after a change.
+  import { t } from '../i18n';
   import type { FormatPatch, StyleDTO } from '../bridge/sheet';
   import { FONT_CHOICES, fontFamilies, fontLabel } from '../stores/fonts';
   import ColorPicker from './ColorPicker.svelte';
@@ -18,28 +19,28 @@
 
   const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
   const numberFormats: { label: string; code: string }[] = [
-    { label: '通用格式', code: '' },
-    { label: '數值', code: '0.00' },
-    { label: '貨幣', code: '"$"#,##0.00_);[Red]\\("$"#,##0.00\\)' },
-    { label: '簡短日期', code: 'yyyy/m/d' },
-    { label: '完整日期', code: 'yyyy"年"m"月"d"日"' },
-    { label: '民國日期', code: '[$-404]e/m/d' },
-    { label: '時間', code: 'h:mm:ss' },
-    { label: '百分比', code: '0.00%' },
-    { label: '科學記號', code: '0.00E+00' },
-    { label: '文字', code: '@' },
+    { label: t('通用格式'), code: '' },
+    { label: t('數值'), code: '0.00' },
+    { label: t('貨幣'), code: '"$"#,##0.00_);[Red]\\("$"#,##0.00\\)' },
+    { label: t('簡短日期'), code: 'yyyy/m/d' },
+    { label: t('完整日期'), code: 'yyyy"年"m"月"d"日"' },
+    { label: t('民國日期'), code: '[$-404]e/m/d' },
+    { label: t('時間'), code: 'h:mm:ss' },
+    { label: t('百分比'), code: '0.00%' },
+    { label: t('科學記號'), code: '0.00E+00' },
+    { label: t('文字'), code: '@' },
   ];
   const borders: { label: string; value: string }[] = [
-    { label: '下框線', value: 'bottom' },
-    { label: '上框線', value: 'top' },
-    { label: '左框線', value: 'left' },
-    { label: '右框線', value: 'right' },
-    { label: '無框線', value: 'none' },
-    { label: '所有框線', value: 'all' },
-    { label: '外框線', value: 'outside' },
-    { label: '粗外框線', value: 'thickOutside' },
-    { label: '粗下框線', value: 'thickBottom' },
-    { label: '雙下框線', value: 'doubleBottom' },
+    { label: t('下框線'), value: 'bottom' },
+    { label: t('上框線'), value: 'top' },
+    { label: t('左框線'), value: 'left' },
+    { label: t('右框線'), value: 'right' },
+    { label: t('無框線'), value: 'none' },
+    { label: t('所有框線'), value: 'all' },
+    { label: t('外框線'), value: 'outside' },
+    { label: t('粗外框線'), value: 'thickOutside' },
+    { label: t('粗下框線'), value: 'thickBottom' },
+    { label: t('雙下框線'), value: 'doubleBottom' },
   ];
 
   let open = $state<'font' | 'fill' | 'border' | 'clear' | null>(null);
@@ -51,7 +52,7 @@
   let size = $derived(style?.font.size || 11);
   let alignH = $derived(style?.alignH ?? '');
   let alignV = $derived(style?.alignV ?? '');
-  let numberLabel = $derived(numberFormats.find((f) => f.code === (style?.numFmt ?? ''))?.label ?? '自訂');
+  let numberLabel = $derived(numberFormats.find((f) => f.code === (style?.numFmt ?? ''))?.label ?? t('自訂'));
 
   const keep = (e: PointerEvent) => e.preventDefault();
 
@@ -60,80 +61,80 @@
   }
 
   function align(h: string): void {
-    onformat({ alignH: alignH === h ? '' : h, label: '對齊方式' });
+    onformat({ alignH: alignH === h ? '' : h, label: t('對齊方式') });
   }
 
   function valign(v: string): void {
-    onformat({ alignV: alignV === v ? '' : v, label: '對齊方式' });
+    onformat({ alignV: alignV === v ? '' : v, label: t('對齊方式') });
   }
 </script>
 
 <svelte:window onpointerdown={(e) => open && !(e.target as Element).closest?.('.menu-host') && (open = null)} />
 
-<div class="toolbar" role="toolbar" aria-label="常用">
+<div class="toolbar" role="toolbar" aria-label={t('常用')}>
   <select
     class="font"
     tabindex="-1"
     value={font}
-    title="字型"
-    onchange={(e) => onformat({ fontName: e.currentTarget.value, label: '字型' })}
+    title={t('字型')}
+    onchange={(e) => onformat({ fontName: e.currentTarget.value, label: t('字型') })}
   >
     {#if !FONT_CHOICES.some((f) => f.value === font)}<option value={font}>{fontLabel(font)}</option>{/if}
-    {#each FONT_CHOICES as f (f.value)}<option value={f.value} style:font-family={fontFamilies(f.value).map((n) => `"${n}"`).join(', ')}>{f.label}</option>{/each}
+    {#each FONT_CHOICES as f (f.value)}<option value={f.value} style:font-family={fontFamilies(f.value).map((n) => `"${n}"`).join(', ')}>{fontLabel(f.value)}</option>{/each}
   </select>
   <select
     class="size"
     tabindex="-1"
     value={size}
-    title="字型大小"
-    onchange={(e) => onformat({ fontSize: Number(e.currentTarget.value), label: '字型大小' })}
+    title={t('字型大小')}
+    onchange={(e) => onformat({ fontSize: Number(e.currentTarget.value), label: t('字型大小') })}
   >
     {#if !sizes.includes(size)}<option value={size}>{size}</option>{/if}
     {#each sizes as s (s)}<option value={s}>{s}</option>{/each}
   </select>
 
   <div class="group">
-    <button class="b" class:on={style?.font.bold} tabindex="-1" title="粗體 (⌘B)" onpointerdown={keep}
-      onclick={() => onformat({ bold: !style?.font.bold, label: '粗體' })}>B</button>
-    <button class="i" class:on={style?.font.italic} tabindex="-1" title="斜體 (⌘I)" onpointerdown={keep}
-      onclick={() => onformat({ italic: !style?.font.italic, label: '斜體' })}>I</button>
-    <button class="u" class:on={style?.font.underline} tabindex="-1" title="底線 (⌘U)" onpointerdown={keep}
-      onclick={() => onformat({ underline: !style?.font.underline, label: '底線' })}>U</button>
-    <button class="s" class:on={style?.font.strike} tabindex="-1" title="刪除線" onpointerdown={keep}
-      onclick={() => onformat({ strike: !style?.font.strike, label: '刪除線' })}>S</button>
+    <button class="b" class:on={style?.font.bold} tabindex="-1" title={t('粗體 (⌘B)')} onpointerdown={keep}
+      onclick={() => onformat({ bold: !style?.font.bold, label: t('粗體') })}>B</button>
+    <button class="i" class:on={style?.font.italic} tabindex="-1" title={t('斜體 (⌘I)')} onpointerdown={keep}
+      onclick={() => onformat({ italic: !style?.font.italic, label: t('斜體') })}>I</button>
+    <button class="u" class:on={style?.font.underline} tabindex="-1" title={t('底線 (⌘U)')} onpointerdown={keep}
+      onclick={() => onformat({ underline: !style?.font.underline, label: t('底線') })}>U</button>
+    <button class="s" class:on={style?.font.strike} tabindex="-1" title={t('刪除線')} onpointerdown={keep}
+      onclick={() => onformat({ strike: !style?.font.strike, label: t('刪除線') })}>S</button>
   </div>
 
   <div class="group">
     <div class="menu-host">
-      <button class="split" tabindex="-1" title="字型色彩" onpointerdown={keep} onclick={() => onformat({ fontColor: lastFont, label: '字型色彩' })}>
+      <button class="split" tabindex="-1" title={t('字型色彩')} onpointerdown={keep} onclick={() => onformat({ fontColor: lastFont, label: t('字型色彩') })}>
         <span class="letter">A</span><span class="bar" style:background="#{lastFont}"></span>
-      </button><button class="caret" tabindex="-1" title="選擇字型色彩" onpointerdown={keep} onclick={() => toggleMenu('font')}>▾</button>
+      </button><button class="caret" tabindex="-1" title={t('選擇字型色彩')} onpointerdown={keep} onclick={() => toggleMenu('font')}>▾</button>
       {#if open === 'font'}
-        <ColorPicker resetLabel="自動" onclose={() => (open = null)}
-          onpick={(c) => { if (c) lastFont = c; onformat({ fontColor: c, label: '字型色彩' }); }} />
+        <ColorPicker resetLabel={t('自動')} onclose={() => (open = null)}
+          onpick={(c) => { if (c) lastFont = c; onformat({ fontColor: c, label: t('字型色彩') }); }} />
       {/if}
     </div>
     <div class="menu-host">
-      <button class="split" tabindex="-1" title="填滿色彩" onpointerdown={keep} onclick={() => onformat({ fill: lastFill, label: '填滿色彩' })}>
+      <button class="split" tabindex="-1" title={t('填滿色彩')} onpointerdown={keep} onclick={() => onformat({ fill: lastFill, label: t('填滿色彩') })}>
         <span class="bucket">▧</span><span class="bar" style:background="#{lastFill}"></span>
-      </button><button class="caret" tabindex="-1" title="選擇填滿色彩" onpointerdown={keep} onclick={() => toggleMenu('fill')}>▾</button>
+      </button><button class="caret" tabindex="-1" title={t('選擇填滿色彩')} onpointerdown={keep} onclick={() => toggleMenu('fill')}>▾</button>
       {#if open === 'fill'}
-        <ColorPicker resetLabel="無填滿" onclose={() => (open = null)}
-          onpick={(c) => { if (c) lastFill = c; onformat({ fill: c, label: '填滿色彩' }); }} />
+        <ColorPicker resetLabel={t('無填滿')} onclose={() => (open = null)}
+          onpick={(c) => { if (c) lastFill = c; onformat({ fill: c, label: t('填滿色彩') }); }} />
       {/if}
     </div>
     <div class="menu-host">
-      <button class="split" tabindex="-1" title="框線" onpointerdown={keep} onclick={() => onformat({ border: lastBorder, label: '框線' })}>
+      <button class="split" tabindex="-1" title={t('框線')} onpointerdown={keep} onclick={() => onformat({ border: lastBorder, label: t('框線') })}>
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
           <rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-dasharray="1.5 1.5" />
           <line x1="2" y1="14" x2="14" y2="14" stroke="currentColor" stroke-width="2" />
         </svg>
-      </button><button class="caret" tabindex="-1" title="選擇框線" onpointerdown={keep} onclick={() => toggleMenu('border')}>▾</button>
+      </button><button class="caret" tabindex="-1" title={t('選擇框線')} onpointerdown={keep} onclick={() => toggleMenu('border')}>▾</button>
       {#if open === 'border'}
         <ul class="menu" role="menu">
           {#each borders as b (b.value)}
             <li><button role="menuitem" tabindex="-1" onpointerdown={keep}
-                onclick={() => { lastBorder = b.value; onformat({ border: b.value, label: '框線' }); open = null; }}>{b.label}</button></li>
+                onclick={() => { lastBorder = b.value; onformat({ border: b.value, label: t('框線') }); open = null; }}>{b.label}</button></li>
           {/each}
         </ul>
       {/if}
@@ -141,7 +142,7 @@
   </div>
 
   <div class="group">
-    {#each [['left', '靠左對齊'], ['center', '置中'], ['right', '靠右對齊']] as [h, label] (h)}
+    {#each [['left', t('靠左對齊')], ['center', t('置中')], ['right', t('靠右對齊')]] as [h, label] (h)}
       <button class:on={alignH === h} tabindex="-1" title={label} onpointerdown={keep} onclick={() => align(h)} aria-label={label}>
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
           {#each [3, 6.5, 10, 13.5] as y, i (y)}
@@ -152,7 +153,7 @@
         </svg>
       </button>
     {/each}
-    {#each [['top', '靠上對齊'], ['center', '置中對齊'], ['bottom', '靠下對齊']] as [v, label] (v)}
+    {#each [['top', t('靠上對齊')], ['center', t('置中對齊')], ['bottom', t('靠下對齊')]] as [v, label] (v)}
       <button class:on={alignV === v || (v === 'bottom' && alignV === '')} tabindex="-1" title={label} onpointerdown={keep}
         onclick={() => valign(v === 'bottom' ? '' : v)} aria-label={label}>
         <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
@@ -161,37 +162,37 @@
         </svg>
       </button>
     {/each}
-    <button class="text" class:on={style?.wrap} tabindex="-1" title="自動換行" onpointerdown={keep}
-      onclick={() => onformat({ wrap: !style?.wrap, label: '自動換行' })}>自動換行</button>
-    <button class="text" class:on={merged} tabindex="-1" title={merged ? '取消合併儲存格' : '跨欄置中'} onpointerdown={keep}
-      onclick={() => onmerge(true)}>跨欄置中</button>
+    <button class="text" class:on={style?.wrap} tabindex="-1" title={t('自動換行')} onpointerdown={keep}
+      onclick={() => onformat({ wrap: !style?.wrap, label: t('自動換行') })}>{t('自動換行')}</button>
+    <button class="text" class:on={merged} tabindex="-1" title={merged ? t('取消合併儲存格') : t('跨欄置中')} onpointerdown={keep}
+      onclick={() => onmerge(true)}>{t('跨欄置中')}</button>
   </div>
 
   <div class="group">
-    <select class="numfmt" tabindex="-1" title="數值格式" value={numberLabel}
+    <select class="numfmt" tabindex="-1" title={t('數值格式')} value={numberLabel}
       onchange={(e) => {
         const label = e.currentTarget.value;
-        if (label === '其他…') onnumberdialog();
-        else onformat({ numFmt: numberFormats.find((f) => f.label === label)?.code ?? '', label: '數值格式' });
+        if (label === t('其他…')) onnumberdialog();
+        else onformat({ numFmt: numberFormats.find((f) => f.label === label)?.code ?? '', label: t('數值格式') });
       }}>
-      {#if numberLabel === '自訂'}<option>自訂</option>{/if}
+      {#if numberLabel === t('自訂')}<option>{t('自訂')}</option>{/if}
       {#each numberFormats as f (f.label)}<option>{f.label}</option>{/each}
-      <option>其他…</option>
+      <option>{t('其他…')}</option>
     </select>
-    <button class="text" tabindex="-1" title="百分比樣式" onpointerdown={keep} onclick={() => onformat({ numFmt: '0%', label: '百分比樣式' })}>%</button>
-    <button class="text" tabindex="-1" title="千分位樣式" onpointerdown={keep} onclick={() => onformat({ numFmt: '#,##0.00', label: '千分位樣式' })}>,</button>
-    <button class="text" tabindex="-1" title="增加小數位數" onpointerdown={keep} onclick={() => onformat({ decimals: 1, label: '增加小數位數' })}>.0→.00</button>
-    <button class="text" tabindex="-1" title="減少小數位數" onpointerdown={keep} onclick={() => onformat({ decimals: -1, label: '減少小數位數' })}>.00→.0</button>
+    <button class="text" tabindex="-1" title={t('百分比樣式')} onpointerdown={keep} onclick={() => onformat({ numFmt: '0%', label: t('百分比樣式') })}>%</button>
+    <button class="text" tabindex="-1" title={t('千分位樣式')} onpointerdown={keep} onclick={() => onformat({ numFmt: '#,##0.00', label: t('千分位樣式') })}>,</button>
+    <button class="text" tabindex="-1" title={t('增加小數位數')} onpointerdown={keep} onclick={() => onformat({ decimals: 1, label: t('增加小數位數') })}>.0→.00</button>
+    <button class="text" tabindex="-1" title={t('減少小數位數')} onpointerdown={keep} onclick={() => onformat({ decimals: -1, label: t('減少小數位數') })}>.00→.0</button>
   </div>
 
   <div class="group">
     <div class="menu-host">
-      <button class="text" tabindex="-1" title="清除" onpointerdown={keep} onclick={() => toggleMenu('clear')}>清除 ▾</button>
+      <button class="text" tabindex="-1" title={t('清除')} onpointerdown={keep} onclick={() => toggleMenu('clear')}>{t('清除 ▾')}</button>
       {#if open === 'clear'}
         <ul class="menu" role="menu">
-          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('all'); open = null; }}>全部清除</button></li>
-          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('formats'); open = null; }}>清除格式</button></li>
-          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('contents'); open = null; }}>清除內容</button></li>
+          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('all'); open = null; }}>{t('全部清除')}</button></li>
+          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('formats'); open = null; }}>{t('清除格式')}</button></li>
+          <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('contents'); open = null; }}>{t('清除內容')}</button></li>
         </ul>
       {/if}
     </div>

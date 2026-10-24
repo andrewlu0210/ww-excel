@@ -2,7 +2,7 @@
 // controller with simulated key events and typed text, then checks the
 // Go model (source of truth) and the frontend cache. Native IME input
 // and menu accelerators cannot be simulated here; test those by hand.
-import { benchApi, documentApi, sheetApi, type FormatPatch, type PasteMode } from '../bridge/sheet';
+import { benchApi, documentApi, settingsApi, sheetApi, type FormatPatch, type PasteMode } from '../bridge/sheet';
 import type { MenuAction } from '../input/keymap';
 import type { Range } from '../grid/selection';
 import { ensureFont } from '../stores/fontLoader';
@@ -37,6 +37,8 @@ export interface SheetDriver {
   // v0.7
   chartImages(): Record<number, string>;
   getObjects(): { id: number; kind: string; row: number; col: number; w: number; h: number }[];
+  // v1.0
+  getAnnouncement(): string;
 }
 
 interface Check {
@@ -288,6 +290,7 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await productivityTests(sheet, { key, type, goTo, step, expect, expectCell });
   await dataTests(sheet, { key, type, goTo, step, expect, expectCell });
   await outputTests(sheet, { key, type, goTo, step, expect, expectCell });
+  await polishTests(sheet, { key, type, goTo, step, expect, expectCell });
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
@@ -876,4 +879,66 @@ async function outputTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   await new Promise((r) => setTimeout(r, 300));
   const drawn = Object.values(sheet.chartImages())[0];
   if (drawn) await benchApi.snapshot('selftest-chart', drawn);
+}
+
+// v1.0: preferences (appearance, Enter direction) and the VoiceOver live
+// region. Runs on sheet 0 of the reopened v0.7 file, from row 100.
+async function polishTests(sheet: SheetDriver, h: Helpers): Promise<void> {
+  const { key, type, goTo, step, expect, expectCell } = h;
+  const waitFor = async (ok: () => boolean) => {
+    for (let i = 0; i < 40 && !ok(); i++) await new Promise((r) => setTimeout(r, 50));
+  };
+  const initial = await settingsApi.get();
+  expect('偏好設定：預設值', initial.appearance === 'system' && initial.enterMove === 'down' && initial.lang === 'zh-TW', JSON.stringify(initial));
+
+  // 53. Forced dark appearance reaches the page (and the grid colors).
+  await settingsApi.set({ ...initial, appearance: 'dark' });
+  await waitFor(() => document.documentElement.dataset.theme === 'dark');
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
+  expect('外觀：強制深色', document.documentElement.dataset.theme === 'dark' && bg === '#1b1b1b', `theme=${document.documentElement.dataset.theme} --grid-bg=${bg}`);
+  await new Promise((r) => setTimeout(r, 200));
+  await settingsApi.set({ ...initial, appearance: 'light' });
+  await waitFor(() => document.documentElement.dataset.theme === 'light');
+  const lightBg = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
+  expect('外觀：強制淺色', document.documentElement.dataset.theme === 'light' && ['#fff', '#ffffff'].includes(lightBg.toLowerCase()), `theme=${document.documentElement.dataset.theme} --grid-bg=${lightBg}`);
+  await settingsApi.set({ ...initial, appearance: 'system' });
+  await waitFor(() => document.documentElement.dataset.theme === undefined);
+  expect('外觀：跟隨系統', document.documentElement.dataset.theme === undefined, String(document.documentElement.dataset.theme));
+
+  // 54. Enter moves right when set so; ⇧Enter goes the other way.
+  await settingsApi.set({ ...initial, enterMove: 'right' });
+  await new Promise((r) => setTimeout(r, 100));
+  await goTo(100, 0);
+  await type('右');
+  await key('Enter');
+  await expectCell('Enter 向右：提交', 100, 0, '右');
+  let a = sheet.getSelection().active;
+  expect('Enter 向右：移到右邊', a.row === 100 && a.col === 1, `作用中 ${addr(a)}`);
+  await key('Enter', { shiftKey: true });
+  a = sheet.getSelection().active;
+  expect('⇧Enter 反方向', a.row === 100 && a.col === 0, `作用中 ${addr(a)}`);
+  await settingsApi.set({ ...initial, enterMove: 'none' });
+  await new Promise((r) => setTimeout(r, 100));
+  await key('Enter');
+  a = sheet.getSelection().active;
+  expect('Enter 不移動', a.row === 100 && a.col === 0, `作用中 ${addr(a)}`);
+  await settingsApi.set(initial);
+  await new Promise((r) => setTimeout(r, 100));
+  await key('Enter');
+  a = sheet.getSelection().active;
+  expect('還原 Enter 向下', a.row === 101 && a.col === 0, `作用中 ${addr(a)}`);
+
+  // 55. VoiceOver: the live region names the active cell and its value.
+  await key('ArrowUp');
+  await new Promise((r) => setTimeout(r, 250));
+  expect('VoiceOver：播報儲存格與值', sheet.getAnnouncement() === 'A101 右', JSON.stringify(sheet.getAnnouncement()));
+  await key('ArrowRight');
+  await new Promise((r) => setTimeout(r, 250));
+  expect('VoiceOver：空白儲存格', sheet.getAnnouncement() === 'B101 空白', JSON.stringify(sheet.getAnnouncement()));
+  await key('ArrowRight', { shiftKey: true });
+  await new Promise((r) => setTimeout(r, 250));
+  expect('VoiceOver：選取範圍', sheet.getAnnouncement() === '已選取 B101:C101，B101 空白', JSON.stringify(sheet.getAnnouncement()));
+  const live = document.querySelector('[aria-live="polite"]');
+  expect('VoiceOver：live region', live?.textContent === sheet.getAnnouncement(), String(live?.textContent));
+  await step();
 }

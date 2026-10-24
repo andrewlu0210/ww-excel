@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"ww-excel/internal/document"
+	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
+	"ww-excel/internal/recovery"
 )
 
 // Event names pushed from Go to the frontend.
@@ -104,6 +106,9 @@ type Session struct {
 	// CloseWindow closes the session's window; its closing hook then
 	// asks about unsaved changes. Set by main.
 	CloseWindow func()
+
+	// ID names the session's autosave snapshot.
+	ID string
 }
 
 func NewSession(doc *document.Document, emit Emitter) *Session {
@@ -112,7 +117,7 @@ func NewSession(doc *document.Document, emit Emitter) *Session {
 	}
 	// Existing styles reach the frontend through GetBlocks/Layout; diff
 	// events only carry styles created later.
-	return &Session{doc: doc, emit: emit, stylesSent: doc.Workbook().StyleTable().Len()}
+	return &Session{doc: doc, emit: emit, stylesSent: doc.Workbook().StyleTable().Len(), ID: recovery.NewID()}
 }
 
 func (s *Session) read(fn func(d *document.Document)) {
@@ -130,7 +135,7 @@ func (s *Session) State() DocState {
 func (s *Session) stateLocked() DocState {
 	h := s.doc.History()
 	return DocState{
-		Name:      s.doc.Name(),
+		Name:      i18n.T(s.doc.Name()),
 		Path:      s.doc.Path(),
 		Dirty:     s.doc.Dirty(),
 		CanUndo:   h.CanUndo(),
@@ -316,6 +321,24 @@ func (s *Session) Pristine() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.doc.Path() == "" && !s.doc.History().CanUndo() && !s.doc.History().CanRedo()
+}
+
+// snapshot encodes the document for autosave unless it is clean or
+// unchanged since the last snapshot (taken at version, when has).
+func (s *Session) snapshot(version uint64, has bool) (snap snapshot, ok bool, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.doc.Dirty() {
+		return snapshot{dirty: false}, true, nil
+	}
+	if has && s.doc.Version() == version {
+		return snapshot{}, false, nil
+	}
+	data, err := recovery.Encode(s.doc.Workbook())
+	if err != nil {
+		return snapshot{}, false, err
+	}
+	return snapshot{dirty: true, data: data, version: s.doc.Version(), title: s.doc.Name(), path: s.doc.Path()}, true, nil
 }
 
 func (s *Session) Dirty() bool {

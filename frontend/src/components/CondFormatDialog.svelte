@@ -1,5 +1,6 @@
 <script lang="ts">
   // 格式 › 設定格式化的條件… (new rule) and 管理規則… (list, delete).
+  import { t } from '../i18n';
   import { onMount } from 'svelte';
   import type { CFRuleDTO } from '../bridge/sheet';
   import { colName } from '../grid/layout';
@@ -38,43 +39,43 @@
   }
 
   const kinds = [
-    { value: 'cell', label: '儲存格的值' },
-    { value: 'text', label: '包含特定文字' },
-    { value: 'top', label: '前 N 項' },
-    { value: 'bottom', label: '後 N 項' },
-    { value: 'average', label: '高於／低於平均' },
-    { value: 'duplicate', label: '重複的值' },
-    { value: 'unique', label: '唯一的值' },
-    { value: 'blanks', label: '空格' },
-    { value: 'formula', label: '使用公式' },
-    { value: '3_color_scale', label: '三色色階' },
-    { value: '2_color_scale', label: '雙色色階' },
-    { value: 'data_bar', label: '資料橫條' },
+    { value: 'cell', label: t('儲存格的值') },
+    { value: 'text', label: t('包含特定文字') },
+    { value: 'top', label: t('前 N 項') },
+    { value: 'bottom', label: t('後 N 項') },
+    { value: 'average', label: t('高於／低於平均') },
+    { value: 'duplicate', label: t('重複的值') },
+    { value: 'unique', label: t('唯一的值') },
+    { value: 'blanks', label: t('空格') },
+    { value: 'formula', label: t('使用公式') },
+    { value: '3_color_scale', label: t('三色色階') },
+    { value: '2_color_scale', label: t('雙色色階') },
+    { value: 'data_bar', label: t('資料橫條') },
   ];
   const ops = [
-    { value: 'greaterThan', label: '大於' },
-    { value: 'lessThan', label: '小於' },
-    { value: 'between', label: '介於' },
-    { value: 'notBetween', label: '不介於' },
-    { value: 'equal', label: '等於' },
-    { value: 'notEqual', label: '不等於' },
-    { value: 'greaterThanOrEqual', label: '大於或等於' },
-    { value: 'lessThanOrEqual', label: '小於或等於' },
+    { value: 'greaterThan', label: t('大於') },
+    { value: 'lessThan', label: t('小於') },
+    { value: 'between', label: t('介於') },
+    { value: 'notBetween', label: t('不介於') },
+    { value: 'equal', label: t('等於') },
+    { value: 'notEqual', label: t('不等於') },
+    { value: 'greaterThanOrEqual', label: t('大於或等於') },
+    { value: 'lessThanOrEqual', label: t('小於或等於') },
   ];
   const textOps = [
-    { value: 'containsText', label: '包含' },
-    { value: 'notContains', label: '不包含' },
-    { value: 'beginsWith', label: '開頭是' },
-    { value: 'endsWith', label: '結尾是' },
+    { value: 'containsText', label: t('包含') },
+    { value: 'notContains', label: t('不包含') },
+    { value: 'beginsWith', label: t('開頭是') },
+    { value: 'endsWith', label: t('結尾是') },
   ];
   // Excel's preset highlight formats.
   const presets = [
-    { label: '淺紅色填滿與深紅色文字', color: '9C0006', fill: 'FFC7CE' },
-    { label: '黃色填滿與深黃色文字', color: '9C5700', fill: 'FFEB9C' },
-    { label: '綠色填滿與深綠色文字', color: '006100', fill: 'C6EFCE' },
-    { label: '淺紅色填滿', color: '', fill: 'FFC7CE' },
-    { label: '紅色文字', color: 'C00000', fill: '' },
-    { label: '粗體', color: '', fill: '' },
+    { label: t('淺紅色填滿與深紅色文字'), color: '9C0006', fill: 'FFC7CE' },
+    { label: t('黃色填滿與深黃色文字'), color: '9C5700', fill: 'FFEB9C' },
+    { label: t('綠色填滿與深綠色文字'), color: '006100', fill: 'C6EFCE' },
+    { label: t('淺紅色填滿'), color: '', fill: 'FFC7CE' },
+    { label: t('紅色文字'), color: 'C00000', fill: '' },
+    { label: t('粗體'), color: '', fill: '' },
   ];
   let preset = $state(0);
   let usesFormat = $derived(!['3_color_scale', '2_color_scale', 'data_bar'].includes(rule.type));
@@ -84,10 +85,10 @@
     const op = [...ops, ...textOps].find((o) => o.value === r.op)?.label ?? '';
     const where = (r.ranges ?? []).map((g) => `${colName(g.c0)}${g.r0 + 1}:${colName(g.c1)}${g.r1 + 1}`).join(' ');
     let what = kind;
-    if (r.type === 'cell') what += ` ${op} ${r.value1}${r.value2 ? ` 與 ${r.value2}` : ''}`;
+    if (r.type === 'cell') what += ` ${op} ${r.value1}${r.value2 ? t(' 與 %s', r.value2) : ''}`;
     if (r.type === 'text') what += ` ${op}「${r.value1}」`;
     if (r.type === 'top' || r.type === 'bottom') what = `${kind.replace('N', r.value1 || '10')}${r.percent ? '%' : ''}`;
-    if (r.type === 'average') what = r.below ? '低於平均' : '高於平均';
+    if (r.type === 'average') what = r.below ? t('低於平均') : t('高於平均');
     if (r.type === 'formula') what += `：=${r.value1}`;
     return `${what}（${where}）`;
   }
@@ -102,7 +103,7 @@
     if (usesFormat) {
       r.color = p.color;
       r.fill = p.fill;
-      r.bold = p.label === '粗體';
+      r.bold = p.label === t('粗體');
     }
     if (r.type === 'top' || r.type === 'bottom') r.value1 = r.value1 || '10';
     error = await onadd(r);
@@ -128,51 +129,51 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label="設定格式化的條件" style="width: 500px">
-    <h2>{adding ? '新增格式化規則' : '設定格式化的條件規則管理員'}</h2>
+  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('設定格式化的條件')} style="width: 500px">
+    <h2>{adding ? t('新增格式化規則') : t('設定格式化的條件規則管理員')}</h2>
     {#if adding}
       <label>
-        規則類型
+        {t('規則類型')}
         <select bind:value={rule.type}>
           {#each kinds as k (k.value)}<option value={k.value}>{k.label}</option>{/each}
         </select>
       </label>
       {#if rule.type === 'cell'}
         <label>
-          條件
+          {t('條件')}
           <select bind:value={rule.op}>
             {#each ops as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
           </select>
         </label>
-        <label>值 <input type="text" bind:value={rule.value1} placeholder="數字、文字或 =公式" /></label>
+        <label>{t('值')} <input type="text" bind:value={rule.value1} placeholder={t('數字、文字或 =公式')} /></label>
         {#if rule.op === 'between' || rule.op === 'notBetween'}
-          <label>到 <input type="text" bind:value={rule.value2} /></label>
+          <label>{t('到')} <input type="text" bind:value={rule.value2} /></label>
         {/if}
       {:else if rule.type === 'text'}
         <label>
-          條件
+          {t('條件')}
           <select bind:value={rule.op}>
             {#each textOps as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
           </select>
         </label>
-        <label>文字 <input type="text" bind:value={rule.value1} /></label>
+        <label>{t('文字')} <input type="text" bind:value={rule.value1} /></label>
       {:else if rule.type === 'top' || rule.type === 'bottom'}
-        <label>項數 <input type="text" bind:value={rule.value1} placeholder="10" /></label>
-        <label class="check"><input type="checkbox" bind:checked={rule.percent} /> 以百分比計算</label>
+        <label>{t('項數')} <input type="text" bind:value={rule.value1} placeholder="10" /></label>
+        <label class="check"><input type="checkbox" bind:checked={rule.percent} /> {t('以百分比計算')}</label>
       {:else if rule.type === 'average'}
         <label>
-          條件
+          {t('條件')}
           <select bind:value={rule.below}>
-            <option value={false}>高於平均</option>
-            <option value={true}>低於平均</option>
+            <option value={false}>{t('高於平均')}</option>
+            <option value={true}>{t('低於平均')}</option>
           </select>
         </label>
       {:else if rule.type === 'formula'}
-        <label>公式 <input type="text" bind:value={rule.value1} placeholder="=$B1>100" /></label>
+        <label>{t('公式')} <input type="text" bind:value={rule.value1} placeholder="=$B1>100" /></label>
       {/if}
       {#if usesFormat}
         <label>
-          格式
+          {t('格式')}
           <select bind:value={preset}>
             {#each presets as p, i (i)}<option value={i}>{p.label}</option>{/each}
           </select>
@@ -180,8 +181,8 @@
       {/if}
       {#if error}<div class="error" role="alert">{error}</div>{/if}
       <div class="dlg-actions">
-        <button onclick={() => (manage ? (adding = false) : onclose())}>取消</button>
-        <button class="primary" onclick={() => void add()}>確定</button>
+        <button onclick={() => (manage ? (adding = false) : onclose())}>{t('取消')}</button>
+        <button class="primary" onclick={() => void add()}>{t('確定')}</button>
       </div>
     {:else}
       <ul class="rules">
@@ -189,10 +190,10 @@
           <li>
             <span class="swatch" style:background={r.fill ? `#${r.fill}` : 'transparent'} style:color={r.color ? `#${r.color}` : 'inherit'}>AaBb</span>
             <span class="what">{describe(r)}</span>
-            <button onclick={() => void remove(i)}>刪除</button>
+            <button onclick={() => void remove(i)}>{t('刪除')}</button>
           </li>
         {:else}
-          <li class="empty">這個工作表沒有格式化規則</li>
+          <li class="empty">{t('這個工作表沒有格式化規則')}</li>
         {/each}
       </ul>
       {#if error}<div class="error" role="alert">{error}</div>{/if}
@@ -201,9 +202,9 @@
           onclick={() => {
             rule = fresh();
             adding = true;
-          }}>新增規則…</button
+          }}>{t('新增規則…')}</button
         >
-        <button class="primary" onclick={onclose}>關閉</button>
+        <button class="primary" onclick={onclose}>{t('關閉')}</button>
       </div>
     {/if}
   </div>

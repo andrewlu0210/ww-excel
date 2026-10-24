@@ -1,6 +1,7 @@
 <script lang="ts">
   // 插入 › 表格… (⌘T): confirm the range, headers and a style; or rename
   // a table.
+  import { t } from '../i18n';
   import type { RangeDTO } from '../bridge/sheet';
   import { colName } from '../grid/layout';
 
@@ -53,15 +54,15 @@
 />
 
 <div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label="表格" style="width: 360px">
+  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('表格')} style="width: 360px">
     {#if renaming !== undefined}
-      <h2>重新命名表格</h2>
-      <label>表格名稱 <input type="text" bind:value={name} /></label>
+      <h2>{t('重新命名表格')}</h2>
+      <label>{t('表格名稱')} <input type="text" bind:value={name} /></label>
     {:else}
-      <h2>建立表格</h2>
-      <div>表格的資料範圍：<strong>{rangeText}</strong></div>
-      <label><input type="checkbox" bind:checked={header} /> 我的表格有標題</label>
-      <div class="styles" role="radiogroup" aria-label="表格樣式">
+      <h2>{t('建立表格')}</h2>
+      <div>{t('表格的資料範圍：')}<strong>{rangeText}</strong></div>
+      <label><input type="checkbox" bind:checked={header} /> {t('我的表格有標題')}</label>
+      <div class="styles" role="radiogroup" aria-label={t('表格樣式')}>
         {#each styles as s (s)}
           {@const sw = swatches[s] ?? ['#4472C4', '#D9E1F2']}
           <button role="radio" aria-checked={style === s} class:on={style === s} title={s} onclick={() => (style = s)}>
@@ -72,8 +73,8 @@
     {/if}
     {#if error}<div class="error" role="alert">{error}</div>{/if}
     <div class="dlg-actions">
-      <button onclick={onclose}>取消</button>
-      <button class="primary" onclick={() => void ok()}>確定</button>
+      <button onclick={onclose}>{t('取消')}</button>
+      <button class="primary" onclick={() => void ok()}>{t('確定')}</button>
     </div>
   </div>
 </div>

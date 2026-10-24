@@ -1,5 +1,6 @@
 <script lang="ts">
   // AutoFilter dropdown: sort by the column, or pick the values it shows.
+  import { t } from '../i18n';
   import type { FilterValueDTO } from '../bridge/sheet';
 
   interface Props {
@@ -41,25 +42,25 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="backdrop" onpointerdown={onclose}></div>
-<div class="dlg menu" style:left="{x}px" style:top="{y}px" role="dialog" aria-label="篩選 {title}">
+<div class="dlg menu" style:left="{x}px" style:top="{y}px" role="dialog" aria-label={t('篩選 %s', title)}>
   <div class="sorts">
-    <button onclick={() => onsort(false)}>A→Z 遞增排序</button>
-    <button onclick={() => onsort(true)}>Z→A 遞減排序</button>
+    <button onclick={() => onsort(false)}>{t('A→Z 遞增排序')}</button>
+    <button onclick={() => onsort(true)}>{t('Z→A 遞減排序')}</button>
   </div>
-  <input type="text" placeholder="搜尋" bind:value={search} />
+  <input type="text" placeholder={t('搜尋')} bind:value={search} />
   <ul>
     <li>
-      <label><input type="checkbox" checked={all} onchange={toggleAll} /> （全選）</label>
+      <label><input type="checkbox" checked={all} onchange={toggleAll} /> {t('（全選）')}</label>
     </li>
     {#each visible as v (v.i)}
       <li>
-        <label><input type="checkbox" bind:checked={checked[v.i]} /> {v.text === '' ? '（空格）' : v.text}</label>
+        <label><input type="checkbox" bind:checked={checked[v.i]} /> {v.text === '' ? t('（空格）') : v.text}</label>
       </li>
     {/each}
   </ul>
   <div class="dlg-actions">
-    <button onclick={onclose}>取消</button>
-    <button class="primary" disabled={!checked.some(Boolean)} onclick={apply}>確定</button>
+    <button onclick={onclose}>{t('取消')}</button>
+    <button class="primary" disabled={!checked.some(Boolean)} onclick={apply}>{t('確定')}</button>
   </div>
 </div>
 

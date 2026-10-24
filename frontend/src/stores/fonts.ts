@@ -3,6 +3,8 @@
 // are not installed on a Mac. The cell keeps the original name, so the
 // xlsx file still says 新細明體; only drawing uses the stand-in.
 
+import { language } from '../i18n';
+
 // Windows (and older Mac) family names -> installed macOS families, in
 // order of preference. Keys are lower case.
 const ALIASES: Record<string, string[]> = {
@@ -69,7 +71,15 @@ export const FONT_CHOICES: { value: string; label: string }[] = [
   { value: '標楷體', label: '標楷體（Windows）' },
 ];
 
+// English names of the Windows fonts, for the English UI.
+const WINDOWS_EN: Record<string, string> = { 新細明體: 'PMingLiU', 微軟正黑體: 'Microsoft JhengHei', 標楷體: 'DFKai-SB' };
+
 // Label for a font name (the name itself when it is not in the list).
 export function fontLabel(name: string): string {
+  if (language() === 'en') {
+    if (WINDOWS_EN[name]) return `${WINDOWS_EN[name]} (Windows)`;
+    // macOS shows the English family names in English.
+    if (FONT_CHOICES.some((f) => f.value === name)) return name;
+  }
   return FONT_CHOICES.find((f) => f.value === name)?.label ?? name;
 }

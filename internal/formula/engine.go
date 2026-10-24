@@ -16,8 +16,10 @@ package formula
 import (
 	"fmt"
 	"math/rand/v2"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"ww-excel/internal/formula/ast"
@@ -42,8 +44,10 @@ type Engine struct {
 	// recalculated without it.
 	circular map[Key]bool
 
-	// Parsed formulas of defined names, by formula text.
-	names map[string]ast.Node
+	// Parsed formulas of defined names, by formula text. Guarded by
+	// namesMu: formulas are evaluated concurrently.
+	names   map[string]ast.Node
+	namesMu sync.Mutex
 }
 
 // compiled is stored in model.Formula.Compiled.
@@ -252,6 +256,8 @@ func (e *Engine) name(name string, sheet int) (ast.Node, bool) {
 	if d == nil {
 		return nil, false
 	}
+	e.namesMu.Lock()
+	defer e.namesMu.Unlock()
 	if n, ok := e.names[d.Formula]; ok {
 		return n, true
 	}
@@ -409,6 +415,9 @@ func (e *Engine) recalc(seeds []Key) []Key {
 			changed = append(changed, k)
 		}
 	}
+	// Kahn's algorithm, one wave of ready formulas at a time. A wave's
+	// formulas do not depend on each other, so large waves are computed
+	// in parallel (reads only) and their values written afterwards.
 	kahn := func(nodes []Key, indeg map[Key]int) {
 		var ready []Key
 		for _, k := range nodes {
@@ -417,19 +426,34 @@ func (e *Engine) recalc(seeds []Key) []Key {
 			}
 		}
 		for len(ready) > 0 {
-			k := ready[0]
-			ready = ready[1:]
-			evaluate(k)
-			for _, d := range edges[k] {
-				if done[d] {
-					continue
+			wave := ready
+			ready = nil
+			if len(wave) >= parallelWave {
+				values := e.computeParallel(wave)
+				for i, k := range wave {
+					done[k] = true
+					delete(e.circular, k)
+					if values[i].ok && e.setValue(k, values[i].cell) {
+						changed = append(changed, k)
+					}
 				}
-				if _, tracked := indeg[d]; !tracked {
-					continue
+			} else {
+				for _, k := range wave {
+					evaluate(k)
 				}
-				indeg[d]--
-				if indeg[d] == 0 {
-					ready = append(ready, d)
+			}
+			for _, k := range wave {
+				for _, d := range edges[k] {
+					if done[d] {
+						continue
+					}
+					if _, tracked := indeg[d]; !tracked {
+						continue
+					}
+					indeg[d]--
+					if indeg[d] == 0 {
+						ready = append(ready, d)
+					}
 				}
 			}
 		}
@@ -575,16 +599,55 @@ func selfLoop(k Key, edges map[Key][]Key) bool {
 // evalCell recalculates one formula cell; reports whether its value
 // changed.
 func (e *Engine) evalCell(k Key) bool {
+	v, ok := e.compute(k)
+	return ok && e.setValue(k, v)
+}
+
+// compute evaluates a formula without storing the result. It only reads
+// the workbook, so it may run concurrently with other computes.
+func (e *Engine) compute(k Key) (model.Cell, bool) {
 	c := e.cell(k)
 	if c.F == nil {
-		return false
+		return model.Cell{}, false
 	}
 	comp := e.ensure(c.F, k.Sheet)
 	if comp.unparsed {
-		return false
+		return model.Cell{}, false
 	}
 	ev := eval.Evaluator{R: reader{e}, Sheet: k.Sheet, Row: k.Row, Col: k.Col, Now: e.Now(), Rand: e.Rand}
-	return e.setValue(k, ev.Eval(comp.node).ToCell())
+	return ev.Eval(comp.node).ToCell(), true
+}
+
+// Waves of at least this many independent formulas are computed in
+// parallel.
+const parallelWave = 512
+
+type computed struct {
+	cell model.Cell
+	ok   bool
+}
+
+// computeParallel evaluates independent formulas on all CPUs.
+func (e *Engine) computeParallel(keys []Key) []computed {
+	out := make([]computed, len(keys))
+	workers := min(runtime.GOMAXPROCS(0), len(keys)/64+1)
+	var wg sync.WaitGroup
+	chunk := (len(keys) + workers - 1) / workers
+	for w := 0; w < workers; w++ {
+		lo, hi := w*chunk, min(len(keys), (w+1)*chunk)
+		if lo >= hi {
+			break
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := lo; i < hi; i++ {
+				out[i].cell, out[i].ok = e.compute(keys[i])
+			}
+		}()
+	}
+	wg.Wait()
+	return out
 }
 
 func (e *Engine) setValue(k Key, v model.Cell) bool {

@@ -97,6 +97,10 @@ func (h *History) top() uint64 {
 }
 
 // MarkSaved records the current state as saved.
+// MarkUnsaved makes the document dirty until the next save, e.g. for a
+// workbook recovered after a crash.
+func (h *History) MarkUnsaved() { h.savedLost = true }
+
 func (h *History) MarkSaved() {
 	h.savedLost = false
 	h.savedSeq = 0

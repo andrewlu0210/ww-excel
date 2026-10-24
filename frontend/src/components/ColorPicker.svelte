@@ -1,6 +1,7 @@
 <script lang="ts">
   // Color palette popover in the style of Excel's: theme-like shades and
   // standard colors, plus "automatic"/"no fill".
+  import { t } from '../i18n';
   interface Props {
     // Label of the reset entry: 自動 (text) or 無填滿 (fill).
     resetLabel: string;
@@ -28,9 +29,9 @@
 
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
-<div class="picker" role="dialog" aria-label="色彩">
+<div class="picker" role="dialog" aria-label={t('色彩')}>
   <button class="reset" tabindex="-1" onpointerdown={(e) => e.preventDefault()} onclick={() => pick('')}>{resetLabel}</button>
-  <div class="label">佈景主題色彩</div>
+  <div class="label">{t('佈景主題色彩')}</div>
   <div class="grid">
     {#each theme as row, i (i)}
       {#each row as c (c)}
@@ -46,7 +47,7 @@
       {/each}
     {/each}
   </div>
-  <div class="label">標準色彩</div>
+  <div class="label">{t('標準色彩')}</div>
   <div class="grid">
     {#each standard as c (c)}
       <button

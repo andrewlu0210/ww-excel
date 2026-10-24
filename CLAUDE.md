@@ -7,7 +7,7 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.7 完成**（2026-10-24），下一步是 v1.0（正式版打磨）
+- 目前階段：**v1.0 完成**（2026-10-24），下一步是 Backlog（v1.x）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
 - 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
 
@@ -31,6 +31,9 @@ WW_BENCH=1 WW_BENCH_OUT="$PWD/docs/perf-latest.md" ./bin/ww-excel
 # Editing self-test: drives the real controller with simulated keys, writes
 # docs/selftest-latest.md + docs/selftest.png, quits (60s watchdog)
 WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
+# WW_LANG=en 加在前面可以預覽英文介面（比對中文文字的檢查項會失敗）
+
+scripts/package.sh                  # dist/WW Excel.app + DMG（ad-hoc 簽章；Developer ID／公證見腳本開頭）
 
 ./bin/ww-excel path/to/file.xlsx    # open a .xlsx / .csv / .wwx on launch
 
@@ -42,6 +45,7 @@ go run ./tools/goldenxlsx           # build testdata/golden/excel-check.xlsx (se
 - 一般啟動是空白文件；`WW_FAKE_ROWS` / `WW_FAKE_COLS` 可以載入假資料（量測模式會自動載入）
 - 新增鍵盤或編輯行為時，在 `frontend/src/bench/selfTest.ts` 加上對應檢查項
 - 新增或修改函數時，在 `testdata/golden/functions.tsv` 加上案例（`go test ./internal/formula -run TestGolden`）
+- 新增介面文字時：前端用 `t('中文')`（`frontend/src/i18n`），Go 端顯示給使用者的中文字串照常寫，並在 `internal/i18n/en.json` 加上英文；`go test ./internal/i18n` 會檢查有沒有漏掉
 - self-test 模擬不了原生 IME 和選單快捷鍵，這兩項每版都要手動確認
 - 需要手動確認的項目記在 `docs/manual-checks.md`；每完成一版就把新的待確認項目加進去，確認後打勾
 - 跑 self-test 或量測前先確認沒有殘留的 `bin/ww-excel` 程序（`pgrep -fl bin/ww-excel`）；Go 端有看門狗會在 3 分鐘後強制結束
@@ -86,13 +90,19 @@ ww-excel/
 │   │   └── functions/         # math.go, lookup.go, text.go, date.go ...
 │   ├── numfmt/                # Excel number format parser/renderer
 │   ├── io/                    # xlsx (excelize), csv, native format
+│   ├── printing/              # pagination + PDF (gopdf)
+│   ├── recovery/ settings/    # autosave snapshots, preferences
+│   ├── i18n/                  # T() + en.json (shared with the frontend)
+│   ├── update/                # GitHub Releases check
 │   └── service/               # Wails-bound services (thin layer)
 ├── frontend/src/
 │   ├── grid/                  # canvas renderer, layout (fenwick), hit-testing
 │   ├── input/                 # keyboard map, selection, editor overlay, IME
 │   ├── stores/                # Svelte stores: selection, viewport cache
 │   ├── components/            # Ribbon, FormulaBar, SheetTabs, dialogs
+│   ├── i18n/                  # t() / tr() over the table from Go
 │   └── bridge/                # typed wrappers over generated bindings/events
+├── scripts/package.sh         # .app + DMG, codesign, notarization
 └── testdata/golden/           # Excel-generated formula expectations
 ```
 
@@ -256,11 +266,23 @@ ww-excel/
 - 留到後續版本：圖表格式設定（顏色、資料標籤、座標軸範圍）、組合圖、手動分頁與分頁預覽、標題列重複列印、整本活頁簿輸出 PDF、圖片裁切與旋轉
 
 ### v1.0 — 正式版打磨
-- [ ] 效能調校（大檔開啟、記憶體、重算並行化）
-- [ ] 自動儲存、當機復原
-- [ ] 偏好設定、深色模式、繁中 / 英文介面
-- [ ] 程式碼簽章、notarization、DMG 打包、自動更新
-- [ ] VoiceOver 基本支援
+- [x] 效能調校（大檔開啟、記憶體、重算並行化）
+- [x] 自動儲存、當機復原
+- [x] 偏好設定、深色模式、繁中 / 英文介面
+- [x] 程式碼簽章、notarization、DMG 打包、自動更新（檢查新版）
+- [x] VoiceOver 基本支援
+- **驗收**：self-test 164/164 ✅；100 萬格 xlsx 開啟 5.8s → 1.3s、heap 926MB → 191MB ✅（見 `docs/perf.md`）；Developer ID 公證、VoiceOver、英文介面 → 待手動確認
+- 設計重點：
+  - **xlsx 讀檔**：工作表 XML 用 `RawToken` 串流解析一次（`xlsxfile/read.go`），excelize 只讀活頁簿層級的部分；開檔時的 excelize 檔案仍保留給原地存檔。共用公式只 parse 主公式，其他格用 `ast.Translate` 平移
+  - **稀疏 block**：`model.Block` 是 `uint16` 索引加上有值的格子 slice，刪除後過半是空的就壓縮；依賴圖用 `int32` 的 compact key
+  - **並行重算**：Kahn 排序一次處理一層就緒的公式，超過 512 個時並行計算（`Engine.compute` 只讀），再依序寫回；名稱 AST 快取有 mutex。改引擎時要跑 `go test -race ./internal/formula`
+  - **當機復原**（`internal/recovery`）：每份文件一組 `<id>.wwx` + `<id>.json`（含 PID），放在 `~/Library/Application Support/ww-excel/Recovery`。`service.Autosaver` 依偏好設定的間隔寫入有變動的文件，文件變乾淨、關閉或程式正常結束（`OnShutdown`）時刪除。啟動時 PID 已不存在的快照就是當機留下的，`service.Recover` 詢問後以「…（已復原）」開啟（沒有路徑、維持已編輯）
+  - **偏好設定**（`internal/settings`）：`settings.json`，`SettingsService` 綁定給前端；變更時 Go 套用外觀（cgo 設定 `NSApp.appearance`，`appearance_darwin.go`）、語言改變時重建選單，再廣播 `settings:changed`。前端設定 `data-theme` 並通知 Canvas 重讀顏色；語言改變時重新載入視窗
+  - **多語系**：原始碼裡的繁中文字就是 key，`internal/i18n/en.json` 是英文表。Go 的 `i18n.T` 支援含 `%s`／`%d` 的 key，會反向比對已經格式化的訊息（含巢狀，例如 parser 的「…（位置 N）」）；前端的 `t()` 用同一張表（啟動時由 Go 提供），Go 傳來的錯誤訊息在 `bridge` 用 `tr()` 翻譯。同一句中文有兩種意思時用 `t('情境|中文')`。新文件的工作表、表格、欄、數列名稱依語言命名（Sheet1、Table1…）。自動測試與量測模式固定用繁中
+  - **VoiceOver**：編輯用的 textarea 一直有焦點，所以作用中儲存格用 `aria-live` 區域播報（位址＋值或選取範圍，150ms 去抖動）
+  - **打包**：`scripts/package.sh` 建立 `dist/WW Excel.app` 與 DMG，版本用 `-X main.version` 寫入；有 `SIGN_IDENTITY` 時加 hardened runtime 簽章，有 `NOTARY_PROFILE` 時送 notarytool 並 staple。檢查更新讀 GitHub Releases 的 latest（`internal/update`），repo 由 `main.updateRepo` 指定
+- 已知限制：檢查更新需要 repo 是公開的（私有 repo 和沒有 release 都回 404，視為已是最新版）；只會提示並開啟下載頁面，不會自動下載安裝（沒有用 Sparkle）；英文翻譯沒有經過母語者審稿，函數參數說明仍是英文縮寫；自動儲存是 Excel 的「自動回復」，不會覆寫原檔；100 萬格的文件每次快照約 0.4 秒，期間編輯會稍有延遲；選單的 About／Hide／Quit 是系統角色，文字跟隨 macOS 語言
+- 留到後續版本：Sparkle 自動安裝更新、自動儲存回原檔、匯出 PDF 依儲存格字型、VoiceOver 念出公式與格式、更多語言
 
 ### Backlog（v1.x 之後）
 動態陣列與溢出（`FILTER`、`SORT`、`UNIQUE`）、`LET` / `LAMBDA`、樞紐分析表、巨集或腳本、外掛系統、多人協作（CRDT）

@@ -18,6 +18,7 @@ declare module "@wailsio/runtime" {
             "doc:state": service$0.DocState;
             "layout:changed": service$0.LayoutChanged;
             "menu:action": string;
+            "settings:changed": service$0.UISettings;
             "sheets:changed": service$0.DocState;
         }
     }

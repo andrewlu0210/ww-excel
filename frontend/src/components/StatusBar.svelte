@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n';
   import { onMount, type Snippet } from 'svelte';
   import { FpsMeter, type Samples } from '../grid/perf';
   import type { SheetMode } from '../input/keymap';
@@ -18,7 +19,7 @@
 
   let { mode, tabs, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
 
-  const MODE_LABEL: Record<SheetMode, string> = { ready: '就緒', enter: '輸入', edit: '編輯', point: '指向' };
+  const MODE_LABEL: Record<SheetMode, string> = { ready: t('就緒'), enter: t('模式|輸入'), edit: t('編輯'), point: t('指向') };
 
   let fps = $state(0);
   let drawP95 = $state(0);
@@ -47,7 +48,7 @@
     <span class="mode">{MODE_LABEL[mode]}</span>
     {@render tabs?.()}
     {#if circular}
-      <span class="circular" title="公式直接或間接參照到自己的儲存格，結果顯示為 0">循環參照：{circular}</span>
+      <span class="circular" title={t('公式直接或間接參照到自己的儲存格，結果顯示為 0')}>{t('循環參照：%s', circular)}</span>
     {/if}
   </div>
   <div class="hud">
@@ -55,7 +56,7 @@
     <span title="Grid draw time, p95">draw {drawP95.toFixed(1)} ms</span>
     <span title="Last GetBlocks round trip">fetch {fetchMs.toFixed(1)} ms</span>
     <span title="Blocks cached in the frontend">{blocks} blocks</span>
-    <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? '量測中…' : '效能量測'}</button>
+    <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? t('量測中…') : t('效能量測')}</button>
   </div>
 </footer>
 

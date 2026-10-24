@@ -67,6 +67,8 @@ export type MenuAction =
   | 'tableTotals'
   | 'renameTable'
   | 'convertTable'
+  // v1.0
+  | 'preferences'
   // v0.7
   | 'insertChart'
   | 'editChart'
@@ -247,6 +249,21 @@ export function idleAction(e: KeyLike): Action | null {
   }
 }
 
+export type EnterMove = 'down' | 'right' | 'up' | 'left' | 'none';
+const OPPOSITE = { down: 'up', up: 'down', right: 'left', left: 'right' } as const;
+let enterMove: EnterMove = 'down';
+
+// 偏好設定 › 按 Enter 後移動方向.
+export function setEnterMove(m: EnterMove): void {
+  enterMove = m;
+}
+
+// Where Enter (⇧Enter when backward) moves the selection.
+export function enterThen(backward: boolean): 'down' | 'up' | 'right' | 'left' | 'stay' {
+  if (enterMove === 'none') return 'stay';
+  return backward ? OPPOSITE[enterMove] : enterMove;
+}
+
 export function editAction(e: KeyLike): Action | null {
   if (isComposing(e)) return null;
 
@@ -263,7 +280,7 @@ export function editAction(e: KeyLike): Action | null {
       if (e.altKey && !e.metaKey) return { type: 'newline' };
       if (e.metaKey) return { type: 'commitFill' };
       if (e.ctrlKey) return null;
-      return { type: 'commit', then: e.shiftKey ? 'up' : 'down' };
+      return { type: 'commit', then: enterThen(e.shiftKey) };
     case 'Tab':
       return { type: 'commit', then: e.shiftKey ? 'left' : 'right' };
     case 'Escape':

@@ -1,5 +1,6 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import './app.css';
+import { initSettings } from './stores/settings';
 
-mount(App, { target: document.getElementById('app')! });
+void initSettings().then(() => mount(App, { target: document.getElementById('app')! }));

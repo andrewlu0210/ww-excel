@@ -39,6 +39,11 @@ export const LayoutChanged = "layout:changed";
 export const MenuAction = "menu:action";
 
 /**
+ * Name of the custom event "settings:changed".
+ */
+export const SettingsChanged = "settings:changed";
+
+/**
  * Name of the custom event "sheets:changed".
  */
 export const SheetsChanged = "sheets:changed";

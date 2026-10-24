@@ -10,6 +10,13 @@ import "ww-excel/internal/model"
 
 type Key struct{ Sheet, Row, Col int }
 
+// ck is the compact form of Key used inside the graph: millions of
+// entries are stored, so 12 bytes instead of 24 matter.
+type ck struct{ s, r, c int32 }
+
+func compact(k Key) ck { return ck{int32(k.Sheet), int32(k.Row), int32(k.Col)} }
+func (k ck) key() Key  { return Key{int(k.s), int(k.r), int(k.c)} }
+
 type Area struct {
 	Sheet          int
 	R0, C0, R1, C1 int
@@ -36,51 +43,52 @@ type rangeDep struct {
 }
 
 type registration struct {
-	singles []Key
+	singles []ck
 	ranges  []int
 }
 
 type Graph struct {
-	singles  map[Key]map[Key]struct{}
+	// Formulas referencing each single cell. Most cells have one or
+	// two dependents, so a slice is far smaller than a set.
+	singles  map[ck][]ck
 	ranges   map[int]*rangeDep
 	buckets  map[bucket]map[int]struct{}
 	large    map[int]struct{}
-	regs     map[Key]registration
-	volatile map[Key]struct{}
+	regs     map[ck]registration
+	volatile map[ck]struct{}
 	nextID   int
 }
 
 func New() *Graph {
 	return &Graph{
-		singles:  map[Key]map[Key]struct{}{},
+		singles:  map[ck][]ck{},
 		ranges:   map[int]*rangeDep{},
 		buckets:  map[bucket]map[int]struct{}{},
 		large:    map[int]struct{}{},
-		regs:     map[Key]registration{},
-		volatile: map[Key]struct{}{},
+		regs:     map[ck]registration{},
+		volatile: map[ck]struct{}{},
 	}
 }
 
 // Set registers formula f with its precedent areas, replacing any
 // previous registration.
-func (g *Graph) Set(f Key, areas []Area, volatile bool) {
-	g.Remove(f)
+func (g *Graph) Set(fk Key, areas []Area, volatile bool) {
+	g.Remove(fk)
+	f := compact(fk)
 	var reg registration
 	for _, a := range areas {
 		if a.single() {
-			k := Key{a.Sheet, a.R0, a.C0}
-			set := g.singles[k]
-			if set == nil {
-				set = map[Key]struct{}{}
-				g.singles[k] = set
+			k := ck{int32(a.Sheet), int32(a.R0), int32(a.C0)}
+			deps := g.singles[k]
+			if !containsCK(deps, f) {
+				g.singles[k] = append(deps, f)
 			}
-			set[f] = struct{}{}
 			reg.singles = append(reg.singles, k)
 			continue
 		}
 		id := g.nextID
 		g.nextID++
-		rd := &rangeDep{area: a, dep: f}
+		rd := &rangeDep{area: a, dep: fk}
 		br0, br1 := a.R0/model.BlockRows, a.R1/model.BlockRows
 		bc0, bc1 := a.C0/model.BlockCols, a.C1/model.BlockCols
 		if (br1-br0+1)*(bc1-bc0+1) > maxBuckets {
@@ -109,17 +117,24 @@ func (g *Graph) Set(f Key, areas []Area, volatile bool) {
 }
 
 // Remove unregisters formula f.
-func (g *Graph) Remove(f Key) {
+func (g *Graph) Remove(fk Key) {
+	f := compact(fk)
 	reg, ok := g.regs[f]
 	if !ok {
 		return
 	}
 	for _, k := range reg.singles {
-		if set := g.singles[k]; set != nil {
-			delete(set, f)
-			if len(set) == 0 {
-				delete(g.singles, k)
+		deps := g.singles[k]
+		for i, d := range deps {
+			if d == f {
+				deps = append(deps[:i:i], deps[i+1:]...)
+				break
 			}
+		}
+		if len(deps) == 0 {
+			delete(g.singles, k)
+		} else {
+			g.singles[k] = deps
 		}
 	}
 	for _, id := range reg.ranges {
@@ -139,7 +154,16 @@ func (g *Graph) Remove(f Key) {
 	delete(g.volatile, f)
 }
 
-func (g *Graph) Has(f Key) bool { _, ok := g.regs[f]; return ok }
+func (g *Graph) Has(f Key) bool { _, ok := g.regs[compact(f)]; return ok }
+
+func containsCK(list []ck, k ck) bool {
+	for _, x := range list {
+		if x == k {
+			return true
+		}
+	}
+	return false
+}
 
 // Len is the number of registered formulas.
 func (g *Graph) Len() int { return len(g.regs) }
@@ -148,8 +172,8 @@ func (g *Graph) Len() int { return len(g.regs) }
 // formula referencing c through several areas may be reported more
 // than once.
 func (g *Graph) Dependents(c Key, fn func(Key)) {
-	for f := range g.singles[c] {
-		fn(f)
+	for _, f := range g.singles[compact(c)] {
+		fn(f.key())
 	}
 	b := bucket{c.Sheet, c.Row / model.BlockRows, c.Col / model.BlockCols}
 	for id := range g.buckets[b] {
@@ -167,13 +191,13 @@ func (g *Graph) Dependents(c Key, fn func(Key)) {
 // Volatile calls fn for every volatile formula.
 func (g *Graph) Volatile(fn func(Key)) {
 	for f := range g.volatile {
-		fn(f)
+		fn(f.key())
 	}
 }
 
 // Each calls fn for every registered formula.
 func (g *Graph) Each(fn func(Key)) {
 	for f := range g.regs {
-		fn(f)
+		fn(f.key())
 	}
 }

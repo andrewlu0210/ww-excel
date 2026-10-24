@@ -484,6 +484,43 @@ export interface TextSample {
     "st": number;
 }
 
+/**
+ * UISettings is what the frontend needs: the stored preferences plus
+ * the language actually in use.
+ */
+export interface UISettings {
+    /**
+     * Appearance is "system", "light" or "dark".
+     */
+    "appearance": string;
+
+    /**
+     * Language is "system", "zh-TW" or "en".
+     */
+    "language": string;
+
+    /**
+     * AutoRecoverMinutes is the autosave interval; 0 turns it off.
+     */
+    "autoRecoverMinutes": number;
+
+    /**
+     * EnterMove is where Enter moves the selection: "down", "right",
+     * "up", "left" or "none".
+     */
+    "enterMove": string;
+
+    /**
+     * CheckUpdates looks for a newer release at launch.
+     */
+    "checkUpdates": boolean;
+
+    /**
+     * Lang is "zh-TW" or "en" ("system" resolved).
+     */
+    "lang": string;
+}
+
 export interface ValidationDTO {
     "type": string;
     "operator": string;

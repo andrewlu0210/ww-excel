@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest } from './bench/selfTest';
@@ -29,6 +30,8 @@
   import NumberFormatDialog from './components/NumberFormatDialog.svelte';
   import PasteSpecialDialog from './components/PasteSpecialDialog.svelte';
   import ShiftDialog from './components/ShiftDialog.svelte';
+  import PreferencesDialog from './components/PreferencesDialog.svelte';
+  import { settings } from './stores/settings';
   import SortDialog from './components/SortDialog.svelte';
   import Sheet from './components/Sheet.svelte';
   import SheetTabs from './components/SheetTabs.svelte';
@@ -59,6 +62,7 @@
   let findPanel = $state<{ replace: boolean } | null>(null);
   let sortDialog = $state<{ range: RangeDTO; header: boolean } | null>(null);
   let pasteDialog = $state(false);
+  let prefsDialog = $state(false);
   let shiftDialog = $state<{ insert: boolean } | null>(null);
   // v0.6 dialogs.
   let names = $state<string[]>([]);
@@ -134,6 +138,9 @@
       case 'pasteSpecial':
         pasteDialog = true;
         break;
+      case 'preferences':
+        if (settings()) prefsDialog = true;
+        break;
       case 'insertCells':
       case 'deleteCells':
         shiftDialog = { insert: action === 'insertCells' };
@@ -200,7 +207,7 @@
     if (!sel) return;
     const r = current(sel);
     const info = await sheetApi.tableRange(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 });
-    if (!info.ok) return notify('請選取資料範圍中的儲存格再建立表格。');
+    if (!info.ok) return notify(t('請選取資料範圍中的儲存格再建立表格。'));
     tableDialog = { range: info.range, header: info.header, styles: await sheetApi.tableStyles() };
   }
 
@@ -209,7 +216,7 @@
     if (!sel) return;
     const r = current(sel);
     const res = await sheetApi.chartFromSelection(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 }, 'column');
-    if (res.error || !res.value) return notify(res.error ?? '請先選取要做成圖表的資料。');
+    if (res.error || !res.value) return notify(res.error ?? t('請先選取要做成圖表的資料。'));
     // Excel puts a new chart next to its data.
     chartDialog = { editing: false, initial: res.value, id: 0, at: { row: r.r0, col: r.c1 + 2 } };
   }
@@ -228,8 +235,8 @@
     let err: string | null;
     if (d.editing) {
       const o = sheetView?.getObjects().find((x) => x.id === d.id);
-      if (!o) return '圖表不存在';
-      err = await sheetApi.updateObject(active, { ...o, chart }, '編輯圖表');
+      if (!o) return t('圖表不存在');
+      err = await sheetApi.updateObject(active, { ...o, chart }, t('編輯圖表'));
     } else {
       const res = await sheetApi.addChart(active, d.at.row, d.at.col, 480, 288, chart);
       err = res.error;
@@ -259,7 +266,7 @@
   async function exportPDF(): Promise<void> {
     const res = await documentApi.exportPDF(active, sheetView?.chartImages() ?? {});
     if (res.error) notify(res.error);
-    else if (res.value) notify('已匯出 PDF。');
+    else if (res.value) notify(t('已匯出 PDF。'));
   }
 
   // The name box went to another sheet.
@@ -270,7 +277,7 @@
 
   async function openSort(): Promise<void> {
     const res = await sheetView?.sortInfo();
-    if (!res?.ok) return notify('請選取資料範圍中的儲存格再排序。');
+    if (!res?.ok) return notify(t('請選取資料範圍中的儲存格再排序。'));
     sortDialog = { range: res.range, header: res.header };
   }
 
@@ -307,7 +314,7 @@
   async function findNext(opt: FindOptionsDTO, forward: boolean): Promise<string | null> {
     const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
     const hit = await sheetApi.findNext(active, pos.row, pos.col, opt, forward);
-    if (!hit) return '找不到符合的資料。';
+    if (!hit) return t('找不到符合的資料。');
     await gotoHit(hit);
     return null;
   }
@@ -317,7 +324,7 @@
     const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
     const res = await sheetApi.replace(active, opt, withText, all, pos.row, pos.col);
     if (res.error) return res.error;
-    if (all) return res.value ? `已完成取代 ${res.value} 項。` : '找不到符合的資料。';
+    if (all) return res.value ? t('已完成取代 %d 項。', res.value) : t('找不到符合的資料。');
     // 取代: replace the current match, then go to the next one.
     const next = await findNext(opt, true);
     return res.value ? null : next;
@@ -380,7 +387,7 @@
   onMount(() => {
     const offs = [
       documentApi.onMenu((action) => {
-        if (['insertSheet', 'formatCells', 'sort', 'defineName', 'nameManager', 'dataValidation', 'condFormat', 'condFormatManager', 'insertTable'].includes(action))
+        if (['preferences', 'insertSheet', 'formatCells', 'sort', 'defineName', 'nameManager', 'dataValidation', 'condFormat', 'condFormatManager', 'insertTable'].includes(action))
           onAppAction(action);
         else void sheetView?.runMenu(action);
       }),
@@ -497,7 +504,7 @@
       preview={previewFormat}
       onapply={(code) => {
         numberDialog = false;
-        void format({ numFmt: code, label: '數值格式' });
+        void format({ numFmt: code, label: t('數值格式') });
       }}
       onclose={() => {
         numberDialog = false;
@@ -544,6 +551,9 @@
     />
   {/if}
 
+  {#if prefsDialog && settings()}
+    <PreferencesDialog initial={settings()!} onclose={() => (prefsDialog = false)} />
+  {/if}
   {#if shiftDialog}
     <ShiftDialog
       insert={shiftDialog.insert}
@@ -690,13 +700,13 @@
   {#if report}
     <div class="report">
       <div class="report-head">
-        <strong>效能量測結果</strong>
-        <button onclick={() => navigator.clipboard.writeText(report)}>複製 Markdown</button>
+        <strong>{t('效能量測結果')}</strong>
+        <button onclick={() => navigator.clipboard.writeText(report)}>{t('複製 Markdown')}</button>
         <button
           onclick={() => {
             report = '';
             sheetView?.focus();
-          }}>關閉</button
+          }}>{t('關閉')}</button
         >
       </div>
       <pre>{report}</pre>

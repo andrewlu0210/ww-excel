@@ -235,3 +235,31 @@ Go benchmark（`go test -bench . ./internal/formula`）：
 - 圖表與圖片是 DOM 物件疊在格線上，只有捲動時更新位置，不影響 Canvas 繪製成本
 - 有圖表的工作表，任何儲存格變動都會在 80ms 後重抓圖表資料（合併成一次）
 - 編輯 self-test 149/149 通過（新增圖表、物件移動、插入列、預覽 PDF、xlsx 存讀共 13 項）
+
+---
+
+## v1.0（2026-10-24）
+
+正式版打磨：大檔開啟、記憶體、重算並行化，再加上自動儲存、偏好設定、深色模式、中英文介面、VoiceOver 與打包。
+
+| 項目 | v0.7 | v1.0 |
+|---|---|---|
+| 捲動 fps（三種情境） | 60 / 60 / 60 | 60 / 60 / 60 |
+| Grid 繪製 p95 | 2–3ms | 2–3ms |
+| 9 blocks 平均 | 1.48ms | 1.48ms |
+| 64 blocks 平均 | 9.03ms | 9.15ms |
+| 捲動時資料送達平均 | 2.63ms | 2.71ms |
+| 1 萬個公式連鎖重算 | 7.2ms | 6.5ms |
+| Go heap（量測資料 2 萬列 × 5 欄） | 29.2MB | 10.9MB |
+| 開啟 100 萬格 xlsx（10 萬列 × 10 欄、20 萬個公式） | 5.8s | 1.2–1.4s |
+| 上面那個檔案開啟後的 heap | 926MB | 191MB |
+| 重算 10 萬個互相獨立的公式（`Rebuild`） | 192ms | 126ms |
+
+大檔測試檔用 `go run ./tools/bigfile -o big.xlsx` 產生，量測：`WW_BIG_XLSX=big.xlsx go test -run TestLoadBigFile -v ./internal/document`（設 `WW_HEAP_OUT` 可輸出 heap profile）。
+
+- **xlsx 讀檔改成直接串流解析工作表 XML**（`xlsxfile/read.go`）：原本經過 excelize 的 `GetRows`／`GetCellFormula`，每格都會配置字串、補滿空格，還要重複掃描。現在工作表只讀一次，共用公式只 parse 主公式一次，其他格用 `ast.Translate` 平移。excelize 只用來讀活頁簿層級的部分（樣式、名稱、註解、條件式格式的 dxf），原地存檔仍保留 excelize 的檔案
+- **稀疏 block**：每個 64×32 block 原本是 2,048 格的固定陣列，現在是 `uint16` 索引加上只存有值的格子；刪除大量內容後會壓縮。量測資料的 heap 從 29MB 降到 11MB
+- **依賴圖改用 12 bytes 的 key**（`int32` × 3），單格依賴用 slice 取代 set
+- **重算並行化**：Kahn 拓撲排序一次處理一整層「已就緒」的公式；同一層的公式互不依賴，超過 512 個時分給所有 CPU 計算（只讀取），再依序寫回結果。連鎖公式（每層只有 1 個）走原本的單執行緒路徑，所以 1 萬個連鎖公式的時間不變。名稱的 AST 快取加了 mutex；`go test -race` 通過
+- **自動儲存**：預設每 2 分鐘把有變動的文件寫成 wwx 快照。上面那個 100 萬格的檔案，快照約 0.4 秒、5.3MB（壓縮後）；編碼時持有讀鎖，這段時間的編輯會稍微延遲。沒有變動的文件不重寫
+- 編輯 self-test 164/164 通過（新增偏好設定、深色模式、Enter 方向、VoiceOver 共 15 項）

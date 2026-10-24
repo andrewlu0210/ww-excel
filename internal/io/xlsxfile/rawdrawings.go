@@ -35,63 +35,35 @@ type rawAnchor struct {
 	twoCell bool
 }
 
-// readDrawings reads the charts and pictures of every sheet straight
-// from the package (excelize cannot read charts back).
-func readDrawings(file string, wb *model.Workbook) {
-	z, err := zip.OpenReader(file)
-	if err != nil {
+// readDrawing reads the charts and pictures of a sheet's drawing part
+// (excelize cannot read charts back).
+func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
+	if drawing == "" {
 		return
 	}
-	defer z.Close()
-	parts := map[string]*zip.File{}
-	for _, f := range z.File {
-		parts[f.Name] = f
-	}
-	sheets, err := sheetParts(parts)
-	if err != nil {
-		return
-	}
-	for _, sh := range wb.Sheets {
-		part, ok := sheets[sh.SourceName]
-		if !ok {
-			continue
-		}
-		var ws struct {
-			Drawing struct {
-				RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
-			} `xml:"drawing"`
-		}
-		if decodePart(parts, part, &ws) != nil || ws.Drawing.RID == "" {
-			continue
-		}
-		drawing := relTarget(parts, part, ws.Drawing.RID)
-		if drawing == "" {
-			continue
-		}
-		for _, a := range readAnchors(parts, drawing) {
-			obj := model.Object{Anchor: model.Anchor{Row: a.FromRow, Col: a.FromCol, DX: float64(a.FromCX) / emuPerPx, DY: float64(a.FromRY) / emuPerPx}}
-			obj.W, obj.H = anchorSize(&sh.Layout, a)
-			switch {
-			case a.Chart.RID != "":
-				c := readChart(parts, relTarget(parts, drawing, a.Chart.RID))
-				if c == nil {
-					continue
-				}
-				obj.Kind, obj.Chart = model.ObjectChart, c
-			case a.Blip.RID != "":
-				media := relTarget(parts, drawing, a.Blip.RID)
-				data := readPart(parts, media)
-				if data == nil {
-					continue
-				}
-				obj.Kind = model.ObjectImage
-				obj.Image = &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media))}
-			default:
+	for _, a := range readAnchors(parts, drawing) {
+		obj := model.Object{Anchor: model.Anchor{Row: a.FromRow, Col: a.FromCol, DX: float64(a.FromCX) / emuPerPx, DY: float64(a.FromRY) / emuPerPx}}
+		obj.W, obj.H = anchorSize(&sh.Layout, a)
+		switch {
+		case a.Chart.RID != "":
+			c := readChart(parts, relTarget(parts, drawing, a.Chart.RID))
+			if c == nil {
 				continue
 			}
-			obj.ID = sh.Layout.NextObjectID()
-			sh.Layout.Objects = append(sh.Layout.Objects, obj)
+			obj.Kind, obj.Chart = model.ObjectChart, c
+		case a.Blip.RID != "":
+			media := relTarget(parts, drawing, a.Blip.RID)
+			data := readPart(parts, media)
+			if data == nil {
+				continue
+			}
+			obj.Kind = model.ObjectImage
+			obj.Image = &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media))}
+		default:
+			continue
 		}
+		obj.ID = sh.Layout.NextObjectID()
+		sh.Layout.Objects = append(sh.Layout.Objects, obj)
 	}
 }
 

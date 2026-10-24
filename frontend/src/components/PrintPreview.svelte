@@ -1,5 +1,6 @@
 <script lang="ts">
   // 列印預覽: the PDF that will be printed, shown by WebKit's PDF viewer.
+  import { t } from '../i18n';
   interface Props {
     url: string;
     pages: number;
@@ -15,17 +16,17 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="dlg-backdrop" role="presentation">
-  <div class="dlg preview" role="dialog" aria-modal="true" aria-label="列印預覽">
+  <div class="dlg preview" role="dialog" aria-modal="true" aria-label={t('列印預覽')}>
     <div class="bar">
-      <h2>列印預覽</h2>
-      <span class="pages">共 {pages} 頁</span>
+      <h2>{t('列印預覽')}</h2>
+      <span class="pages">{t('共 %d 頁', pages)}</span>
       <span class="spacer"></span>
-      <button onclick={onsetup}>版面設定…</button>
-      <button onclick={onexport}>匯出 PDF…</button>
-      <button class="primary" onclick={onprint}>列印…</button>
-      <button onclick={onclose}>關閉</button>
+      <button onclick={onsetup}>{t('版面設定…')}</button>
+      <button onclick={onexport}>{t('匯出 PDF…')}</button>
+      <button class="primary" onclick={onprint}>{t('列印…')}</button>
+      <button onclick={onclose}>{t('關閉')}</button>
     </div>
-    <iframe title="列印預覽" src={url}></iframe>
+    <iframe title={t('列印預覽')} src={url}></iframe>
   </div>
 </div>
 
