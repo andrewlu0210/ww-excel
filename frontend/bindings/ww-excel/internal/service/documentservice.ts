@@ -36,22 +36,31 @@ export function MoveSheet($from: number, to: number): $CancellablePromise<void> 
 }
 
 /**
- * New replaces the document with an empty workbook.
+ * New opens an empty workbook in a new window.
  */
 export function New(): $CancellablePromise<boolean> {
     return $Call.ByID(4208941621);
 }
 
 /**
- * Open asks for a file and loads it.
+ * Open asks for a file and opens it.
  */
 export function Open(): $CancellablePromise<boolean> {
     return $Call.ByID(435265909);
 }
 
 /**
- * OpenPath loads path without asking about unsaved changes. Errors are
- * also shown to the user.
+ * OpenFile opens path like Excel does: in the window already showing it,
+ * in the calling window when that holds an untouched new workbook, or
+ * in a new window.
+ */
+export function OpenFile(path: string): $CancellablePromise<boolean> {
+    return $Call.ByID(3854025747, path);
+}
+
+/**
+ * OpenPath loads path into the calling window without asking about
+ * unsaved changes. Errors are also shown to the user.
  */
 export function OpenPath(path: string): $CancellablePromise<void> {
     return $Call.ByID(1593076422, path);

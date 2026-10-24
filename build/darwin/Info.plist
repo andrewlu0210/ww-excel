@@ -25,5 +25,38 @@
             <string>true</string>
         <key>NSHumanReadableCopyright</key>
             <string>© 2026 WW</string>
+        <key>CFBundleDocumentTypes</key>
+            <array>
+                <dict>
+                    <key>CFBundleTypeExtensions</key>
+                    <array><string>xlsx</string><string>xlsm</string></array>
+                    <key>CFBundleTypeName</key>
+                    <string>Excel 活頁簿</string>
+                    <key>CFBundleTypeRole</key>
+                    <string>Editor</string>
+                    <key>LSHandlerRank</key>
+                    <string>Alternate</string>
+                </dict>
+                <dict>
+                    <key>CFBundleTypeExtensions</key>
+                    <array><string>csv</string></array>
+                    <key>CFBundleTypeName</key>
+                    <string>CSV 文字檔</string>
+                    <key>CFBundleTypeRole</key>
+                    <string>Editor</string>
+                    <key>LSHandlerRank</key>
+                    <string>Alternate</string>
+                </dict>
+                <dict>
+                    <key>CFBundleTypeExtensions</key>
+                    <array><string>wwx</string></array>
+                    <key>CFBundleTypeName</key>
+                    <string>WW Excel 活頁簿</string>
+                    <key>CFBundleTypeRole</key>
+                    <string>Editor</string>
+                    <key>LSHandlerRank</key>
+                    <string>Owner</string>
+                </dict>
+            </array>
     </dict>
 </plist>

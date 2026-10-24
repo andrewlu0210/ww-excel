@@ -21,7 +21,54 @@ export type MenuAction =
   | 'formatCells'
   | 'insertSheet'
   | 'autofitCols'
-  | 'autofitRows';
+  | 'autofitRows'
+  // v0.5
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'pasteSpecial'
+  | 'fillDown'
+  | 'fillRight'
+  | 'find'
+  | 'replace'
+  | 'insertCells'
+  | 'deleteCells'
+  | 'insertRows'
+  | 'insertCols'
+  | 'deleteRows'
+  | 'deleteCols'
+  | 'hideRows'
+  | 'unhideRows'
+  | 'hideCols'
+  | 'unhideCols'
+  | 'freezePanes'
+  | 'freezeTopRow'
+  | 'freezeFirstCol'
+  | 'unfreeze'
+  | 'sort'
+  | 'sortAsc'
+  | 'sortDesc'
+  | 'filter'
+  | 'clearAll'
+  | 'clearFormats'
+  | 'clearContents';
+
+// Menu actions that also apply while a cell is being edited; the rest
+// (clipboard, fill, ...) leave the key to the text field.
+const EDIT_MENU = new Set<MenuAction>([
+  'undo',
+  'redo',
+  'selectAll',
+  'new',
+  'open',
+  'save',
+  'saveAs',
+  'close',
+  'bold',
+  'italic',
+  'underline',
+  'formatCells',
+]);
 
 export type Action =
   // Arrow keys. jump = ⌘ (data edge), extend = Shift.
@@ -37,6 +84,7 @@ export type Action =
   | { type: 'clear' } // Delete / forward delete
   | { type: 'selectRow' } // Shift+Space
   | { type: 'selectCol' } // ⌃Space
+  | { type: 'escape' } // Esc while idle: ends the copy marquee
   | { type: 'menu'; action: MenuAction }
   // Editing only
   | { type: 'commit'; then: 'down' | 'up' | 'right' | 'left' | 'stay' }
@@ -76,8 +124,35 @@ const ARROWS: Record<string, [number, number]> = {
 // the key first inside WKWebView, so both paths dispatch through the
 // same de-duplicating handler.
 function menuShortcut(e: KeyLike): MenuAction | null {
+  const key = e.key.toLowerCase();
+  // ⌃ shortcuts (Excel for Mac): hide/unhide rows and columns.
+  if (e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (key === '9' || key === '(') return e.shiftKey ? 'unhideRows' : 'hideRows';
+    if (key === '0' || key === ')') return e.shiftKey ? 'unhideCols' : 'hideCols';
+    return null;
+  }
+  if (e.ctrlKey && e.metaKey && !e.altKey && key === 'v') return 'pasteSpecial';
   if (!e.metaKey || e.altKey || e.ctrlKey) return null;
-  switch (e.key.toLowerCase()) {
+  switch (key) {
+    case 'c':
+      return e.shiftKey ? null : 'copy';
+    case 'x':
+      return e.shiftKey ? null : 'cut';
+    case 'v':
+      return e.shiftKey ? null : 'paste';
+    case 'd':
+      return e.shiftKey ? null : 'fillDown';
+    case 'r':
+      return e.shiftKey ? null : 'fillRight';
+    case 'f':
+      return e.shiftKey ? 'filter' : 'find';
+    case 'h':
+      return e.shiftKey ? 'replace' : null;
+    case '+':
+    case '=':
+      return e.shiftKey || key === '+' ? 'insertCells' : null;
+    case '-':
+      return e.shiftKey ? null : 'deleteCells';
     case 'z':
       return e.shiftKey ? 'redo' : 'undo';
     case 'a':
@@ -134,6 +209,8 @@ export function idleAction(e: KeyLike): Action | null {
     case 'Backspace':
     case 'Delete':
       return e.metaKey || e.altKey ? null : { type: 'clear' };
+    case 'Escape':
+      return { type: 'escape' };
     case ' ':
       if (e.shiftKey && !e.metaKey && !e.ctrlKey) return { type: 'selectRow' };
       if (e.ctrlKey && !e.shiftKey && !e.metaKey) return { type: 'selectCol' };
@@ -148,7 +225,8 @@ export function editAction(e: KeyLike): Action | null {
 
   const menu = menuShortcut(e);
   // Inside the editor ⌘A / ⌘Z act on the text; the controller decides.
-  if (menu) return { type: 'menu', action: menu };
+  if (menu && EDIT_MENU.has(menu)) return { type: 'menu', action: menu };
+  if (menu) return null;
   if (e.key === 'F4' || (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't')) {
     return { type: 'toggleAbs' };
   }

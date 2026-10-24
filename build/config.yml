@@ -69,7 +69,20 @@ dev_mode:
 
 # File Associations
 # More information at: https://v3.wails.io/noit/done/yet
+# Kept in sync by hand with build/darwin/Info.plist (CFBundleDocumentTypes).
 fileAssociations:
+  - ext: xlsx
+    name: Excel 活頁簿
+    description: Excel Workbook
+    role: Editor
+  - ext: csv
+    name: CSV 文字檔
+    description: Comma-separated values
+    role: Editor
+  - ext: wwx
+    name: WW Excel 活頁簿
+    description: WW Excel Workbook
+    role: Editor
 #  - ext: wails
 #    name: Wails
 #    description: Wails Application File

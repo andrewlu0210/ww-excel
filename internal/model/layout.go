@@ -27,6 +27,32 @@ type Layout struct {
 	RowStyles map[int]uint32
 	ColStyles map[int]uint32
 	Merges    []Range
+	// Frozen panes: the first FreezeRows rows and FreezeCols columns
+	// stay on screen while scrolling (0 = none).
+	FreezeRows int
+	FreezeCols int
+	// Filter is the sheet's AutoFilter, or nil.
+	Filter *AutoFilter
+}
+
+// AutoFilter is a filtered range: its first row holds the dropdown
+// buttons; rows below that fail a column's criteria are hidden.
+type AutoFilter struct {
+	Range Range
+	// Cols maps a column index to the display values it shows; columns
+	// without an entry show everything.
+	Cols map[int][]string
+}
+
+func (f *AutoFilter) Clone() *AutoFilter {
+	if f == nil {
+		return nil
+	}
+	out := &AutoFilter{Range: f.Range, Cols: make(map[int][]string, len(f.Cols))}
+	for c, v := range f.Cols {
+		out.Cols[c] = append([]string(nil), v...)
+	}
+	return out
 }
 
 func NewLayout() Layout {
@@ -48,6 +74,7 @@ func (l Layout) Clone() Layout {
 	out.RowStyles = cloneMap(l.RowStyles)
 	out.ColStyles = cloneMap(l.ColStyles)
 	out.Merges = append([]Range(nil), l.Merges...)
+	out.Filter = l.Filter.Clone()
 	return out
 }
 

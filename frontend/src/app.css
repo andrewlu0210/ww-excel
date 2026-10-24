@@ -90,3 +90,81 @@ body {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Shared dialog chrome for the v0.5 dialogs and panels. */
+.dlg-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.25);
+}
+.dlg {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+  color: var(--chrome-text);
+  font: 13px var(--ui-font);
+}
+.dlg h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.dlg fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+}
+.dlg legend {
+  padding: 0 4px;
+  color: var(--chrome-muted);
+  font-size: 11px;
+}
+.dlg label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dlg input[type='text'],
+.dlg select {
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--chrome-text);
+  background: var(--grid-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 4px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.dlg button {
+  padding: 4px 14px;
+  font: inherit;
+  color: var(--chrome-text);
+  background: var(--app-bg);
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+}
+.dlg button.primary {
+  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.dlg button:disabled {
+  opacity: 0.5;
+}
+.dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

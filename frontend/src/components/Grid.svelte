@@ -5,11 +5,12 @@
   import { Samples, type ScrollBenchResult } from '../grid/perf';
   import {
     emptyLook,
+    filterButton,
+    frozenRect,
     GridRenderer,
     HEADER_H,
     headerWidthFor,
     metrics,
-    rangeRect,
     SelectionRenderer,
     type Highlight,
     type Rect,
@@ -17,7 +18,7 @@
   } from '../grid/renderer';
   import { ScrollAxis } from '../grid/scroll';
   import type { CellPos, Range, Selection } from '../grid/selection';
-  import type { GridPointer, PointerArea, ResizeRequest } from '../input/pointer';
+  import type { ContextRequest, GridPointer, PointerArea, ResizeRequest } from '../input/pointer';
   import { styleStore } from '../stores/styles';
   import { BlockCache } from '../stores/viewportCache';
 
@@ -34,11 +35,31 @@
     onautofit?: (r: { rows: boolean; index: number }) => void;
     // Called after every redraw, e.g. to keep the editor on its cell.
     onviewport?: () => void;
+    // Copied range (marching ants) and fill-handle drag target.
+    copyRange?: Range | null;
+    fillPreview?: Range | null;
+    // A filter button was clicked: its column and where to open the menu.
+    onfilterbutton?: (e: { col: number; x: number; y: number }) => void;
+    oncontext?: (e: ContextRequest) => void;
     children?: Snippet;
   }
 
-  let { sheet, info, layout, selection, highlights = [], onpointer, onresize, onautofit, onviewport, children }: Props =
-    $props();
+  let {
+    sheet,
+    info,
+    layout,
+    selection,
+    highlights = [],
+    onpointer,
+    onresize,
+    onautofit,
+    onviewport,
+    copyRange = null,
+    fillPreview = null,
+    onfilterbutton,
+    oncontext,
+    children,
+  }: Props = $props();
 
   // Layout and cache are created once per mounted sheet; later prop
   // changes do not rebuild them.
@@ -97,8 +118,38 @@
       updateSpacer();
     }
     drawTimes.push(gridLayer.draw(sx, sy, selection));
-    selLayer.draw(sx, sy, selection, highlights);
+    drawSelection();
     onviewport?.();
+  }
+
+  let antsPhase = 0;
+  function drawSelection(): void {
+    selLayer?.draw(sx, sy, selection, highlights, { copy: copyRange, antsPhase, fill: fillPreview });
+  }
+
+  // Marching ants: redraw only the selection layer.
+  $effect(() => {
+    if (!copyRange) return;
+    const timer = setInterval(() => {
+      antsPhase = (antsPhase + 1) % 7;
+      if (!destroyed) drawSelection();
+    }, 90);
+    return () => clearInterval(timer);
+  });
+
+  // Frozen panes: positions left of / above the freeze lines do not
+  // scroll.
+  function frozenW(): number {
+    return look.freeze.cols > 0 ? cols.offset(look.freeze.cols) : 0;
+  }
+  function frozenH(): number {
+    return look.freeze.rows > 0 ? rows.offset(look.freeze.rows) : 0;
+  }
+  function scrollXAt(x: number): number {
+    return x < metrics.headerW + frozenW() ? 0 : sx;
+  }
+  function scrollYAt(y: number): number {
+    return y < HEADER_H + frozenH() ? 0 : sy;
   }
 
   function viewW(): number {
@@ -155,9 +206,15 @@
       rowStyles: new Map((l.rowStyles ?? []).map((s) => [s.i, s.s])),
       colStyles: new Map((l.colStyles ?? []).map((s) => [s.i, s.s])),
       merges: (l.merges ?? []).map((m) => ({ r0: m.r0, c0: m.c0, r1: m.r1, c1: m.c1 })),
+      freeze: { rows: l.freezeRows ?? 0, cols: l.freezeCols ?? 0 },
+      filter: l.filter ? { r0: l.filter.r0, c0: l.filter.c0, r1: l.filter.r1, c1: l.filter.c1 } : null,
+      filtered: new Set(l.filteredCols ?? []),
     };
     if (gridLayer) gridLayer.look = look;
-    if (selLayer) selLayer.merges = look.merges;
+    if (selLayer) {
+      selLayer.merges = look.merges;
+      selLayer.freeze = look.freeze;
+    }
     if (scroller) updateSpacer();
     schedule();
   }
@@ -195,15 +252,17 @@
   function borderAt(x: number, y: number): { rows: boolean; index: number } | null {
     const area = areaAt(x, y);
     if (area === 'col') {
-      const c = cols.indexAt(x - metrics.headerW + sx);
-      const right = metrics.headerW + cols.offset(c + 1) - sx;
-      const left = metrics.headerW + cols.offset(c) - sx;
+      const s = scrollXAt(x);
+      const c = cols.indexAt(x - metrics.headerW + s);
+      const right = metrics.headerW + cols.offset(c + 1) - s;
+      const left = metrics.headerW + cols.offset(c) - s;
       if (Math.abs(x - right) <= 4) return { rows: false, index: c };
       if (Math.abs(x - left) <= 4 && c > 0) return { rows: false, index: prevVisible(cols, c) };
     } else if (area === 'row') {
-      const r = rows.indexAt(y - HEADER_H + sy);
-      const bottom = HEADER_H + rows.offset(r + 1) - sy;
-      const top = HEADER_H + rows.offset(r) - sy;
+      const s = scrollYAt(y);
+      const r = rows.indexAt(y - HEADER_H + s);
+      const bottom = HEADER_H + rows.offset(r + 1) - s;
+      const top = HEADER_H + rows.offset(r) - s;
       if (Math.abs(y - bottom) <= 3) return { rows: true, index: r };
       if (Math.abs(y - top) <= 3 && r > 0) return { rows: true, index: prevVisible(rows, r) };
     }
@@ -221,7 +280,7 @@
   function posAt(x: number, y: number): CellPos {
     const cx = Math.max(metrics.headerW, Math.min(x, viewW() - 1));
     const cy = Math.max(HEADER_H, Math.min(y, viewH() - 1));
-    return { row: rows.indexAt(cy - HEADER_H + sy), col: cols.indexAt(cx - metrics.headerW + sx) };
+    return { row: rows.indexAt(cy - HEADER_H + scrollYAt(cy)), col: cols.indexAt(cx - metrics.headerW + scrollXAt(cx)) };
   }
 
   function emit(kind: GridPointer['kind'], area: PointerArea): void {
@@ -237,7 +296,7 @@
   function onPointerDown(e: PointerEvent): void {
     const p = local(e);
     // Clicks on non-overlay scrollbars land outside the client area.
-    if (p.x >= viewW() || p.y >= viewH() || e.button !== 0) return;
+    if (p.x >= viewW() || p.y >= viewH() || e.button !== 0 || e.ctrlKey) return;
     // Keep keyboard focus on the cell editor.
     e.preventDefault();
     lastPointer = { ...p, shift: e.shiftKey, meta: e.metaKey };
@@ -255,9 +314,46 @@
       };
       return;
     }
+    if (onHandle(p.x, p.y)) {
+      drag = { kind: 'select', area: 'fill', pointerId: e.pointerId };
+      emit('down', 'fill');
+      return;
+    }
     const area = areaAt(p.x, p.y);
+    if (area === 'cell') {
+      const btn = filterButtonAt(p.x, p.y);
+      if (btn) {
+        scroller.releasePointerCapture(e.pointerId);
+        const rect = host.getBoundingClientRect();
+        onfilterbutton?.({ col: btn.col, x: rect.left + btn.x, y: rect.top + btn.y });
+        return;
+      }
+    }
     drag = { kind: 'select', area, pointerId: e.pointerId };
     emit('down', area);
+  }
+
+  function onHandle(x: number, y: number): boolean {
+    const h = selLayer?.handle;
+    return !!h && x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h;
+  }
+
+  // The filter dropdown button under a point, if any.
+  function filterButtonAt(x: number, y: number): { col: number; x: number; y: number } | null {
+    const f = look.filter;
+    if (!f) return null;
+    const pos = posAt(x, y);
+    if (pos.row !== f.r0 || pos.col < f.c0 || pos.col > f.c1) return null;
+    const b = filterButton(cellRect(pos));
+    if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) return null;
+    return { col: pos.col, x: b.x, y: b.y + b.h };
+  }
+
+  function onContextMenu(e: MouseEvent): void {
+    e.preventDefault();
+    const p = local(e);
+    if (p.x >= viewW() || p.y >= viewH()) return;
+    oncontext?.({ area: areaAt(p.x, p.y), pos: posAt(p.x, p.y), x: e.clientX, y: e.clientY });
   }
 
   function onPointerMove(e: PointerEvent): void {
@@ -268,9 +364,11 @@
         ? border.rows
           ? 'row-resize'
           : 'col-resize'
-        : areaAt(p.x, p.y) === 'cell'
-          ? 'cell'
-          : 'default';
+        : onHandle(p.x, p.y)
+          ? 'crosshair'
+          : areaAt(p.x, p.y) === 'cell' && !filterButtonAt(p.x, p.y)
+            ? 'cell'
+            : 'default';
       return;
     }
     if (drag.kind === 'resize') {
@@ -317,7 +415,11 @@
       onautofit?.(border);
       return;
     }
-    if (areaAt(p.x, p.y) !== 'cell') return;
+    if (onHandle(p.x, p.y)) {
+      emit('dbl', 'fill');
+      return;
+    }
+    if (areaAt(p.x, p.y) !== 'cell' || filterButtonAt(p.x, p.y)) return;
     lastPointer = { ...p, shift: e.shiftKey, meta: e.metaKey };
     emit('dbl', 'cell');
   }
@@ -331,16 +433,17 @@
     autoRaf = 0;
     if (!drag || drag.kind !== 'select') return;
     const area = drag.area;
+    const frozen = { x: metrics.headerW + frozenW(), y: HEADER_H + frozenH() };
     const p = lastPointer;
     const speed = (over: number) => Math.sign(over) * Math.min(60, Math.abs(over) / 2 + 4);
     let dx = 0;
     let dy = 0;
     if (area !== 'row') {
-      if (p.x < metrics.headerW) dx = speed(p.x - metrics.headerW);
+      if (p.x < frozen.x && sx > 0) dx = speed(p.x - frozen.x);
       else if (p.x >= viewW()) dx = speed(p.x - viewW());
     }
     if (area !== 'col') {
-      if (p.y < HEADER_H) dy = speed(p.y - HEADER_H);
+      if (p.y < frozen.y && sy > 0) dy = speed(p.y - frozen.y);
       else if (p.y >= viewH()) dy = speed(p.y - viewH());
     }
     if (dx === 0 && dy === 0) return;
@@ -353,7 +456,7 @@
 
   // Rectangle of a range in host coordinates (may lie off screen).
   export function areaRect(r: Range): Rect {
-    return rangeRect(rows, cols, r, sx, sy);
+    return frozenRect(rows, cols, r, look.freeze, sx, sy);
   }
 
   export function cellRect(pos: CellPos): Rect {
@@ -381,16 +484,24 @@
   export function scrollIntoView(pos: CellPos): void {
     const contentW = viewW() - metrics.headerW;
     const contentH = viewH() - HEADER_H;
+    // Frozen cells are always visible; the others must clear the frozen
+    // panes.
+    const fw = frozenW();
+    const fh = frozenH();
     let x = sx;
     let y = sy;
     const left = cols.offset(pos.col);
     const right = left + cols.size(pos.col);
     const top = rows.offset(pos.row);
     const bottom = top + rows.size(pos.row);
-    if (left < x) x = left;
-    else if (right > x + contentW) x = Math.min(left, right - contentW);
-    if (top < y) y = top;
-    else if (bottom > y + contentH) y = Math.min(top, bottom - contentH);
+    if (pos.col >= look.freeze.cols) {
+      if (left < x + fw) x = left - fw;
+      else if (right > x + contentW) x = Math.min(left - fw, right - contentW);
+    }
+    if (pos.row >= look.freeze.rows) {
+      if (top < y + fh) y = top - fh;
+      else if (bottom > y + contentH) y = Math.min(top - fh, bottom - contentH);
+    }
     if (x !== sx || y !== sy) setScroll(x, y);
   }
 
@@ -414,6 +525,8 @@
   $effect(() => {
     void selection;
     void highlights;
+    void copyRange;
+    void fillPreview;
     schedule();
   });
 
@@ -422,6 +535,7 @@
     selLayer = new SelectionRenderer(selCanvas, rows, cols);
     gridLayer.look = look;
     selLayer.merges = look.merges;
+    selLayer.freeze = look.freeze;
     cache.onUpdate = schedule;
     const offStyles = styleStore.subscribe(schedule);
 
@@ -499,6 +613,15 @@
     scroller.scrollTo(0, 0);
   }
 
+  export function freeze(): { rows: number; cols: number } {
+    return look.freeze;
+  }
+
+  // Visible top-left scrollable cell, for freezing panes.
+  export function topLeft(): CellPos {
+    return { row: rows.indexAt(sy + frozenH()), col: cols.indexAt(sx + frozenW()) };
+  }
+
   export function contentSize(): { width: number; height: number } {
     return { width: cols.total, height: rows.total };
   }
@@ -519,6 +642,7 @@
     onpointerup={onPointerUp}
     onpointercancel={onPointerUp}
     ondblclick={onDblClick}
+    oncontextmenu={onContextMenu}
   >
     <div style:width="{spacerW}px" style:height="{spacerH}px"></div>
   </div>

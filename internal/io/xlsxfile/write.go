@@ -19,8 +19,18 @@ type Changes struct {
 	// Cells edited since load, per sheet.
 	Cells map[*model.Sheet]map[[2]int]bool
 	// Layout of each sheet as it was in the source file, for sheets whose
-	// layout changed.
+	// layout changed (already shifted by Shifts).
 	OldLayouts map[*model.Sheet]model.Layout
+	// Row/column insertions and deletions to replay on the source first,
+	// in order, so untouched content (charts, comments) moves along.
+	Shifts map[*model.Sheet][]Shift
+}
+
+// Shift is an insertion (Count > 0) or deletion (Count < 0) of rows or
+// columns at index At.
+type Shift struct {
+	Rows      bool
+	At, Count int
 }
 
 // Save writes wb to path. src is the file the workbook was loaded from
@@ -164,6 +174,11 @@ func (w *writer) fullSheet(sh *model.Sheet) error {
 }
 
 func (w *writer) changedSheet(sh *model.Sheet, ch Changes) error {
+	for _, s := range ch.Shifts[sh] {
+		if err := w.replayShift(sh.Name, s); err != nil {
+			return err
+		}
+	}
 	for pos := range ch.Cells[sh] {
 		if err := w.cell(sh, pos[0], pos[1], sh.Get(pos[0], pos[1])); err != nil {
 			return err
@@ -171,6 +186,75 @@ func (w *writer) changedSheet(sh *model.Sheet, ch Changes) error {
 	}
 	if old, ok := ch.OldLayouts[sh]; ok {
 		return w.layout(sh, old)
+	}
+	return nil
+}
+
+func (w *writer) replayShift(sheet string, s Shift) error {
+	// excelize does not move comments; capture them first.
+	comments, err := w.f.GetComments(sheet)
+	if err != nil {
+		return err
+	}
+	if err := w.shiftCells(sheet, s); err != nil {
+		return err
+	}
+	for _, c := range comments {
+		col, row, err := excelize.CellNameToCoordinates(c.Cell)
+		if err != nil {
+			continue
+		}
+		i := col - 1
+		if s.Rows {
+			i = row - 1
+		}
+		ni, keep := model.ShiftIndex(i, s.At, s.Count)
+		if keep && ni == i {
+			continue
+		}
+		if err := w.f.DeleteComment(sheet, c.Cell); err != nil {
+			return err
+		}
+		if !keep {
+			continue
+		}
+		if s.Rows {
+			row = ni + 1
+		} else {
+			col = ni + 1
+		}
+		c.Cell, _ = excelize.CoordinatesToCellName(col, row)
+		if err := w.f.AddComment(sheet, c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *writer) shiftCells(sheet string, s Shift) error {
+	f := w.f
+	if s.Rows {
+		if s.Count > 0 {
+			return f.InsertRows(sheet, s.At+1, s.Count)
+		}
+		for i := 0; i < -s.Count; i++ {
+			if err := f.RemoveRow(sheet, s.At+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	col, err := excelize.ColumnNumberToName(s.At + 1)
+	if err != nil {
+		return err
+	}
+	if s.Count > 0 {
+		return f.InsertCols(sheet, col, s.Count)
+	}
+	for i := 0; i < -s.Count; i++ {
+		if err := f.RemoveCol(sheet, col); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -297,6 +381,30 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 			if err := f.MergeCell(sh.Name, cellName(m.R0, m.C0), cellName(m.R1, m.C1)); err != nil {
 				return err
 			}
+		}
+	}
+	if l.FreezeRows != old.FreezeRows || l.FreezeCols != old.FreezeCols {
+		panes := &excelize.Panes{}
+		if l.FreezeRows > 0 || l.FreezeCols > 0 {
+			active := "bottomRight"
+			switch {
+			case l.FreezeCols == 0:
+				active = "bottomLeft"
+			case l.FreezeRows == 0:
+				active = "topRight"
+			}
+			panes = &excelize.Panes{Freeze: true, XSplit: l.FreezeCols, YSplit: l.FreezeRows,
+				TopLeftCell: cellName(l.FreezeRows, l.FreezeCols), ActivePane: active}
+		}
+		if err := f.SetPanes(sh.Name, panes); err != nil {
+			return err
+		}
+	}
+	// Removing a filter is not written back: excelize cannot delete one.
+	if fl := l.Filter; fl != nil && (old.Filter == nil || old.Filter.Range != fl.Range) {
+		ref := cellName(fl.Range.R0, fl.Range.C0) + ":" + cellName(fl.Range.R1, fl.Range.C1)
+		if err := f.AutoFilter(sh.Name, ref, nil); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -35,7 +35,7 @@ describe('idleAction', () => {
     expect(idleAction(key('a'))).toBeNull();
     expect(idleAction(key(' '))).toBeNull();
     expect(idleAction(key('1'))).toBeNull();
-    expect(idleAction(key('c', { metaKey: true }))).toBeNull(); // native Copy role
+    expect(idleAction(key('c', { metaKey: true }))).toEqual({ type: 'menu', action: 'copy' }); // the grid copies (v0.5)
   });
 
   it('ignores keys during IME composition', () => {
@@ -72,5 +72,30 @@ describe('editAction', () => {
   it('does not commit while the IME confirms a candidate', () => {
     expect(editAction(key('Enter', { keyCode: 229 }))).toBeNull();
     expect(editAction(key('ArrowDown', { isComposing: true }))).toBeNull();
+  });
+});
+
+describe('v0.5 shortcuts', () => {
+  const k = (key: string, mods: Partial<KeyLike> = {}): KeyLike => ({
+    key,
+    shiftKey: false,
+    metaKey: false,
+    altKey: false,
+    ctrlKey: false,
+    ...mods,
+  });
+  it('maps clipboard and editing commands when idle', () => {
+    expect(idleAction(k('c', { metaKey: true }))).toEqual({ type: 'menu', action: 'copy' });
+    expect(idleAction(k('v', { metaKey: true, ctrlKey: true }))).toEqual({ type: 'menu', action: 'pasteSpecial' });
+    expect(idleAction(k('+', { metaKey: true, shiftKey: true }))).toEqual({ type: 'menu', action: 'insertCells' });
+    expect(idleAction(k('-', { metaKey: true }))).toEqual({ type: 'menu', action: 'deleteCells' });
+    expect(idleAction(k('(', { ctrlKey: true, shiftKey: true }))).toEqual({ type: 'menu', action: 'unhideRows' });
+    expect(idleAction(k('f', { metaKey: true, shiftKey: true }))).toEqual({ type: 'menu', action: 'filter' });
+    expect(idleAction(k('Escape'))).toEqual({ type: 'escape' });
+  });
+  it('leaves clipboard keys to the text while editing', () => {
+    expect(editAction(k('c', { metaKey: true }))).toBeNull();
+    expect(editAction(k('v', { metaKey: true }))).toBeNull();
+    expect(editAction(k('z', { metaKey: true }))).toEqual({ type: 'menu', action: 'undo' });
   });
 });

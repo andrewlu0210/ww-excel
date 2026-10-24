@@ -7,7 +7,7 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.4 完成**（2026-10-24），下一步是 v0.5（生產力操作）
+- 目前階段：**v0.5 完成**（2026-10-24），下一步是 v0.6（進階資料功能）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
 - 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、Svelte 5、Vite 8、vitest 5
 
@@ -199,14 +199,25 @@ ww-excel/
 - 留到後續版本：Golden 期望值用真實 Excel 驗證（工具已備好，見 `testdata/golden/README.md`）、編輯中的部分文字格式（rich text）、條件式格式（v0.6）、凍結窗格與隱藏列欄 UI（v0.5）、稀疏 block 節省記憶體
 
 ### v0.5 — 生產力操作
-- [ ] 剪貼簿與 Excel 互通（TSV 與 HTML）
-- [ ] 選擇性貼上（值、格式、轉置）
-- [ ] 填滿控點、自動數列、日期與自訂清單
-- [ ] 插入 / 刪除列欄，公式參照自動調整
-- [ ] 凍結窗格、隱藏列欄
-- [ ] 尋找與取代、排序、自動篩選
-- [ ] 多視窗（一份文件一個視窗）、最近檔案
-- **驗收**：能取代 Excel 處理日常輕量工作
+- [x] 剪貼簿與 Excel 互通（TSV 與 HTML）
+- [x] 選擇性貼上（值、格式、轉置）
+- [x] 填滿控點、自動數列、日期與自訂清單
+- [x] 插入 / 刪除列欄，公式參照自動調整
+- [x] 凍結窗格、隱藏列欄
+- [x] 尋找與取代、排序、自動篩選
+- [x] 多視窗（一份文件一個視窗）、最近檔案
+- **驗收**：能取代 Excel 處理日常輕量工作 → ✅ self-test 113/113；與 Excel 互相複製貼上、多視窗、Finder 開檔 → 待手動確認
+- 設計重點：
+  - 剪貼簿：⌘C 時 Go 存一份內部 clip（含公式 AST 與樣式值，不依賴來源活頁簿），並把 TSV 寫進系統剪貼簿；前端在使用者手勢內再嘗試寫入 HTML 表格。貼上時剪貼簿文字和上次複製的相同就用內部 clip（公式平移、格式、合併），否則當成輸入逐格解析
+  - ⌘V 閒置時由 Go 讀系統剪貼簿；選單的原生「貼上」會觸發 textarea 的 paste 事件，兩條路都經過 `runMenu` 去重。編輯中 ⌘C/⌘X/⌘V 交給 textarea 原生處理
+  - 剪下貼上是「移動」：整本活頁簿參照到來源範圍的公式改指向新位置（`ast.Move`）；剪下後有任何編輯就取消
+  - 插入／刪除列欄：`model.Sheet.Shift` 搬儲存格與版面，`ast.Adjust` 調整所有公式，Undo 用公式快照完整還原（含 `#REF!`）。xlsx 原地存檔時用 excelize 重放 InsertRows/RemoveRow，並手動搬註解
+  - 凍結窗格：繪製分成最多 4 個區域，每區有自己的捲動量和裁切框；凍結以絕對列欄為準，凍結時捲回左上角
+  - 篩選：`Layout.Filter` 記錄範圍和每欄允許的顯示值，用隱藏列實作；xlsx 讀寫 `_xlnm._FilterDatabase` 與 autoFilter 範圍
+  - 多視窗：每個視窗一個 `Session`，`Hub` 依 binding 呼叫的視窗（`application.WindowKey`）找到 session；Go 用 `window.EmitEvent` 推送，前端 bridge 依 sender 過濾。開檔時如果目前視窗是沒動過的新文件就直接取代，否則開新視窗；已開啟的檔案會切到該視窗
+  - 最近檔案存在 `~/Library/Application Support/ww-excel/recent.json`；Info.plist 註冊 xlsx/csv（Alternate）與 wwx（Owner）
+- self-test 會寫入真實的系統剪貼簿，也不測多視窗（新視窗會再跑一次 self-test）
+- 留到後續版本：插入／刪除儲存格並右移或下移（目前只支援整列整欄）、轉置貼上時參照不轉置、移除篩選無法寫回已存在的 xlsx（excelize 沒有刪除 API）、凍結時保留目前捲動位置、從 Excel 貼上 HTML 格式、拖曳選取範圍搬移、⌥ 拖曳填滿控點
 
 ### v0.6 — 進階資料功能
 - [ ] 條件式格式、資料驗證（下拉選單）

@@ -33,9 +33,79 @@ export interface SheetLook {
   rowStyles: Map<number, number>;
   colStyles: Map<number, number>;
   merges: Range[];
+  // Frozen rows/columns at the top/left (0 = none).
+  freeze: Freeze;
+  // AutoFilter range (buttons on its first row) and filtered columns.
+  filter: Range | null;
+  filtered: Set<number>;
 }
 
-export const emptyLook = (): SheetLook => ({ rowStyles: new Map(), colStyles: new Map(), merges: [] });
+export interface Freeze {
+  rows: number;
+  cols: number;
+}
+
+export const emptyLook = (): SheetLook => ({
+  rowStyles: new Map(),
+  colStyles: new Map(),
+  merges: [],
+  freeze: { rows: 0, cols: 0 },
+  filter: null,
+  filtered: new Set(),
+});
+
+// A pane of the content area: a clip rectangle (viewport coordinates)
+// with its own scroll offset. Frozen rows/columns are panes that never
+// scroll; without freezing there is one pane.
+export interface Pane {
+  sx: number;
+  sy: number;
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+interface Segment {
+  s: number; // scroll offset
+  a: number; // clip start
+  b: number; // clip end
+}
+
+function segments(axis: AxisLayout, frozen: number, scroll: number, start: number, end: number): Segment[] {
+  if (frozen <= 0) return [{ s: scroll, a: start, b: end }];
+  const edge = Math.min(start + axis.offset(frozen), end);
+  return [
+    { s: 0, a: start, b: edge },
+    { s: scroll, a: edge, b: end },
+  ];
+}
+
+export function panes(rows: AxisLayout, cols: AxisLayout, fz: Freeze, sx: number, sy: number, w: number, h: number): Pane[] {
+  const out: Pane[] = [];
+  for (const ys of segments(rows, fz.rows, sy, HEADER_H, h)) {
+    for (const xs of segments(cols, fz.cols, sx, metrics.headerW, w)) {
+      if (xs.b > xs.a && ys.b > ys.a) out.push({ sx: xs.s, sy: ys.s, x0: xs.a, x1: xs.b, y0: ys.a, y1: ys.b });
+    }
+  }
+  return out;
+}
+
+// Rectangle of a range with frozen panes: each edge uses the scroll of
+// the pane its row/column is in.
+export function frozenRect(rows: AxisLayout, cols: AxisLayout, r: Range, fz: Freeze, sx: number, sy: number): Rect {
+  const x0 = metrics.headerW + cols.offset(r.c0) - (r.c0 < fz.cols ? 0 : sx);
+  const x1 = metrics.headerW + cols.offset(r.c1 + 1) - (r.c1 < fz.cols ? 0 : sx);
+  const y0 = HEADER_H + rows.offset(r.r0) - (r.r0 < fz.rows ? 0 : sy);
+  const y1 = HEADER_H + rows.offset(r.r1 + 1) - (r.r1 < fz.rows ? 0 : sy);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+// Filter dropdown button inside a header cell (viewport coordinates).
+export function filterButton(cell: Rect): Rect {
+  const size = Math.min(15, cell.h - 3, cell.w - 2);
+  return { x: cell.x + cell.w - size - 2, y: cell.y + cell.h - size - 2, w: size, h: size };
+}
 
 interface Theme {
   gridBg: string;
@@ -180,14 +250,14 @@ export class GridRenderer extends Layer {
     this.theme = readTheme();
   }
 
-  visibleRange(sx: number, sy: number): VisibleRange {
-    const contentW = this.width - metrics.headerW;
-    const contentH = this.height - HEADER_H;
+  // Cells inside a pane's clip rectangle.
+  private paneRange(p: Pane): VisibleRange {
+    const hw = metrics.headerW;
     return {
-      r0: this.rows.indexAt(sy),
-      r1: this.rows.indexAt(sy + contentH),
-      c0: this.cols.indexAt(sx),
-      c1: this.cols.indexAt(sx + contentW),
+      r0: this.rows.indexAt(p.y0 - HEADER_H + p.sy),
+      r1: this.rows.indexAt(p.y1 - HEADER_H + p.sy),
+      c0: this.cols.indexAt(p.x0 - hw + p.sx),
+      c1: this.cols.indexAt(p.x1 - hw + p.sx),
     };
   }
 
@@ -202,10 +272,34 @@ export class GridRenderer extends Layer {
   draw(sx: number, sy: number, sel: Selection): number {
     const t0 = performance.now();
     const { ctx, width: w, height: h, theme: th } = this;
-    const vr = this.visibleRange(sx, sy);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = th.gridBg;
+    ctx.fillRect(0, 0, w, h);
+
+    const fz = this.look.freeze;
+    for (const p of panes(this.rows, this.cols, fz, sx, sy, w, h)) this.drawPane(p);
+
+    const hw = metrics.headerW;
+    this.drawHeaders(
+      segments(this.cols, fz.cols, sx, hw, w),
+      segments(this.rows, fz.rows, sy, HEADER_H, h),
+      sel,
+    );
+
+    // Freeze lines.
+    ctx.fillStyle = th.headerLine;
+    if (fz.cols > 0) ctx.fillRect(Math.min(hw + this.cols.offset(fz.cols), w) - 1, 0, 1, h);
+    if (fz.rows > 0) ctx.fillRect(0, Math.min(HEADER_H + this.rows.offset(fz.rows), h) - 1, w, 1);
+    return performance.now() - t0;
+  }
+
+  private drawPane(p: Pane): void {
+    const { ctx } = this;
+    const vr = this.paneRange(p);
+    const { sx, sy } = p;
     const hw = metrics.headerW;
 
-    // Text from columns left of the viewport may overflow into it.
+    // Text from columns left of the pane may overflow into it.
     const first = Math.max(0, vr.c0 - OVERFLOW_LOOKBACK);
     const cache = this.cache;
     const blocks = {
@@ -223,10 +317,6 @@ export class GridRenderer extends Layer {
       if (br < blocks.r0 || bc < blocks.c0) cache.ensure({ r0: br, r1: br, c0: bc, c1: bc });
     }
 
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = th.gridBg;
-    ctx.fillRect(0, 0, w, h);
-
     // Row/col pixel positions are computed once and shared by all passes.
     const ys = this.positions(this.rows, vr.r0, vr.r1, HEADER_H - sy);
     const xs = this.positions(this.cols, first, vr.c1, hw - sx);
@@ -243,16 +333,49 @@ export class GridRenderer extends Layer {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(hw, HEADER_H, w - hw, h - HEADER_H);
+    ctx.rect(p.x0, p.y0, p.x1 - p.x0, p.y1 - p.y0);
     ctx.clip();
     this.drawGridLines(xs, ys);
     this.drawFills(cv, xs, ys, covered, merges, sx, sy);
     this.drawBorders(cv, xs, ys, covered, merges, sx, sy);
     this.drawTexts(cv, xs, ys, covered, merges, sx, sy);
+    this.drawFilterButtons(vr, sx, sy);
     ctx.restore();
+  }
 
-    this.drawHeaders(vr, xs.slice(vr.c0 - first), ys, sel);
-    return performance.now() - t0;
+  private drawFilterButtons(vr: VisibleRange, sx: number, sy: number): void {
+    const f = this.look.filter;
+    if (!f || f.r0 < vr.r0 || f.r0 > vr.r1) return;
+    const { ctx, theme: th } = this;
+    for (let c = Math.max(f.c0, vr.c0); c <= Math.min(f.c1, vr.c1); c++) {
+      if (this.cols.size(c) === 0) continue;
+      const b = filterButton(rangeRect(this.rows, this.cols, { r0: f.r0, c0: c, r1: f.r0, c1: c }, sx, sy));
+      ctx.fillStyle = th.headerBg;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = th.headerLine;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+      const on = this.look.filtered.has(c);
+      ctx.fillStyle = on ? th.accent : th.headerText;
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      ctx.beginPath();
+      if (on) {
+        // Funnel
+        ctx.moveTo(cx - 4, cy - 3);
+        ctx.lineTo(cx + 4, cy - 3);
+        ctx.lineTo(cx + 1, cy + 1);
+        ctx.lineTo(cx + 1, cy + 4);
+        ctx.lineTo(cx - 1, cy + 4);
+        ctx.lineTo(cx - 1, cy + 1);
+      } else {
+        ctx.moveTo(cx - 3.5, cy - 1.5);
+        ctx.lineTo(cx + 3.5, cy - 1.5);
+        ctx.lineTo(cx, cy + 2.5);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   // positions()[i] is the start of index first+i; the extra trailing
@@ -504,71 +627,83 @@ export class GridRenderer extends Layer {
     return state;
   }
 
-  private drawHeaders(vr: VisibleRange, xs: number[], ys: number[], sel: Selection): void {
+  private drawHeaders(colSegs: Segment[], rowSegs: Segment[], sel: Selection): void {
     const { ctx, width: w, height: h, theme: th } = this;
     const hw = metrics.headerW;
 
     ctx.fillStyle = th.headerBg;
     ctx.fillRect(0, 0, w, HEADER_H);
     ctx.fillRect(0, 0, hw, h);
-
     ctx.font = th.headerFont;
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineWidth = 1 / this.dpr;
 
-    const colStates = new Array<number>(vr.c1 - vr.c0 + 1);
-    const rowStates = new Array<number>(vr.r1 - vr.r0 + 1);
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(hw, 0, w - hw, HEADER_H);
-    ctx.clip();
-    for (let c = vr.c0; c <= vr.c1; c++) {
-      const left = xs[c - vr.c0];
-      const right = xs[c - vr.c0 + 1];
-      if (right === left) continue;
-      const state = (colStates[c - vr.c0] = this.headerState(sel, c, 'col'));
-      if (state > 0) {
-        ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
-        ctx.fillRect(left, 0, right - left, HEADER_H);
+    for (const seg of colSegs) {
+      const c0 = this.cols.indexAt(seg.a - hw + seg.s);
+      const c1 = this.cols.indexAt(seg.b - hw + seg.s);
+      const xs = this.positions(this.cols, c0, c1, hw - seg.s);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(seg.a, 0, seg.b - seg.a, HEADER_H);
+      ctx.clip();
+      ctx.textAlign = 'center';
+      ctx.beginPath();
+      for (let c = c0; c <= c1; c++) {
+        const left = xs[c - c0];
+        const right = xs[c - c0 + 1];
+        if (right === left) continue;
+        const state = this.headerState(sel, c, 'col');
+        if (state > 0) {
+          ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
+          ctx.fillRect(left, 0, right - left, HEADER_H);
+          ctx.fillStyle = th.accent;
+          ctx.fillRect(left, HEADER_H - 2, right - left, 2);
+        }
+        ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
+        ctx.fillText(colName(c), (left + right) / 2, HEADER_H / 2 + 1);
+        const x = this.snap(right - 1);
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, HEADER_H);
       }
-      ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
-      ctx.fillText(colName(c), (left + right) / 2, HEADER_H / 2 + 1);
+      ctx.strokeStyle = th.headerLine;
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.restore();
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, HEADER_H, hw, h - HEADER_H);
-    ctx.clip();
-    for (let r = vr.r0; r <= vr.r1; r++) {
-      const top = ys[r - vr.r0];
-      const bottom = ys[r - vr.r0 + 1];
-      if (bottom === top) continue;
-      const state = (rowStates[r - vr.r0] = this.headerState(sel, r, 'row'));
-      if (state > 0) {
-        ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
-        ctx.fillRect(0, top, hw, bottom - top);
+    for (const seg of rowSegs) {
+      const r0 = this.rows.indexAt(seg.a - HEADER_H + seg.s);
+      const r1 = this.rows.indexAt(seg.b - HEADER_H + seg.s);
+      const ys = this.positions(this.rows, r0, r1, HEADER_H - seg.s);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, seg.a, hw, seg.b - seg.a);
+      ctx.clip();
+      ctx.textAlign = 'center';
+      ctx.beginPath();
+      for (let r = r0; r <= r1; r++) {
+        const top = ys[r - r0];
+        const bottom = ys[r - r0 + 1];
+        if (bottom === top) continue;
+        const state = this.headerState(sel, r, 'row');
+        if (state > 0) {
+          ctx.fillStyle = state === 2 ? th.headerFullBg : th.headerActiveBg;
+          ctx.fillRect(0, top, hw, bottom - top);
+          ctx.fillStyle = th.accent;
+          ctx.fillRect(hw - 2, top, 2, bottom - top);
+        }
+        ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
+        ctx.fillText(String(r + 1), hw / 2, (top + bottom) / 2);
+        const y = this.snap(bottom - 1);
+        ctx.moveTo(0, y);
+        ctx.lineTo(hw, y);
       }
-      ctx.fillStyle = state > 0 ? th.headerActiveText : th.headerText;
-      ctx.fillText(String(r + 1), hw / 2, (top + bottom) / 2);
+      ctx.strokeStyle = th.headerLine;
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.restore();
     ctx.textAlign = 'start';
 
     ctx.beginPath();
-    for (let i = 1; i < xs.length; i++) {
-      if (xs[i] < hw) continue;
-      const x = this.snap(xs[i] - 1);
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, HEADER_H);
-    }
-    for (let i = 1; i < ys.length; i++) {
-      if (ys[i] < HEADER_H) continue;
-      const y = this.snap(ys[i] - 1);
-      ctx.moveTo(0, y);
-      ctx.lineTo(hw, y);
-    }
     const hy = this.snap(HEADER_H - 1);
     const hx = this.snap(hw - 1);
     ctx.moveTo(0, hy);
@@ -576,34 +711,25 @@ export class GridRenderer extends Layer {
     ctx.moveTo(hx, 0);
     ctx.lineTo(hx, h);
     ctx.strokeStyle = th.headerLine;
-    ctx.lineWidth = 1 / this.dpr;
     ctx.stroke();
-
-    // Accent edge on selected headers, as in Excel
-    ctx.fillStyle = th.accent;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(hw, 0, w - hw, HEADER_H);
-    ctx.clip();
-    for (let i = 0; i < colStates.length; i++) {
-      if (colStates[i] > 0) ctx.fillRect(xs[i], HEADER_H - 2, xs[i + 1] - xs[i], 2);
-    }
-    ctx.restore();
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, HEADER_H, hw, h - HEADER_H);
-    ctx.clip();
-    for (let i = 0; i < rowStates.length; i++) {
-      if (rowStates[i] > 0) ctx.fillRect(hw - 2, ys[i], 2, ys[i + 1] - ys[i]);
-    }
-    ctx.restore();
   }
 }
 
 // Selection layer: redrawn independently of the grid layer.
+// Extra marks on the selection layer.
+export interface Marks {
+  copy?: Range | null; // copied/cut range (marching ants)
+  antsPhase?: number;
+  fill?: Range | null; // fill-handle drag target
+  noHandle?: boolean;
+}
+
 export class SelectionRenderer extends Layer {
   private theme = readTheme();
   merges: Range[] = [];
+  freeze: Freeze = { rows: 0, cols: 0 };
+  // Where the fill handle was drawn (viewport coordinates), for hits.
+  handle: Rect | null = null;
   // Column or row being resized: [axis, pixel position] of the guide.
   guide: { vertical: boolean; at: number } | null = null;
 
@@ -626,23 +752,35 @@ export class SelectionRenderer extends Layer {
     return { r0: row, c0: col, r1: row, c1: col };
   }
 
-  draw(sx: number, sy: number, sel: Selection, highlights: readonly Highlight[] = []): void {
+  draw(sx: number, sy: number, sel: Selection, highlights: readonly Highlight[] = [], marks: Marks = {}): void {
     const { ctx, width: w, height: h, theme: th } = this;
-    const hw = metrics.headerW;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    this.handle = null;
+    for (const p of panes(this.rows, this.cols, this.freeze, sx, sy, w, h)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(p.x0, p.y0, p.x1 - p.x0, p.y1 - p.y0);
+      ctx.clip();
+      this.drawPane(p, sel, highlights, marks);
+      ctx.restore();
+    }
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(hw, HEADER_H, w - hw, h - HEADER_H);
-    ctx.clip();
+    if (this.guide) {
+      ctx.fillStyle = th.accent;
+      if (this.guide.vertical) ctx.fillRect(this.guide.at - 1, 0, 2, h);
+      else ctx.fillRect(0, this.guide.at - 1, w, 2);
+    }
+  }
 
+  private drawPane(p: Pane, sel: Selection, highlights: readonly Highlight[], marks: Marks): void {
+    const { ctx, width: w, height: h, theme: th } = this;
     const activeArea = this.mergeOf(sel.active.row, sel.active.col);
     const cur = current(sel);
     const single =
       isSingleCell(sel) ||
       (sel.ranges.length === 1 && cur.r0 === activeArea.r0 && cur.c0 === activeArea.c0 && cur.r1 === activeArea.r1 && cur.c1 === activeArea.c1);
-    const rect = (r: Range) => clampRect(rangeRect(this.rows, this.cols, r, sx, sy), w, h);
+    const rect = (r: Range) => clampRect(rangeRect(this.rows, this.cols, r, p.sx, p.sy), w, h);
 
     if (!single) {
       ctx.fillStyle = th.selectionFill;
@@ -665,22 +803,40 @@ export class SelectionRenderer extends Layer {
       if (rc.w > 0 && rc.h > 0) {
         ctx.lineWidth = 2;
         ctx.strokeRect(rc.x - 1, rc.y - 1, rc.w, rc.h);
+        // Fill handle, unless the corner lies in another pane.
         const fx = rc.x + rc.w - 4;
         const fy = rc.y + rc.h - 4;
-        ctx.fillStyle = th.gridBg;
-        ctx.fillRect(fx - 1, fy - 1, 8, 8);
-        ctx.fillStyle = th.accent;
-        ctx.fillRect(fx, fy, 6, 6);
+        if (fx + 3 > p.x0 && fx + 3 <= p.x1 && fy + 3 > p.y0 && fy + 3 <= p.y1 && !marks.noHandle) {
+          ctx.fillStyle = th.gridBg;
+          ctx.fillRect(fx - 1, fy - 1, 8, 8);
+          ctx.fillStyle = th.accent;
+          ctx.fillRect(fx, fy, 6, 6);
+          this.handle = { x: fx - 2, y: fy - 2, w: 10, h: 10 };
+        }
       }
     }
-    this.drawHighlights(highlights, rect);
-    ctx.restore();
-
-    if (this.guide) {
-      ctx.fillStyle = th.accent;
-      if (this.guide.vertical) ctx.fillRect(this.guide.at - 1, 0, 2, h);
-      else ctx.fillRect(0, this.guide.at - 1, w, 2);
+    if (marks.fill) {
+      const rc = rect(marks.fill);
+      ctx.strokeStyle = th.headerText;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeRect(rc.x - 0.5, rc.y - 0.5, rc.w, rc.h);
+      ctx.setLineDash([]);
     }
+    if (marks.copy) {
+      // Marching ants around the copied range.
+      const rc = rect(marks.copy);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = th.gridBg;
+      ctx.strokeRect(rc.x - 1, rc.y - 1, rc.w, rc.h);
+      ctx.strokeStyle = th.accent;
+      ctx.setLineDash([4, 3]);
+      ctx.lineDashOffset = -(marks.antsPhase ?? 0);
+      ctx.strokeRect(rc.x - 1, rc.y - 1, rc.w, rc.h);
+      ctx.setLineDash([]);
+      ctx.lineDashOffset = 0;
+    }
+    this.drawHighlights(highlights, rect);
   }
 
   // Colored boxes for the references in the formula being edited.

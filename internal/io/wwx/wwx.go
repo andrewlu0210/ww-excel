@@ -51,6 +51,14 @@ type fileLayout struct {
 	RowStyles  []fileStyleRef `json:"rowStyles,omitempty"`
 	ColStyles  []fileStyleRef `json:"colStyles,omitempty"`
 	Merges     [][4]int       `json:"merges,omitempty"`
+	FreezeRows int            `json:"freezeRows,omitempty"`
+	FreezeCols int            `json:"freezeCols,omitempty"`
+	Filter     *fileFilter    `json:"filter,omitempty"`
+}
+
+type fileFilter struct {
+	Range [4]int           `json:"range"`
+	Cols  map[int][]string `json:"cols,omitempty"`
 }
 
 // A cell has at most one value field (n, s, b or e). F is the formula
@@ -165,7 +173,10 @@ func Read(r io.Reader) (*model.Workbook, error) {
 }
 
 func writeLayout(l model.Layout) *fileLayout {
-	fl := &fileLayout{DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol}
+	fl := &fileLayout{DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
+	if f := l.Filter; f != nil {
+		fl.Filter = &fileFilter{Range: [4]int{f.Range.R0, f.Range.C0, f.Range.R1, f.Range.C1}, Cols: f.Cols}
+	}
 	for i, sz := range l.Rows {
 		fl.Rows = append(fl.Rows, fileSize{I: i, Px: sz.Px, Hidden: sz.Hidden})
 	}
@@ -211,6 +222,14 @@ func readLayout(fl *fileLayout) model.Layout {
 	}
 	for _, m := range fl.Merges {
 		l.Merges = append(l.Merges, model.Range{R0: m[0], C0: m[1], R1: m[2], C1: m[3]})
+	}
+	l.FreezeRows, l.FreezeCols = max(fl.FreezeRows, 0), max(fl.FreezeCols, 0)
+	if f := fl.Filter; f != nil {
+		r := f.Range
+		l.Filter = &model.AutoFilter{Range: model.Range{R0: r[0], C0: r[1], R1: r[2], C1: r[3]}.Clamp(), Cols: f.Cols}
+		if l.Filter.Cols == nil {
+			l.Filter.Cols = map[int][]string{}
+		}
 	}
 	return l
 }

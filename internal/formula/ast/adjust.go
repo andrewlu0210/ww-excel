@@ -58,47 +58,12 @@ func adjustArea(a Area, s Shift) (Area, bool, bool) {
 		lo, hi = &a.R0, &a.R1
 	}
 	oldLo, oldHi := *lo, *hi
-	newLo, newHi, ok := shiftSpan(oldLo, oldHi, s.At, s.Count, limit)
+	newLo, newHi, ok := model.ShiftSpan(oldLo, oldHi, s.At, s.Count, limit)
 	if !ok {
 		return a, false, false
 	}
 	*lo, *hi = newLo, newHi
 	return a, true, newLo != oldLo || newHi != oldHi
-}
-
-func shiftSpan(lo, hi, at, count, limit int) (int, int, bool) {
-	if count > 0 {
-		if lo >= at {
-			lo += count
-		}
-		if hi >= at {
-			hi += count
-		}
-		if lo >= limit {
-			return 0, 0, false
-		}
-		return lo, min(hi, limit-1), true
-	}
-	n := -count
-	end := at + n - 1
-	switch {
-	case hi < at:
-		return lo, hi, true
-	case lo > end:
-		return lo - n, hi - n, true
-	}
-	newLo := lo
-	if lo >= at {
-		newLo = at
-	}
-	newHi := hi - n
-	if hi <= end {
-		newHi = at - 1
-	}
-	if newHi < newLo {
-		return 0, 0, false
-	}
-	return newLo, newHi, true
 }
 
 // Translate moves the relative ($-less) parts of references by (dr, dc),
@@ -231,4 +196,34 @@ func rewriteTree(n Node, refFn func(Ref) Node, callFn func(Call) Call) Node {
 		}
 	}
 	return rewrite(n)
+}
+
+// Move rewrites references that lie entirely inside src on sheet srcSheet
+// to point (dr, dc) away on dstSheet, as Excel does for formulas that
+// refer to cells that were cut and pasted. Partially covered references
+// are left alone. formulaSheet is the sheet the formula lives on.
+func Move(n Node, formulaSheet, srcSheet string, src model.Range, dstSheet string, dr, dc int) (Node, bool) {
+	changed := false
+	out := mapRefs(n, func(x Ref) Node {
+		sheet := x.Sheet
+		if sheet == "" {
+			sheet = formulaSheet
+		}
+		a := x.Area
+		if !strings.EqualFold(sheet, srcSheet) || a.Kind != CellArea ||
+			a.R0 < src.R0 || a.R1 > src.R1 || a.C0 < src.C0 || a.C1 > src.C1 {
+			return x
+		}
+		a.R0, a.R1, a.C0, a.C1 = a.R0+dr, a.R1+dr, a.C0+dc, a.C1+dc
+		x.Area = a
+		if !strings.EqualFold(dstSheet, formulaSheet) || x.Sheet != "" {
+			x.Sheet = dstSheet
+		}
+		if strings.EqualFold(dstSheet, formulaSheet) && x.Sheet != "" && strings.EqualFold(x.Sheet, formulaSheet) && sheet == formulaSheet {
+			x.Sheet = ""
+		}
+		changed = true
+		return x
+	})
+	return out, changed
 }

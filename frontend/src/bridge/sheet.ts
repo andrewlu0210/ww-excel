@@ -1,6 +1,6 @@
 // The only module that touches generated Wails bindings. Wails3 is still
 // in beta, so keep binding/event usage behind these wrappers.
-import { Events } from '@wailsio/runtime';
+import { Events, Window } from '@wailsio/runtime';
 import { BenchService, DocumentService, SheetService } from '../../bindings/ww-excel/internal/service';
 import type { FuncInfo } from '../../bindings/ww-excel/internal/formula/models';
 import type {
@@ -12,7 +12,14 @@ import type {
   CellPos,
   CellsChanged,
   ChangedCell,
+  CopyResult,
   DocState,
+  FilterValueDTO,
+  FindOptionsDTO,
+  HitDTO,
+  PasteResult,
+  SortInfo,
+  SortKeyDTO,
   FormatPatch,
   LayoutChanged,
   LayoutDTO,
@@ -39,11 +46,43 @@ export type {
   CellPos,
   CellsChanged,
   ChangedCell,
+  CopyResult,
   DocState,
+  FilterValueDTO,
+  FindOptionsDTO,
+  HitDTO,
+  PasteResult,
+  SortInfo,
+  SortKeyDTO,
   MemStats,
   RangeDTO,
   SheetInfo,
 };
+
+// Every document window runs this frontend. Go sends a window's events
+// from that window (its name is the sender); drop the other windows'.
+let windowName: string | null = null;
+void Window.Name()
+  .then((n) => (windowName = n))
+  .catch(() => {});
+
+function on<T>(name: string, cb: (data: T) => void): () => void {
+  return Events.On(name, (ev) => {
+    if (windowName !== null && ev.sender && ev.sender !== windowName) return;
+    cb(ev.data as T);
+  });
+}
+
+export type PasteMode = 'all' | 'values' | 'formats' | 'formulas';
+
+// Result of an edit that may be refused: the message for the user.
+async function failed<T>(p: Promise<T>): Promise<{ value: T | null; error: string | null }> {
+  try {
+    return { value: await p, error: null };
+  } catch (err) {
+    return { value: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 export const sheetApi = {
   info(sheet: number): Promise<SheetInfo> {
@@ -91,11 +130,48 @@ export const sheetApi = {
   dataEdge: (sheet: number, row: number, col: number, dr: number, dc: number): Promise<CellPos> =>
     SheetService.DataEdge(sheet, row, col, dr, dc),
 
+  // ---- v0.5 ----
+  copy: (sheet: number, rg: RangeDTO, cut: boolean) => failed(SheetService.Copy(sheet, rg, cut)),
+  clearClip: (): Promise<void> => SheetService.ClearClip(),
+  hasClip: (): Promise<boolean> => SheetService.HasClip(),
+  // text: from a paste event, or null to read the system clipboard.
+  paste: (sheet: number, sel: RangeDTO, text: string | null) => failed(SheetService.Paste(sheet, sel, text)),
+  pasteSpecial: (sheet: number, sel: RangeDTO, mode: PasteMode, transpose: boolean, skipBlanks: boolean) =>
+    failed(SheetService.PasteSpecial(sheet, sel, mode, transpose, skipBlanks)),
+  shift: (sheet: number, rows: boolean, at: number, count: number): Promise<string | null> =>
+    rejected(SheetService.Shift(sheet, rows, at, count)),
+  fillSeries: (sheet: number, src: RangeDTO, dst: RangeDTO, copyOnly: boolean): Promise<string | null> =>
+    rejected(SheetService.FillSeries(sheet, src, dst, copyOnly)),
+  hide: (sheet: number, rows: boolean, lo: number, hi: number, hidden: boolean): Promise<string | null> =>
+    rejected(SheetService.Hide(sheet, rows, lo, hi, hidden)),
+  freeze: (sheet: number, rows: number, cols: number): Promise<string | null> =>
+    rejected(SheetService.Freeze(sheet, rows, cols)),
+  currentRegion: (sheet: number, row: number, col: number): Promise<RangeDTO> =>
+    SheetService.CurrentRegion(sheet, row, col),
+  findNext: (sheet: number, row: number, col: number, opt: FindOptionsDTO, forward: boolean): Promise<HitDTO | null> =>
+    SheetService.FindNext(sheet, row, col, opt, forward),
+  async findAll(sheet: number, opt: FindOptionsDTO): Promise<HitDTO[]> {
+    return (await SheetService.FindAll(sheet, opt)) ?? [];
+  },
+  replace: (sheet: number, opt: FindOptionsDTO, withText: string, all: boolean, row: number, col: number) =>
+    failed(SheetService.Replace(sheet, opt, withText, all, row, col)),
+  sortInfo: (sheet: number, sel: RangeDTO): Promise<SortInfo> => SheetService.SortInfo(sheet, sel),
+  sort: (sheet: number, rg: RangeDTO, keys: SortKeyDTO[], header: boolean): Promise<string | null> =>
+    rejected(SheetService.Sort(sheet, rg, keys, header)),
+  toggleFilter: (sheet: number, sel: RangeDTO): Promise<string | null> => rejected(SheetService.ToggleFilter(sheet, sel)),
+  async filterValues(sheet: number, col: number): Promise<FilterValueDTO[]> {
+    return (await SheetService.FilterValues(sheet, col)) ?? [];
+  },
+  setFilter: (sheet: number, col: number, shown: string[], all: boolean): Promise<string | null> =>
+    rejected(SheetService.SetFilter(sheet, col, shown, all)),
+  sortFilter: (sheet: number, col: number, desc: boolean): Promise<string | null> =>
+    rejected(SheetService.SortFilter(sheet, col, desc)),
+
   onCellsChanged(cb: (e: CellsChanged) => void): () => void {
-    return Events.On('cells:changed', (ev) => cb(ev.data));
+    return on('cells:changed', cb);
   },
   onLayoutChanged(cb: (e: LayoutChanged) => void): () => void {
-    return Events.On('layout:changed', (ev) => cb(ev.data));
+    return on('layout:changed', cb);
   },
 };
 
@@ -123,16 +199,16 @@ export const documentApi = {
   moveSheet: (from: number, to: number): Promise<void> => DocumentService.MoveSheet(from, to),
 
   onState(cb: (s: DocState) => void): () => void {
-    return Events.On('doc:state', (ev) => cb(ev.data));
+    return on('doc:state', cb);
   },
   onReset(cb: (s: DocState) => void): () => void {
-    return Events.On('doc:reset', (ev) => cb(ev.data));
+    return on('doc:reset', cb);
   },
   onSheetsChanged(cb: (s: DocState) => void): () => void {
-    return Events.On('sheets:changed', (ev) => cb(ev.data));
+    return on('sheets:changed', cb);
   },
   onMenu(cb: (action: MenuAction) => void): () => void {
-    return Events.On('menu:action', (ev) => cb(ev.data as MenuAction));
+    return on('menu:action', cb);
   },
 };
 

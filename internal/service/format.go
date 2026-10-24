@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sort"
 	"ww-excel/internal/command"
 	"ww-excel/internal/model"
 	"ww-excel/internal/numfmt"
@@ -224,6 +225,12 @@ type LayoutDTO struct {
 	RowStyles  []StyleRefDTO `json:"rowStyles"`
 	ColStyles  []StyleRefDTO `json:"colStyles"`
 	Merges     []RangeDTO    `json:"merges"`
+	FreezeRows int           `json:"freezeRows"`
+	FreezeCols int           `json:"freezeCols"`
+	// Filter is the AutoFilter range, or nil; FilteredCols are the
+	// columns with criteria (their buttons show a funnel).
+	Filter       *RangeDTO `json:"filter"`
+	FilteredCols []int     `json:"filteredCols"`
 	// Styles the caller does not know yet (IDs >= the known count).
 	Styles []StyleDTO `json:"styles"`
 }
@@ -232,7 +239,15 @@ func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 	out := LayoutDTO{
 		DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol,
 		Rows: []SizeDTO{}, Cols: []SizeDTO{}, RowStyles: []StyleRefDTO{}, ColStyles: []StyleRefDTO{}, Merges: []RangeDTO{},
-		Styles: stylesSince(wb, knownStyles),
+		Styles:     stylesSince(wb, knownStyles),
+		FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols, FilteredCols: []int{},
+	}
+	if f := l.Filter; f != nil {
+		out.Filter = &RangeDTO{R0: f.Range.R0, C0: f.Range.C0, R1: f.Range.R1, C1: f.Range.C1}
+		for c := range f.Cols {
+			out.FilteredCols = append(out.FilteredCols, c)
+		}
+		sort.Ints(out.FilteredCols)
 	}
 	for i, s := range l.Rows {
 		out.Rows = append(out.Rows, SizeDTO{I: i, Px: s.Px, Hidden: s.Hidden})

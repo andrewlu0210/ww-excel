@@ -24,6 +24,16 @@ type Effect struct {
 	// Other cells changed on other sheets (e.g. formulas rewritten when
 	// a sheet is renamed), keyed by sheet index after the change.
 	Others map[int][]CellRef
+	// Shift is set when rows or columns of Sheet were inserted or
+	// deleted: every position moved, so caches and indexes rebuild.
+	Shift *Shift
+}
+
+// Shift is an insertion (Count > 0) or deletion (Count < 0) of rows or
+// columns.
+type Shift struct {
+	Rows      bool
+	At, Count int
 }
 
 type Command interface {
@@ -144,3 +154,51 @@ type Func struct {
 func (f *Func) Label() string                  { return f.Name }
 func (f *Func) Do(wb *model.Workbook) Effect   { return f.DoFn(wb) }
 func (f *Func) Undo(wb *model.Workbook) Effect { return f.UndoFn(wb) }
+
+// Batch runs several commands as one undo step. The effect reports the
+// first command's sheet; cells changed on other sheets go to Others.
+type Batch struct {
+	Name string
+	Cmds []Command
+}
+
+func (b *Batch) Label() string { return b.Name }
+
+func (b *Batch) Do(wb *model.Workbook) Effect {
+	effs := make([]Effect, len(b.Cmds))
+	for i, c := range b.Cmds {
+		effs[i] = c.Do(wb)
+	}
+	return mergeEffects(effs)
+}
+
+func (b *Batch) Undo(wb *model.Workbook) Effect {
+	effs := make([]Effect, len(b.Cmds))
+	for i := len(b.Cmds) - 1; i >= 0; i-- {
+		effs[i] = b.Cmds[i].Undo(wb)
+	}
+	return mergeEffects(effs)
+}
+
+func mergeEffects(effs []Effect) Effect {
+	if len(effs) == 0 {
+		return Effect{}
+	}
+	out := Effect{Sheet: effs[0].Sheet, Others: map[int][]CellRef{}}
+	for _, e := range effs {
+		if e.Sheet == out.Sheet {
+			out.Cells = append(out.Cells, e.Cells...)
+			out.LayoutChanged = out.LayoutChanged || e.LayoutChanged
+			if e.Bounds != nil && out.Bounds == nil {
+				out.Bounds = e.Bounds
+			}
+		} else {
+			out.Others[e.Sheet] = append(out.Others[e.Sheet], e.Cells...)
+		}
+		for s, cells := range e.Others {
+			out.Others[s] = append(out.Others[s], cells...)
+		}
+		out.Structure = out.Structure || e.Structure
+	}
+	return out
+}

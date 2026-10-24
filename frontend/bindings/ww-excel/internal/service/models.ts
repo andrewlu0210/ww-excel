@@ -112,6 +112,14 @@ export interface ChangedCell {
     "fc"?: string;
 }
 
+/**
+ * CopyResult is what ⌘C put on the clipboard.
+ */
+export interface CopyResult {
+    "text": string;
+    "html": string;
+}
+
 export interface DocState {
     "name": string;
     "path": string;
@@ -130,6 +138,19 @@ export interface DocState {
      * Sheets are the sheet names in order.
      */
     "sheets": string[] | null;
+}
+
+export interface FilterValueDTO {
+    "text": string;
+    "shown": boolean;
+}
+
+export interface FindOptionsDTO {
+    "text": string;
+    "matchCase": boolean;
+    "wholeCell": boolean;
+    "inFormulas": boolean;
+    "allSheets": boolean;
 }
 
 export interface FontDTO {
@@ -182,6 +203,13 @@ export interface FormatPatch {
     "label"?: string;
 }
 
+export interface HitDTO {
+    "sheet": number;
+    "row": number;
+    "col": number;
+    "v": string;
+}
+
 /**
  * LayoutChanged tells the frontend to refetch a sheet's layout.
  */
@@ -200,6 +228,15 @@ export interface LayoutDTO {
     "rowStyles": StyleRefDTO[] | null;
     "colStyles": StyleRefDTO[] | null;
     "merges": RangeDTO[] | null;
+    "freezeRows": number;
+    "freezeCols": number;
+
+    /**
+     * Filter is the AutoFilter range, or nil; FilteredCols are the
+     * columns with criteria (their buttons show a funnel).
+     */
+    "filter": RangeDTO | null;
+    "filteredCols": number[] | null;
 
     /**
      * Styles the caller does not know yet (IDs >= the known count).
@@ -211,6 +248,18 @@ export interface MemStats {
     "heapAllocMB": number;
     "sysMB": number;
     "numGC": number;
+}
+
+/**
+ * PasteResult is the area a paste wrote, selected afterwards.
+ */
+export interface PasteResult {
+    "area": RangeDTO;
+
+    /**
+     * Moved is set after pasting cut cells (the copy marquee ends).
+     */
+    "moved": boolean;
 }
 
 export interface RangeDTO {
@@ -234,6 +283,17 @@ export interface SizeDTO {
     "i": number;
     "px": number;
     "hidden"?: boolean;
+}
+
+export interface SortInfo {
+    "range": RangeDTO;
+    "header": boolean;
+    "ok": boolean;
+}
+
+export interface SortKeyDTO {
+    "col": number;
+    "desc": boolean;
 }
 
 export interface StyleDTO {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"sort"
 
 	"ww-excel/internal/command"
@@ -68,12 +69,16 @@ type TextSample struct {
 }
 
 type SheetService struct {
-	s *Session
+	src Sessions
+	// The internal clipboard, shared by all windows.
+	clip clipState
 }
 
-func NewSheetService(s *Session) *SheetService {
-	return &SheetService{s: s}
+func NewSheetService(src Sessions) *SheetService {
+	return &SheetService{src: src}
 }
+
+func (s *SheetService) at(ctx context.Context) *Session { return s.src.For(ctx) }
 
 func sheetAt(d *document.Document, index int) *model.Sheet {
 	sheets := d.Workbook().Sheets
@@ -96,14 +101,14 @@ func toModelRanges(ranges []RangeDTO) []model.Range {
 }
 
 // Info returns grid dimensions and block geometry for a sheet.
-func (s *SheetService) Info(sheet int) SheetInfo {
+func (s *SheetService) Info(ctx context.Context, sheet int) SheetInfo {
 	info := SheetInfo{
 		Rows:      model.MaxRows,
 		Cols:      model.MaxCols,
 		BlockRows: model.BlockRows,
 		BlockCols: model.BlockCols,
 	}
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		if sh := sheetAt(d, sheet); sh != nil {
 			info.Name = sh.Name
 			info.UsedRows, info.UsedCols = sh.UsedRange()
@@ -115,9 +120,9 @@ func (s *SheetService) Info(sheet int) SheetInfo {
 // GetBlocks returns the requested blocks in one call. Empty blocks are
 // returned with no cells so the frontend can mark them as loaded.
 // knownStyles is how many styles the caller has; newer ones are included.
-func (s *SheetService) GetBlocks(sheet int, refs []BlockRef, knownStyles int) BlocksResult {
+func (s *SheetService) GetBlocks(ctx context.Context, sheet int, refs []BlockRef, knownStyles int) BlocksResult {
 	res := BlocksResult{Blocks: make([]BlockDTO, 0, len(refs))}
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		wb := d.Workbook()
 		res.Version = d.Version()
 		res.Styles = stylesSince(wb, knownStyles)
@@ -141,9 +146,9 @@ func (s *SheetService) GetBlocks(sheet int, refs []BlockRef, knownStyles int) Bl
 }
 
 // Layout returns a sheet's sizes, row/column styles and merges.
-func (s *SheetService) Layout(sheet int, knownStyles int) LayoutDTO {
+func (s *SheetService) Layout(ctx context.Context, sheet int, knownStyles int) LayoutDTO {
 	var out LayoutDTO
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		sh := sheetAt(d, sheet)
 		if sh == nil {
 			out = layoutDTO(d.Workbook(), model.NewLayout(), knownStyles)
@@ -155,9 +160,9 @@ func (s *SheetService) Layout(sheet int, knownStyles int) LayoutDTO {
 }
 
 // EditText returns the text to show when editing a cell (F2).
-func (s *SheetService) EditText(sheet, row, col int) string {
+func (s *SheetService) EditText(ctx context.Context, sheet, row, col int) string {
 	var text string
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) {
 			text = sh.Get(row, col).EditText()
 		}
@@ -168,9 +173,9 @@ func (s *SheetService) EditText(sheet, row, col int) string {
 // SetCell commits typed text into one cell. A formula that cannot be
 // entered (syntax error, wrong argument count) returns an error whose
 // message is shown to the user; nothing changes.
-func (s *SheetService) SetCell(sheet, row, col int, text string) error {
+func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text string) error {
 	var err error
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil || !validCell(row, col) {
 			return document.Change{}, false
 		}
@@ -185,9 +190,9 @@ func (s *SheetService) SetCell(sheet, row, col int, text string) error {
 
 // Fill writes text into every cell of the ranges (⌘Enter). A formula is
 // entered at the active cell and adjusted for the others.
-func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string, activeRow, activeCol int) error {
+func (s *SheetService) Fill(ctx context.Context, sheet int, ranges []RangeDTO, text string, activeRow, activeCol int) error {
 	var err error
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
@@ -206,7 +211,7 @@ func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string, activeRow
 
 // Clear empties the ranges: mode "contents" (Delete key), "formats" or
 // "all".
-func (s *SheetService) Clear(sheet int, ranges []RangeDTO, mode string) {
+func (s *SheetService) Clear(ctx context.Context, sheet int, ranges []RangeDTO, mode string) {
 	m := command.ClearContents
 	switch mode {
 	case "formats":
@@ -214,7 +219,7 @@ func (s *SheetService) Clear(sheet int, ranges []RangeDTO, mode string) {
 	case "all":
 		m = command.ClearAll
 	}
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
@@ -223,13 +228,13 @@ func (s *SheetService) Clear(sheet int, ranges []RangeDTO, mode string) {
 }
 
 // Format applies a formatting change to the ranges.
-func (s *SheetService) Format(sheet int, ranges []RangeDTO, patch FormatPatch) error {
+func (s *SheetService) Format(ctx context.Context, sheet int, ranges []RangeDTO, patch FormatPatch) error {
 	label := patch.Label
 	if label == "" {
 		label = "格式設定"
 	}
 	var err error
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
@@ -244,8 +249,8 @@ func (s *SheetService) Format(sheet int, ranges []RangeDTO, patch FormatPatch) e
 
 // SetSizes sets row heights (rows = true) or column widths in pixels;
 // px < 0 restores the default.
-func (s *SheetService) SetSizes(sheet int, rows bool, indices []int, px float64) {
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+func (s *SheetService) SetSizes(ctx context.Context, sheet int, rows bool, indices []int, px float64) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil || len(indices) == 0 {
 			return document.Change{}, false
 		}
@@ -254,9 +259,9 @@ func (s *SheetService) SetSizes(sheet int, rows bool, indices []int, px float64)
 }
 
 // Merge merges rg; center also centers it (跨欄置中).
-func (s *SheetService) Merge(sheet int, rg RangeDTO, center bool) error {
+func (s *SheetService) Merge(ctx context.Context, sheet int, rg RangeDTO, center bool) error {
 	var err error
-	s.s.change(true, func(d *document.Document) (document.Change, bool) {
+	s.at(ctx).change(true, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
@@ -269,8 +274,8 @@ func (s *SheetService) Merge(sheet int, rg RangeDTO, center bool) error {
 	return err
 }
 
-func (s *SheetService) Unmerge(sheet int, ranges []RangeDTO) {
-	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+func (s *SheetService) Unmerge(ctx context.Context, sheet int, ranges []RangeDTO) {
+	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
@@ -280,10 +285,10 @@ func (s *SheetService) Unmerge(sheet int, ranges []RangeDTO) {
 
 // AutoFitColumn returns the longest texts of a column (by characters,
 // per style), which the frontend measures to auto-fit the width.
-func (s *SheetService) AutoFitColumn(sheet, col int) []TextSample {
+func (s *SheetService) AutoFitColumn(ctx context.Context, sheet, col int) []TextSample {
 	const keep = 40
 	var out []TextSample
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		sh := sheetAt(d, sheet)
 		if sh == nil || col < 0 || col >= model.MaxCols {
 			return
@@ -305,9 +310,9 @@ func (s *SheetService) AutoFitColumn(sheet, col int) []TextSample {
 }
 
 // RowTexts returns the cells of a row, for auto-fitting its height.
-func (s *SheetService) RowTexts(sheet, row int) []TextSample {
+func (s *SheetService) RowTexts(ctx context.Context, sheet, row int) []TextSample {
 	var out []TextSample
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		sh := sheetAt(d, sheet)
 		if sh == nil || row < 0 || row >= model.MaxRows {
 			return
@@ -325,9 +330,9 @@ func (s *SheetService) RowTexts(sheet, row int) []TextSample {
 
 // PreviewFormat renders a cell's value with a format code, for the
 // number format dialog. Empty cells preview the number 1234.5678.
-func (s *SheetService) PreviewFormat(sheet, row, col int, code string) string {
+func (s *SheetService) PreviewFormat(ctx context.Context, sheet, row, col int, code string) string {
 	var out string
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		c := model.NumberCell(1234.5678)
 		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) && sh.Get(row, col).HasContent() {
 			c = sh.Get(row, col)
@@ -337,26 +342,26 @@ func (s *SheetService) PreviewFormat(sheet, row, col int, code string) string {
 	return out
 }
 
-func (s *SheetService) Undo() bool {
-	return s.s.change(true, func(d *document.Document) (document.Change, bool) { return d.Undo() })
+func (s *SheetService) Undo(ctx context.Context) bool {
+	return s.at(ctx).change(true, func(d *document.Document) (document.Change, bool) { return d.Undo() })
 }
 
-func (s *SheetService) Redo() bool {
-	return s.s.change(true, func(d *document.Document) (document.Change, bool) { return d.Redo() })
+func (s *SheetService) Redo(ctx context.Context) bool {
+	return s.at(ctx).change(true, func(d *document.Document) (document.Change, bool) { return d.Redo() })
 }
 
 // Functions lists worksheet functions for autocomplete and hints.
-func (s *SheetService) Functions() []formula.FuncInfo {
+func (s *SheetService) Functions(ctx context.Context) []formula.FuncInfo {
 	return formula.Functions()
 }
 
 // DataEdge returns the ⌘+arrow target from (row, col).
-func (s *SheetService) DataEdge(sheet, row, col, dr, dc int) CellPos {
+func (s *SheetService) DataEdge(ctx context.Context, sheet, row, col, dr, dc int) CellPos {
 	pos := CellPos{Row: row, Col: col}
 	if !validCell(row, col) || abs(dr)+abs(dc) != 1 {
 		return pos
 	}
-	s.s.read(func(d *document.Document) {
+	s.at(ctx).read(func(d *document.Document) {
 		if sh := sheetAt(d, sheet); sh != nil {
 			pos.Row, pos.Col = sh.DataEdge(row, col, dr, dc)
 		}

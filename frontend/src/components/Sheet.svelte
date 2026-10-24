@@ -13,15 +13,21 @@
     documentApi,
     sheetApi,
     type CellsChanged,
+    type CopyResult,
+    type FilterValueDTO,
     type FormatPatch,
     type FuncInfo,
     type LayoutDTO,
+    type PasteMode,
     type RangeDTO,
+    type SortInfo,
+    type SortKeyDTO,
     type SheetInfo,
     type StyleDTO,
   } from '../bridge/sheet';
   import { callAt, canPoint, findRefs, refText, toggleAbsolute, wordAt } from '../formula/refs';
-  import { cellAddress } from '../grid/layout';
+  import { fillCopy, fillTarget, sameRange } from '../grid/fill';
+  import { cellAddress, colName } from '../grid/layout';
   import { areaOf, expand, mergeAt, snap, stepStart } from '../grid/merges';
   import { metrics, REF_COLORS, type Highlight } from '../grid/renderer';
   import { LINE_HEIGHT, TextCache } from '../grid/text';
@@ -31,7 +37,10 @@
     current,
     cycleActive,
     extendTo,
+    contains,
     fromRange,
+    isFullCols,
+    isFullRows,
     isSingleCell,
     rangeOf,
     selectAll,
@@ -51,7 +60,8 @@
     type MenuAction,
     type SheetMode,
   } from '../input/keymap';
-  import type { GridPointer, ResizeRequest } from '../input/pointer';
+  import type { ContextRequest, GridPointer, ResizeRequest } from '../input/pointer';
+  import FilterMenu from './FilterMenu.svelte';
   import Grid from './Grid.svelte';
 
   interface Props {
@@ -65,6 +75,8 @@
     onselectionchange?: (sel: Selection) => void;
     // Menu actions handled by the app (sheet tabs, dialogs).
     onappaction?: (action: MenuAction) => void;
+    // A message for the user, e.g. why a paste was refused.
+    onnotify?: (message: string) => void;
   }
 
   let {
@@ -76,6 +88,7 @@
     activeMerged = $bindable(false),
     onselectionchange,
     onappaction,
+    onnotify,
   }: Props = $props();
 
   // Fixed for the lifetime of the component: the grid is always full size.
@@ -110,6 +123,19 @@
   let hint = $state<{ info: FuncInfo; arg: number } | null>(null);
   let editError = $state<string | null>(null);
   let popupPos = $state({ x: 0, y: 0 });
+
+  // Copied or cut range, shown with marching ants until Esc or an edit.
+  let copyRange = $state<Range | null>(null);
+  // Fill-handle drag: the source and the target being previewed.
+  let fillSrc: Range | null = null;
+  let fillPreview = $state<Range | null>(null);
+  // Right-click menu and filter dropdown.
+  let contextMenu = $state<{ x: number; y: number; area: ContextRequest['area'] } | null>(null);
+  let filterMenu = $state<{ col: number; x: number; y: number; values: FilterValueDTO[]; title: string } | null>(null);
+
+  function notify(message: string | null | undefined): void {
+    if (message) onnotify?.(message);
+  }
 
   $effect(() => {
     mode = !editing ? 'ready' : point ? 'point' : editing.mode;
@@ -252,7 +278,14 @@
         await beginEdit('edit');
         break;
       case 'clear':
+        copyRange = null;
         await sheetApi.clear(sheet, sel.ranges.map(toDTO));
+        break;
+      case 'escape':
+        if (copyRange) {
+          copyRange = null;
+          await sheetApi.clearClip();
+        }
         break;
       case 'selectRow': {
         const r = current(sel);
@@ -295,10 +328,13 @@
 
   // Entry point for menu items and ⌘ shortcuts. Must not be called from
   // inside the queue.
-  export async function runMenu(action: MenuAction): Promise<void> {
+  export async function runMenu(action: MenuAction, pasteText: string | null = null): Promise<void> {
     const now = performance.now();
     if (lastMenu.action === action && now - lastMenu.at < 150) return;
     lastMenu = { action, at: now };
+    contextMenu = null;
+
+    if (await runEditingMenu(action, pasteText)) return;
 
     switch (action) {
       case 'undo':
@@ -313,7 +349,7 @@
         return;
       case 'selectAll':
         if (editing) input().select();
-        else setSelection(selectAll(lim), selection.active);
+        else await selectRegionOrAll();
         return;
       case 'bold':
       case 'italic':
@@ -329,6 +365,8 @@
         return;
       case 'formatCells':
       case 'insertSheet':
+      case 'find':
+      case 'replace':
         if (editing) commit('stay');
         onappaction?.(action);
         return;
@@ -421,6 +459,7 @@
 
   function commit(then: 'down' | 'up' | 'right' | 'left' | 'stay'): void {
     if (!editing) return;
+    copyRange = null;
     const { pos } = editing;
     const text = input().value;
     endEditing();
@@ -721,9 +760,13 @@
     }
     if (e.kind === 'down' && editing) commit('stay');
     tabStartCol = null;
+    contextMenu = null;
     const sel = selection;
 
     switch (e.area) {
+      case 'fill':
+        onFillPointer(e);
+        break;
       case 'corner':
         if (e.kind === 'down') setSelection(selectAll(lim), sel.active);
         break;
@@ -800,6 +843,10 @@
       documentApi.onReset(() => void onReset()),
       styleStore.subscribe(() => styleTick++),
     ];
+    for (const el of [editor, bar]) {
+      for (const type of ['copy', 'cut', 'paste']) el.addEventListener(type, onClipboardEvent as EventListener);
+      for (const type of ['beforecopy', 'beforecut']) el.addEventListener(type, onBeforeClipboard);
+    }
     void loadLayout();
     sheetApi.functions().then((list) => {
       functions = list;
@@ -809,6 +856,369 @@
     refreshFormula();
     return () => offs.forEach((off) => off());
   });
+
+  // ---- Clipboard, fill, structure, sort & filter (v0.5) ----
+
+  // Menu actions that act on cells. Returns false for other actions.
+  async function runEditingMenu(action: MenuAction, pasteText: string | null): Promise<boolean> {
+    switch (action) {
+      case 'copy':
+      case 'cut':
+        if (editing) document.execCommand(action);
+        else await copySelection(action === 'cut');
+        return true;
+      case 'paste':
+        if (editing) return true; // the text field pastes natively
+        await paste(pasteText);
+        return true;
+      case 'pasteSpecial':
+        if (editing) commit('stay');
+        if (await sheetApi.hasClip()) onappaction?.('pasteSpecial');
+        else notify('請先複製儲存格，再使用選擇性貼上。');
+        return true;
+      case 'fillDown':
+      case 'fillRight': {
+        if (editing) return true;
+        const f = fillCopy(current(selection), action === 'fillDown');
+        if (f) await fill(f.src, f.dst, true);
+        return true;
+      }
+      case 'insertCells':
+      case 'deleteCells': {
+        if (editing) commit('stay');
+        const r = current(selection);
+        const insert = action === 'insertCells';
+        if (isFullRows(r, lim)) await shiftSelection(true, insert);
+        else if (isFullCols(r, lim)) await shiftSelection(false, insert);
+        else onappaction?.(action); // ask: whole rows or columns
+        return true;
+      }
+      case 'insertRows':
+      case 'deleteRows':
+      case 'insertCols':
+      case 'deleteCols':
+        if (editing) commit('stay');
+        await shiftSelection(action.endsWith('Rows'), action.startsWith('insert'));
+        return true;
+      case 'hideRows':
+      case 'unhideRows':
+      case 'hideCols':
+      case 'unhideCols': {
+        if (editing) return true;
+        const rows = action.endsWith('Rows');
+        const hidden = action.startsWith('hide');
+        for (const r of selection.ranges) {
+          const err = await serial(() => sheetApi.hide(sheet, rows, rows ? r.r0 : r.c0, rows ? r.r1 : r.c1, hidden));
+          if (err) return notify(err), true;
+        }
+        return true;
+      }
+      case 'freezePanes':
+      case 'freezeTopRow':
+      case 'freezeFirstCol':
+      case 'unfreeze':
+        if (editing) commit('stay');
+        await freezePanes(action);
+        return true;
+      case 'sortAsc':
+      case 'sortDesc':
+        if (editing) commit('stay');
+        await quickSort(action === 'sortDesc');
+        return true;
+      case 'sort':
+        if (editing) commit('stay');
+        onappaction?.('sort');
+        return true;
+      case 'filter':
+        if (editing) commit('stay');
+        notify(await serial(() => sheetApi.toggleFilter(sheet, toDTO(current(selection)))));
+        return true;
+      case 'clearAll':
+      case 'clearFormats':
+      case 'clearContents':
+        if (editing) return true;
+        await clearRanges(action === 'clearAll' ? 'all' : action === 'clearFormats' ? 'formats' : 'contents');
+        return true;
+    }
+    return false;
+  }
+
+  // Runs a backend call in the queue and returns its result.
+  function serial<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      void enqueue(async () => {
+        try {
+          resolve(await fn());
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  function single1(): Range | null {
+    if (selection.ranges.length > 1) {
+      notify('無法對多重選取範圍執行此命令。');
+      return null;
+    }
+    return current(selection);
+  }
+
+  async function copySelection(cut: boolean): Promise<void> {
+    const r = single1();
+    if (!r) return;
+    // Offer an HTML table too (formats for other apps) while still inside
+    // the user's gesture; Go has already put the text on the clipboard.
+    let done: (v: CopyResult | null) => void = () => {};
+    const result = new Promise<CopyResult | null>((res) => (done = res));
+    writeRichClipboard(result);
+    const res = await serial(() => sheetApi.copy(sheet, toDTO(r), cut));
+    done(res.value);
+    if (res.error) return notify(res.error);
+    copyRange = r;
+  }
+
+  function writeRichClipboard(result: Promise<CopyResult | null>): void {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) return;
+    const blob = (type: string, pick: (r: CopyResult) => string) =>
+      result.then((r) => {
+        if (!r) throw new Error('copy failed');
+        return new Blob([pick(r)], { type });
+      });
+    try {
+      void navigator.clipboard
+        .write([
+          new ClipboardItem({
+            'text/plain': blob('text/plain', (r) => r.text),
+            'text/html': blob('text/html', (r) => r.html),
+          }),
+        ])
+        .catch(() => {});
+    } catch {
+      // Not allowed here; the plain text from Go stays.
+    }
+  }
+
+  // Pastes the clipboard at the selection (text from a paste event, or
+  // read by Go).
+  export async function paste(text: string | null): Promise<void> {
+    const r = single1();
+    if (!r) return;
+    const res = await serial(() => sheetApi.paste(sheet, toDTO(r), text));
+    if (res.error) return notify(res.error);
+    if (res.value) {
+      if (res.value.moved) copyRange = null;
+      setSelection(fromRange(res.value.area));
+    }
+  }
+
+  export async function pasteSpecial(mode: PasteMode, transpose: boolean, skipBlanks: boolean): Promise<void> {
+    const r = single1();
+    if (!r) return;
+    const res = await serial(() => sheetApi.pasteSpecial(sheet, toDTO(r), mode, transpose, skipBlanks));
+    if (res.error) notify(res.error);
+    else if (res.value) setSelection(fromRange(res.value));
+    focus();
+  }
+
+  async function fill(src: Range, dst: Range, copyOnly: boolean): Promise<void> {
+    copyRange = null;
+    const err = await serial(() => sheetApi.fillSeries(sheet, toDTO(src), toDTO(dst), copyOnly));
+    if (err) return notify(err);
+    setSelection({ ...fromRange(dst), active: selection.active });
+  }
+
+  function onFillPointer(e: GridPointer): void {
+    const src = current(selection);
+    switch (e.kind) {
+      case 'down':
+        fillSrc = src;
+        fillPreview = src;
+        break;
+      case 'drag':
+        if (fillSrc) {
+          fillPreview = fillTarget(fillSrc, e.pos);
+          grid?.scrollIntoView(e.pos);
+        }
+        break;
+      case 'up': {
+        const from = fillSrc;
+        const to = fillPreview;
+        fillSrc = null;
+        fillPreview = null;
+        if (from && to && !sameRange(from, to)) void fill(from, to, false);
+        break;
+      }
+      case 'dbl':
+        void fillToRegion(src);
+        break;
+    }
+  }
+
+  // Double-clicking the fill handle fills down as far as the data
+  // around it goes.
+  async function fillToRegion(src: Range): Promise<void> {
+    const region = await sheetApi.currentRegion(sheet, src.r1, src.c0);
+    if (region.r1 > src.r1) await fill(src, { ...src, r1: region.r1 }, false);
+  }
+
+  export async function shiftSelection(rows: boolean, insert: boolean): Promise<void> {
+    const r = single1();
+    if (!r) return;
+    const at = rows ? r.r0 : r.c0;
+    const count = rows ? r.r1 - r.r0 + 1 : r.c1 - r.c0 + 1;
+    copyRange = null;
+    notify(await serial(() => sheetApi.shift(sheet, rows, at, insert ? count : -count)));
+  }
+
+  async function freezePanes(action: MenuAction): Promise<void> {
+    const fz = grid?.freeze() ?? { rows: 0, cols: 0 };
+    let rows = 0;
+    let cols = 0;
+    if (action === 'freezeTopRow') rows = 1;
+    else if (action === 'freezeFirstCol') cols = 1;
+    else if (action === 'freezePanes' && fz.rows === 0 && fz.cols === 0) {
+      ({ row: rows, col: cols } = selection.active);
+      if (rows === 0 && cols === 0) return notify('請選取要凍結的列下方、欄右方的儲存格。');
+    }
+    grid?.scrollToOrigin();
+    notify(await serial(() => sheetApi.freeze(sheet, rows, cols)));
+  }
+
+  export function sortInfo(): Promise<SortInfo> {
+    return sheetApi.sortInfo(sheet, toDTO(current(selection)));
+  }
+
+  export async function sortRange(rg: RangeDTO, keys: SortKeyDTO[], header: boolean): Promise<void> {
+    copyRange = null;
+    notify(await serial(() => sheetApi.sort(sheet, rg, keys, header)));
+    focus();
+  }
+
+  async function quickSort(desc: boolean): Promise<void> {
+    const info = await sortInfo();
+    if (!info.ok) return notify('請選取資料範圍中的儲存格再排序。');
+    const col = Math.max(info.range.c0, Math.min(selection.active.col, info.range.c1));
+    await sortRange(info.range, [{ col, desc }], info.header);
+  }
+
+  // Column labels for the sort dialog: header texts or 欄 A.
+  export function columnLabels(rg: RangeDTO, header: boolean): { col: number; label: string }[] {
+    const out = [];
+    for (let c = rg.c0; c <= rg.c1 && out.length < 200; c++) {
+      const text = header ? grid?.cache.cell(rg.r0, c)?.text : '';
+      out.push({ col: c, label: text ? text : `欄 ${colName(c)}` });
+    }
+    return out;
+  }
+
+  // ⌘A: the data region around the active cell first, then everything.
+  async function selectRegionOrAll(): Promise<void> {
+    const sel = selection;
+    if (isSingleCell(sel)) {
+      const r = await sheetApi.currentRegion(sheet, sel.active.row, sel.active.col);
+      if (r.r0 !== r.r1 || r.c0 !== r.c1) {
+        setSelection({ ...fromRange(r), active: sel.active }, sel.active);
+        return;
+      }
+    }
+    setSelection(selectAll(lim), sel.active);
+  }
+
+  export function goTo(pos: CellPos): void {
+    if (editing) commit('stay');
+    setSelection(singleAt(pos));
+    focus();
+  }
+
+  async function onFilterButton(e: { col: number; x: number; y: number }): Promise<void> {
+    if (editing) commit('stay');
+    const values = await sheetApi.filterValues(sheet, e.col);
+    const base = root.getBoundingClientRect();
+    filterMenu = { col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: `欄 ${colName(e.col)}` };
+  }
+
+  async function applyFilter(shown: string[] | null): Promise<void> {
+    const col = filterMenu?.col;
+    filterMenu = null;
+    if (col === undefined) return;
+    notify(await serial(() => sheetApi.setFilter(sheet, col, shown ?? [], shown === null)));
+    focus();
+  }
+
+  async function sortByFilter(desc: boolean): Promise<void> {
+    const col = filterMenu?.col;
+    filterMenu = null;
+    if (col === undefined) return;
+    notify(await serial(() => sheetApi.sortFilter(sheet, col, desc)));
+    focus();
+  }
+
+  function onContext(e: ContextRequest): void {
+    if (editing) commit('stay');
+    filterMenu = null;
+    // Right-clicking outside the selection selects what was clicked.
+    const inside = selection.ranges.some((r) => contains(r, e.pos.row, e.pos.col));
+    if (!inside || e.area === 'corner') {
+      if (e.area === 'row') setSelection(selectRows(selection, e.pos.row, e.pos.row, lim, false, selection.active.col));
+      else if (e.area === 'col') setSelection(selectCols(selection, e.pos.col, e.pos.col, lim, false, selection.active.row));
+      else if (e.area === 'cell') setSelection(singleAt(e.pos));
+    }
+    const base = root.getBoundingClientRect();
+    contextMenu = { x: e.x - base.left, y: e.y - base.top, area: e.area };
+  }
+
+  type MenuItem = { label: string; action: MenuAction; key?: string } | null;
+  let contextItems = $derived.by((): MenuItem[] => {
+    if (!contextMenu) return [];
+    const clip: MenuItem[] = [
+      { label: '剪下', action: 'cut', key: '⌘X' },
+      { label: '拷貝', action: 'copy', key: '⌘C' },
+      { label: '貼上', action: 'paste', key: '⌘V' },
+      { label: '選擇性貼上…', action: 'pasteSpecial', key: '⌃⌘V' },
+      null,
+    ];
+    if (contextMenu.area === 'row' || contextMenu.area === 'col') {
+      const rows = contextMenu.area === 'row';
+      return [
+        ...clip,
+        { label: rows ? '插入列' : '插入欄', action: rows ? 'insertRows' : 'insertCols' },
+        { label: rows ? '刪除列' : '刪除欄', action: rows ? 'deleteRows' : 'deleteCols' },
+        { label: '清除內容', action: 'clearContents' },
+        null,
+        { label: rows ? '自動調整列高' : '自動調整欄寬', action: rows ? 'autofitRows' : 'autofitCols' },
+        { label: '隱藏', action: rows ? 'hideRows' : 'hideCols' },
+        { label: '取消隱藏', action: rows ? 'unhideRows' : 'unhideCols' },
+      ];
+    }
+    return [
+      ...clip,
+      { label: '插入…', action: 'insertCells', key: '⇧⌘=' },
+      { label: '刪除…', action: 'deleteCells', key: '⌘-' },
+      { label: '清除內容', action: 'clearContents' },
+      null,
+      { label: '遞增排序', action: 'sortAsc' },
+      { label: '遞減排序', action: 'sortDesc' },
+      { label: '篩選', action: 'filter', key: '⇧⌘F' },
+      null,
+      { label: '儲存格格式…', action: 'formatCells', key: '⌘1' },
+    ];
+  });
+
+  // Clipboard events reach the focused textarea from the Edit menu
+  // (native roles). While idle the grid handles them.
+  function onClipboardEvent(e: ClipboardEvent): void {
+    if (editing) return;
+    e.preventDefault();
+    if (e.type === 'paste') void runMenu('paste', e.clipboardData?.getData('text/plain') ?? null);
+    else void runMenu(e.type === 'cut' ? 'cut' : 'copy');
+  }
+
+  // WebKit enables Copy/Cut in the menu only when there is a selection
+  // or the page handles beforecopy/beforecut.
+  function onBeforeClipboard(e: Event): void {
+    if (!editing) e.preventDefault();
+  }
 
   // ---- Formatting ----
 
@@ -850,6 +1260,7 @@
 
   export async function clearRanges(mode: 'contents' | 'formats' | 'all'): Promise<void> {
     if (editing) commit('stay');
+    copyRange = null;
     await enqueue(() => sheetApi.clear(sheet, selection.ranges.map(toDTO), mode));
     focus();
   }
@@ -992,6 +1403,21 @@
   export function setSelectionForTest(sel: Selection): void {
     setSelection(sel);
   }
+
+  export function getCopyRange(): Range | null {
+    return copyRange;
+  }
+
+  export function getLayout(): LayoutDTO | null {
+    return layout;
+  }
+
+  // Drives the fill handle like a mouse drag from the selection corner.
+  export function dragFillHandle(to: CellPos): void {
+    onPointer({ kind: 'down', area: 'fill', pos: selection.active, shift: false, meta: false });
+    onPointer({ kind: 'drag', area: 'fill', pos: to, shift: false, meta: false });
+    onPointer({ kind: 'up', area: 'fill', pos: to, shift: false, meta: false });
+  }
 </script>
 
 <div class="sheet" bind:this={root}>
@@ -1025,6 +1451,10 @@
     onresize={onResize}
     onautofit={(r) => void autofitOne(r.rows, r.index)}
     onviewport={layoutEditor}
+    {copyRange}
+    {fillPreview}
+    onfilterbutton={(e) => void onFilterButton(e)}
+    oncontext={onContext}
   >
     <textarea
       bind:this={editor}
@@ -1042,6 +1472,60 @@
       oncompositionstart={onCompositionStart}
     ></textarea>
   </Grid>
+
+  {#if contextMenu}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="menu-backdrop"
+      onpointerdown={() => {
+        contextMenu = null;
+        focus();
+      }}
+      oncontextmenu={(e) => {
+        e.preventDefault();
+        contextMenu = null;
+      }}
+    ></div>
+    <ul class="context-menu" role="menu" style:left="{contextMenu.x}px" style:top="{contextMenu.y}px">
+      {#each contextItems as item, i (i)}
+        {#if item}
+          <li role="none">
+            <button
+              role="menuitem"
+              onpointerdown={(e) => e.preventDefault()}
+              onclick={() => {
+                const a = item.action;
+                contextMenu = null;
+                if (a === 'formatCells') onappaction?.(a);
+                else void runMenu(a);
+                focus();
+              }}
+            >
+              <span>{item.label}</span>
+              {#if item.key}<kbd>{item.key}</kbd>{/if}
+            </button>
+          </li>
+        {:else}
+          <li class="sep" role="separator"></li>
+        {/if}
+      {/each}
+    </ul>
+  {/if}
+
+  {#if filterMenu}
+    <FilterMenu
+      x={filterMenu.x}
+      y={filterMenu.y}
+      title={filterMenu.title}
+      values={filterMenu.values}
+      onsort={(desc) => void sortByFilter(desc)}
+      onapply={(shown) => void applyFilter(shown)}
+      onclose={() => {
+        filterMenu = null;
+        focus();
+      }}
+    />
+  {/if}
 
   {#if editing && (editError || suggestions.length > 0 || hint)}
     <div class="popups" style:left="{popupPos.x}px" style:top="{popupPos.y}px">
@@ -1209,6 +1693,50 @@
   .fname {
     font-weight: 600;
     color: var(--accent);
+  }
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+  }
+  .context-menu {
+    position: absolute;
+    z-index: 21;
+    min-width: 200px;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    background: var(--popup-bg);
+    border: 1px solid var(--popup-border);
+    border-radius: 7px;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.2);
+    font: 13px var(--ui-font);
+  }
+  .context-menu button {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 3px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--chrome-text);
+    font: inherit;
+    text-align: left;
+  }
+  .context-menu button:hover {
+    background: var(--accent);
+    color: #fff;
+  }
+  .context-menu kbd {
+    font: inherit;
+    opacity: 0.6;
+  }
+  .context-menu .sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--popup-border);
   }
   .desc {
     color: var(--chrome-muted);

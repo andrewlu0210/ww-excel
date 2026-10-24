@@ -30,6 +30,28 @@ export function Clear(sheet: number, ranges: $models.RangeDTO[] | null, mode: st
 }
 
 /**
+ * ClearClip ends a pending cut (Esc).
+ */
+export function ClearClip(): $CancellablePromise<void> {
+    return $Call.ByID(275034840);
+}
+
+/**
+ * Copy captures a range for pasting and puts its text (tab-separated,
+ * as Excel does) and an HTML table on the system clipboard.
+ */
+export function Copy(sheet: number, rg: $models.RangeDTO, cut: boolean): $CancellablePromise<$models.CopyResult> {
+    return $Call.ByID(205989728, sheet, rg, cut);
+}
+
+/**
+ * CurrentRegion is the data block around a cell (⌘A, sort, filter).
+ */
+export function CurrentRegion(sheet: number, row: number, col: number): $CancellablePromise<$models.RangeDTO> {
+    return $Call.ByID(1094334482, sheet, row, col);
+}
+
+/**
  * DataEdge returns the ⌘+arrow target from (row, col).
  */
 export function DataEdge(sheet: number, row: number, col: number, dr: number, dc: number): $CancellablePromise<$models.CellPos> {
@@ -52,10 +74,43 @@ export function Fill(sheet: number, ranges: $models.RangeDTO[] | null, text: str
 }
 
 /**
+ * FillSeries extends src over dst (fill handle); copyOnly repeats the
+ * cells instead of continuing a series (⌘D, ⌘R, ⌥-drag).
+ */
+export function FillSeries(sheet: number, src: $models.RangeDTO, dst: $models.RangeDTO, copyOnly: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3618456001, sheet, src, dst, copyOnly);
+}
+
+export function FilterValues(sheet: number, col: number): $CancellablePromise<$models.FilterValueDTO[] | null> {
+    return $Call.ByID(2043452641, sheet, col);
+}
+
+/**
+ * FindAll lists up to 1,000 matches with their text (找全部).
+ */
+export function FindAll(sheet: number, opt: $models.FindOptionsDTO): $CancellablePromise<$models.HitDTO[] | null> {
+    return $Call.ByID(2042142085, sheet, opt);
+}
+
+/**
+ * FindNext returns the next match after (row, col), or nil.
+ */
+export function FindNext(sheet: number, row: number, col: number, opt: $models.FindOptionsDTO, forward: boolean): $CancellablePromise<$models.HitDTO | null> {
+    return $Call.ByID(3321376443, sheet, row, col, opt, forward);
+}
+
+/**
  * Format applies a formatting change to the ranges.
  */
 export function Format(sheet: number, ranges: $models.RangeDTO[] | null, patch: $models.FormatPatch): $CancellablePromise<void> {
     return $Call.ByID(3015178646, sheet, ranges, patch);
+}
+
+/**
+ * Freeze keeps the first rows and cols on screen (0, 0 unfreezes).
+ */
+export function Freeze(sheet: number, rows: number, cols: number): $CancellablePromise<void> {
+    return $Call.ByID(3430450694, sheet, rows, cols);
 }
 
 /**
@@ -72,6 +127,20 @@ export function Functions(): $CancellablePromise<formula$0.FuncInfo[] | null> {
  */
 export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null, knownStyles: number): $CancellablePromise<$models.BlocksResult> {
     return $Call.ByID(3691041957, sheet, refs, knownStyles);
+}
+
+/**
+ * HasClip reports whether 選擇性貼上 has something to paste.
+ */
+export function HasClip(): $CancellablePromise<boolean> {
+    return $Call.ByID(1193898633);
+}
+
+/**
+ * Hide hides or shows rows (rows = true) or columns lo..hi.
+ */
+export function Hide(sheet: number, rows: boolean, lo: number, hi: number, hidden: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1015704945, sheet, rows, lo, hi, hidden);
 }
 
 /**
@@ -96,6 +165,24 @@ export function Merge(sheet: number, rg: $models.RangeDTO, center: boolean): $Ca
 }
 
 /**
+ * Paste pastes at the selection. text is the clipboard text from a paste
+ * event, or nil to read the system clipboard. Text matching our last
+ * copy pastes that clip (formulas, formats); other text is entered as
+ * if typed.
+ */
+export function Paste(sheet: number, sel: $models.RangeDTO, text: string | null): $CancellablePromise<$models.PasteResult> {
+    return $Call.ByID(3483011796, sheet, sel, text);
+}
+
+/**
+ * PasteSpecial pastes the internal clip: mode is "all", "values",
+ * "formats" or "formulas".
+ */
+export function PasteSpecial(sheet: number, sel: $models.RangeDTO, mode: string, transpose: boolean, skipBlanks: boolean): $CancellablePromise<$models.RangeDTO> {
+    return $Call.ByID(544686695, sheet, sel, mode, transpose, skipBlanks);
+}
+
+/**
  * PreviewFormat renders a cell's value with a format code, for the
  * number format dialog. Empty cells preview the number 1234.5678.
  */
@@ -105,6 +192,14 @@ export function PreviewFormat(sheet: number, row: number, col: number, code: str
 
 export function Redo(): $CancellablePromise<boolean> {
     return $Call.ByID(547917765);
+}
+
+/**
+ * Replace replaces matches: every match when all, else only the cell at
+ * (sheet, row, col) if it matches. Returns how many cells changed.
+ */
+export function Replace(sheet: number, opt: $models.FindOptionsDTO, $with: string, all: boolean, row: number, col: number): $CancellablePromise<number> {
+    return $Call.ByID(535424183, sheet, opt, $with, all, row, col);
 }
 
 /**
@@ -124,11 +219,53 @@ export function SetCell(sheet: number, row: number, col: number, text: string): 
 }
 
 /**
+ * SetFilter sets the values a filter column shows; all clears it.
+ */
+export function SetFilter(sheet: number, col: number, shown: string[] | null, all: boolean): $CancellablePromise<void> {
+    return $Call.ByID(315446633, sheet, col, shown, all);
+}
+
+/**
  * SetSizes sets row heights (rows = true) or column widths in pixels;
  * px < 0 restores the default.
  */
 export function SetSizes(sheet: number, rows: boolean, indices: number[] | null, px: number): $CancellablePromise<void> {
     return $Call.ByID(2793758031, sheet, rows, indices, px);
+}
+
+/**
+ * Shift inserts (count > 0) or deletes (count < 0) rows or columns.
+ */
+export function Shift(sheet: number, rows: boolean, at: number, count: number): $CancellablePromise<void> {
+    return $Call.ByID(3461978163, sheet, rows, at, count);
+}
+
+/**
+ * Sort sorts the rows of rg by keys.
+ */
+export function Sort(sheet: number, rg: $models.RangeDTO, keys: $models.SortKeyDTO[] | null, header: boolean): $CancellablePromise<void> {
+    return $Call.ByID(3727103541, sheet, rg, keys, header);
+}
+
+/**
+ * SortFilter sorts the filter range by one of its columns.
+ */
+export function SortFilter(sheet: number, col: number, desc: boolean): $CancellablePromise<void> {
+    return $Call.ByID(4162256839, sheet, col, desc);
+}
+
+/**
+ * SortInfo returns the range a sort of the selection applies to.
+ */
+export function SortInfo(sheet: number, sel: $models.RangeDTO): $CancellablePromise<$models.SortInfo> {
+    return $Call.ByID(233822741, sheet, sel);
+}
+
+/**
+ * ToggleFilter turns the AutoFilter on (around the selection) or off.
+ */
+export function ToggleFilter(sheet: number, sel: $models.RangeDTO): $CancellablePromise<void> {
+    return $Call.ByID(1239779915, sheet, sel);
 }
 
 export function Undo(): $CancellablePromise<boolean> {

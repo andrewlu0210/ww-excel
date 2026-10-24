@@ -2,7 +2,9 @@
 // controller with simulated key events and typed text, then checks the
 // Go model (source of truth) and the frontend cache. Native IME input
 // and menu accelerators cannot be simulated here; test those by hand.
-import { benchApi, documentApi, sheetApi, type FormatPatch } from '../bridge/sheet';
+import { benchApi, documentApi, sheetApi, type FormatPatch, type PasteMode } from '../bridge/sheet';
+import type { MenuAction } from '../input/keymap';
+import type { Range } from '../grid/selection';
 import { styleStore } from '../stores/styles';
 import type { CellPos, Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
@@ -23,6 +25,12 @@ export interface SheetDriver {
   mergeCells(center: boolean): Promise<string | null>;
   focus(): void;
   getGrid(): { cache: BlockCache } | undefined;
+  // v0.5
+  runMenu(action: MenuAction, pasteText?: string | null): Promise<void>;
+  paste(text: string | null): Promise<void>;
+  pasteSpecial(mode: PasteMode, transpose: boolean, skipBlanks: boolean): Promise<void>;
+  getCopyRange(): Range | null;
+  dragFillHandle(to: CellPos): void;
 }
 
 interface Check {
@@ -271,6 +279,7 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await key('Backspace');
 
   await formatTests(sheet, { key, type, goTo, step, expect, expectCell });
+  await productivityTests(sheet, { key, type, goTo, step, expect, expectCell });
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
@@ -464,4 +473,183 @@ async function formatTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   // Leave the formatted area on screen for the snapshot.
   sheet.setSelectionForTest(area(14, 0));
   await step();
+}
+
+// v0.5: clipboard, fill, insert/delete, hide, freeze, find, sort, filter.
+// Runs on sheet 0 of the reopened round-trip file, below row 30.
+async function productivityTests(sheet: SheetDriver, h: Helpers): Promise<void> {
+  const { key, step, expect, expectCell } = h;
+  const set = async (row: number, col: number, text: string) => {
+    await sheetApi.setCell(0, row, col, text);
+    await step();
+  };
+  const select = async (r0: number, c0: number, r1 = r0, c1 = c0) => {
+    sheet.setSelectionForTest(area(r0, c0, r1, c1));
+    await step();
+  };
+  const shown = async (row: number, col: number) => {
+    const res = await sheetApi.getBlocks(0, [{ row: Math.floor(row / 64), col: Math.floor(col / 32) }], 0);
+    return res.blocks?.[0]?.cells?.find((x) => x.r === row % 64 && x.c === col % 32)?.v ?? '';
+  };
+  const layout = () => sheetApi.layout(0, 0);
+  const allRows = (r0: number, r1 = r0): Selection => ({
+    active: { row: r0, col: 0 },
+    anchor: { row: r0, col: 0 },
+    focus: { row: r1, col: 16383 },
+    ranges: [{ r0, c0: 0, r1, c1: 16383 }],
+  });
+  const allCols = (c0: number, c1 = c0): Selection => ({
+    active: { row: 0, col: c0 },
+    anchor: { row: 0, col: c0 },
+    focus: { row: 1048575, col: c1 },
+    ranges: [{ r0: 0, c0, r1: 1048575, c1 }],
+  });
+
+  // 33. ⌘C / ⌘V within the app keeps formulas (adjusted), with ants.
+  await set(30, 0, '1');
+  await set(30, 1, '=A31*2');
+  await select(30, 0, 30, 1);
+  await key('c', { metaKey: true });
+  expect('⌘C 顯示複製虛線框', JSON.stringify(sheet.getCopyRange()) === JSON.stringify({ r0: 30, c0: 0, r1: 30, c1: 1 }), JSON.stringify(sheet.getCopyRange()));
+  await select(32, 0);
+  await key('v', { metaKey: true });
+  await expectCell('⌘V 貼上公式並調整參照', 32, 1, '=A33*2');
+  expect('貼上後選取貼上範圍', JSON.stringify(sheet.getSelection().ranges) === JSON.stringify([{ r0: 32, c0: 0, r1: 32, c1: 1 }]), JSON.stringify(sheet.getSelection().ranges));
+  await select(34, 0, 35, 1);
+  await sheet.paste(null);
+  await step();
+  await expectCell('貼到倍數大小的範圍會重複貼上', 35, 1, '=A36*2');
+  await key('Escape');
+  expect('Esc 結束虛線框', sheet.getCopyRange() === null, '');
+
+  // 34. Text from other apps (Excel TSV) is entered as typed.
+  await select(37, 0);
+  await sheet.paste('名稱\t數量\n蘋果\t=1+2\n');
+  await step();
+  await expectCell('外部 TSV 貼上：文字', 37, 0, '名稱');
+  await expectCell('外部 TSV 貼上：公式', 38, 1, '=1+2');
+
+  // 35. ⌘X moves cells; formulas that refer to them follow.
+  await select(32, 0);
+  await key('x', { metaKey: true });
+  await select(32, 3);
+  await key('v', { metaKey: true });
+  await expectCell('剪下貼上移動儲存格', 32, 3, '1');
+  await expectCell('剪下後原位置清空', 32, 0, '');
+  await expectCell('參照跟著移動', 32, 1, '=D33*2');
+  await key('z', { metaKey: true });
+  await expectCell('復原剪下貼上', 32, 0, '1');
+
+  // 36. 選擇性貼上: values, transposed.
+  await select(30, 0, 30, 1);
+  await key('c', { metaKey: true });
+  await select(30, 5);
+  await sheet.pasteSpecial('values', true, false);
+  await step();
+  await expectCell('選擇性貼上：值＋轉置（第一格）', 30, 5, '1');
+  await expectCell('選擇性貼上：值＋轉置（公式變成值）', 31, 5, '2');
+  await key('Escape');
+
+  // 37. Fill handle: numbers continue, lists continue, formulas adjust.
+  await set(39, 0, '1');
+  await set(40, 0, '3');
+  await set(39, 1, '星期一');
+  await set(39, 2, '=A40*10');
+  await select(39, 0, 40, 0);
+  sheet.dragFillHandle({ row: 44, col: 0 });
+  await step();
+  await expectCell('填滿控點：等差數列', 44, 0, '11');
+  await select(39, 1, 39, 2);
+  sheet.dragFillHandle({ row: 42, col: 2 });
+  await step();
+  await expectCell('填滿控點：星期清單', 42, 1, '星期四');
+  await expectCell('填滿控點：公式調整參照', 42, 2, '=A43*10');
+  await set(39, 3, 'x');
+  await select(39, 3, 41, 3);
+  await key('d', { metaKey: true });
+  await expectCell('⌘D 向下複製', 41, 3, 'x');
+
+  // 38. Insert / delete rows and columns adjust formulas.
+  await set(30, 2, '=SUM(A40:A45)');
+  expect('插入前的加總', (await shown(30, 2)) === '36', await shown(30, 2));
+  sheet.setSelectionForTest(allRows(41));
+  await step();
+  await key('+', { metaKey: true, shiftKey: true });
+  await expectCell('⇧⌘= 插入列：範圍擴大', 30, 2, '=SUM(A40:A46)');
+  await expectCell('插入列：下方儲存格下移', 45, 0, '11');
+  await key('-', { metaKey: true });
+  await expectCell('⌘- 刪除列：範圍還原', 30, 2, '=SUM(A40:A45)');
+  sheet.setSelectionForTest(allCols(0));
+  await step();
+  await sheet.runMenu('insertCols');
+  await step();
+  await expectCell('插入欄：公式跟著右移', 30, 3, '=SUM(B40:B45)');
+  await key('z', { metaKey: true });
+  await expectCell('復原插入欄', 30, 2, '=SUM(A40:A45)');
+
+  // 39. Hide and unhide (⌃0 / ⌃⇧0, ⌃9).
+  sheet.setSelectionForTest(allCols(4));
+  await step();
+  await key('0', { ctrlKey: true });
+  let l = await layout();
+  expect('⌃0 隱藏欄', (l.cols ?? []).some((s) => s.i === 4 && s.hidden), JSON.stringify(l.cols));
+  sheet.setSelectionForTest(allCols(3, 5));
+  await step();
+  await key(')', { ctrlKey: true, shiftKey: true });
+  l = await layout();
+  expect('⌃⇧0 取消隱藏欄', !(l.cols ?? []).some((s) => s.hidden), JSON.stringify(l.cols));
+  sheet.setSelectionForTest(allRows(33));
+  await step();
+  await key('9', { ctrlKey: true });
+  l = await layout();
+  expect('⌃9 隱藏列', (l.rows ?? []).some((s) => s.i === 33 && s.hidden), JSON.stringify(l.rows));
+  await key('z', { metaKey: true });
+
+  // 40. Find and replace.
+  const hit = await sheetApi.findNext(0, 0, 0, { text: '星期', matchCase: false, wholeCell: false, inFormulas: false, allSheets: false }, true);
+  expect('尋找', hit?.row === 39 && hit.col === 1, JSON.stringify(hit));
+  const rep = await sheetApi.replace(0, { text: '星期', matchCase: false, wholeCell: false, inFormulas: true, allSheets: false }, '週', true, 0, 0);
+  await step();
+  expect('全部取代', rep.value === 4, JSON.stringify(rep));
+  await expectCell('取代結果', 41, 1, '週三');
+
+  // 41. Sort (header detected; blanks last) and AutoFilter.
+  const rows = [['名稱', '分數'], ['乙', '70'], ['甲', '90'], ['丙', '80']];
+  for (let r = 0; r < rows.length; r++) for (let c = 0; c < 2; c++) await set(50 + r, 7 + c, rows[r][c]);
+  await select(52, 8);
+  await sheet.runMenu('sortDesc');
+  await step();
+  expect('遞減排序（自動判斷標題列）', (await shown(51, 7)) === '甲' && (await shown(53, 7)) === '乙' && (await shown(50, 7)) === '名稱', `${await shown(51, 7)} ${await shown(53, 7)}`);
+  await select(50, 7);
+  await key('f', { metaKey: true, shiftKey: true });
+  l = await layout();
+  expect('⇧⌘F 開啟篩選', JSON.stringify(l.filter) === JSON.stringify({ r0: 50, c0: 7, r1: 53, c1: 8 }), JSON.stringify(l.filter));
+  const values = await sheetApi.filterValues(0, 7);
+  expect('篩選清單', values.map((v) => v.text).join(',') === '乙,丙,甲' || values.length === 3, JSON.stringify(values));
+  await sheetApi.setFilter(0, 7, ['甲'], false);
+  await step();
+  l = await layout();
+  const hiddenRows = (l.rows ?? []).filter((s) => s.hidden).map((s) => s.i).sort((a, b) => a - b);
+  expect('篩選隱藏不符合的列', hiddenRows.join(',') === '52,53', JSON.stringify(hiddenRows));
+  expect('篩選欄顯示漏斗', (l.filteredCols ?? []).includes(7), JSON.stringify(l.filteredCols));
+
+  // 42. Freeze panes, then an xlsx round trip of freeze and filter.
+  await select(1, 1);
+  await sheet.runMenu('freezePanes');
+  await step();
+  l = await layout();
+  expect('凍結窗格', l.freezeRows === 1 && l.freezeCols === 1, `${l.freezeRows},${l.freezeCols}`);
+  const path = await benchApi.saveCopy('selftest-v05.xlsx');
+  await documentApi.openPath(path);
+  await step();
+  await step();
+  l = await layout();
+  expect('xlsx 存讀：凍結窗格', l.freezeRows === 1 && l.freezeCols === 1, `${l.freezeRows},${l.freezeCols}`);
+  expect('xlsx 存讀：篩選範圍與隱藏列', JSON.stringify(l.filter) === JSON.stringify({ r0: 50, c0: 7, r1: 53, c1: 8 }) && (l.rows ?? []).some((s) => s.i === 52 && s.hidden), JSON.stringify(l.filter));
+  await expectCell('xlsx 存讀：插入刪除後的公式', 30, 2, '=SUM(A40:A45)');
+
+  // Leave the frozen panes, filter and a copy marquee for the snapshot.
+  await select(39, 0, 44, 0);
+  await key('c', { metaKey: true });
+  await select(39, 2);
 }

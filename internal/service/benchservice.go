@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -55,7 +56,7 @@ func NewBenchService(sheets *SheetService, docs *DocumentService) *BenchService 
 
 // SaveCopy saves the document as name next to the self-test report,
 // without dialogs, and returns the full path (self-test only).
-func (b *BenchService) SaveCopy(name string) (string, error) {
+func (b *BenchService) SaveCopy(ctx context.Context, name string) (string, error) {
 	if !b.SelfTestMode() {
 		return "", fmt.Errorf("SaveCopy is only available in self-test mode")
 	}
@@ -63,7 +64,7 @@ func (b *BenchService) SaveCopy(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !b.docs.saveTo(path) {
+	if !b.docs.saveTo(ctx, path) {
 		return "", fmt.Errorf("save %s failed", path)
 	}
 	return path, nil
@@ -100,12 +101,12 @@ func (b *BenchService) Mem() MemStats {
 
 // EmitBurst pushes count events, each carrying blocksPerEvent real
 // blocks from the top of sheet 0.
-func (b *BenchService) EmitBurst(count, blocksPerEvent int) {
+func (b *BenchService) EmitBurst(ctx context.Context, count, blocksPerEvent int) {
 	refs := make([]BlockRef, blocksPerEvent)
 	for i := range refs {
 		refs[i] = BlockRef{Row: i}
 	}
-	blocks := b.sheets.GetBlocks(0, refs, 0).Blocks
+	blocks := b.sheets.GetBlocks(ctx, 0, refs, 0).Blocks
 
 	app := application.Get()
 	for i := 0; i < count; i++ {

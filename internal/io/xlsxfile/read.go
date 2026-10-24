@@ -176,6 +176,31 @@ func (r *reader) sheet(name string) (*model.Sheet, error) {
 		}
 	}
 	l.SortMerges()
+
+	if panes, err := r.f.GetPanes(name); err == nil && panes.Freeze {
+		l.FreezeRows, l.FreezeCols = max(panes.YSplit, 0), max(panes.XSplit, 0)
+	}
+	if names := r.f.GetDefinedName(); len(names) > 0 {
+		for _, dn := range names {
+			if dn.Name != "_xlnm._FilterDatabase" || dn.Scope != name {
+				continue
+			}
+			ref := dn.RefersTo
+			if i := strings.LastIndex(ref, "!"); i >= 0 {
+				ref = ref[i+1:]
+			}
+			ref = strings.ReplaceAll(ref, "$", "")
+			parts := strings.Split(ref, ":")
+			if len(parts) != 2 {
+				continue
+			}
+			c0, r0, err1 := excelize.CellNameToCoordinates(parts[0])
+			c1, r1, err2 := excelize.CellNameToCoordinates(parts[1])
+			if err1 == nil && err2 == nil {
+				l.Filter = &model.AutoFilter{Range: model.Range{R0: r0 - 1, C0: c0 - 1, R1: r1 - 1, C1: c1 - 1}.Normalize(), Cols: map[int][]string{}}
+			}
+		}
+	}
 	return sh, nil
 }
 

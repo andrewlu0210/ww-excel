@@ -121,3 +121,16 @@ func TestSheetRewrites(t *testing.T) {
 		t.Fatalf("prefixes = %q", Format(pre))
 	}
 }
+
+func TestMove(t *testing.T) {
+	src := model.Range{R0: 0, C0: 0, R1: 1, C1: 1} // A1:B2
+	n := Binary{Op: "+", L: ref(0, 0, 1, 1), R: Binary{Op: "+", L: ref(1, 1, 1, 1), R: ref(0, 0, 4, 0)}}
+	got, changed := Move(n, "S", "S", src, "S", 3, 2)
+	if !changed || Format(got) != "C4:D5+D5+A1:A5" {
+		t.Fatalf("Move = %q", Format(got))
+	}
+	other, _ := Move(Ref{Sheet: "S", Area: CellAt(0, 0, true, true)}, "T", "S", src, "S", 1, 0)
+	if Format(other) != "S!$A$2" {
+		t.Fatalf("from another sheet = %q", Format(other))
+	}
+}

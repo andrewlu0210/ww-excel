@@ -2,8 +2,23 @@
   import { onMount } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest } from './bench/selfTest';
-  import { benchApi, documentApi, sheetApi, type DocState, type FormatPatch, type SheetInfo, type StyleDTO } from './bridge/sheet';
+  import {
+    benchApi,
+    documentApi,
+    sheetApi,
+    type DocState,
+    type FindOptionsDTO,
+    type FormatPatch,
+    type HitDTO,
+    type RangeDTO,
+    type SheetInfo,
+    type StyleDTO,
+  } from './bridge/sheet';
+  import FindPanel from './components/FindPanel.svelte';
   import NumberFormatDialog from './components/NumberFormatDialog.svelte';
+  import PasteSpecialDialog from './components/PasteSpecialDialog.svelte';
+  import ShiftDialog from './components/ShiftDialog.svelte';
+  import SortDialog from './components/SortDialog.svelte';
   import Sheet from './components/Sheet.svelte';
   import SheetTabs from './components/SheetTabs.svelte';
   import StatusBar from './components/StatusBar.svelte';
@@ -30,6 +45,10 @@
   let activeMerged = $state(false);
   let circular = $state('');
   let numberDialog = $state(false);
+  let findPanel = $state<{ replace: boolean } | null>(null);
+  let sortDialog = $state<{ range: RangeDTO; header: boolean } | null>(null);
+  let pasteDialog = $state(false);
+  let shiftDialog = $state<{ insert: boolean } | null>(null);
   // A short message, e.g. why a merge was refused.
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -76,8 +95,72 @@
   }
 
   function onAppAction(action: MenuAction): void {
-    if (action === 'insertSheet') void addSheet();
-    if (action === 'formatCells') numberDialog = true;
+    switch (action) {
+      case 'insertSheet':
+        void addSheet();
+        break;
+      case 'formatCells':
+        numberDialog = true;
+        break;
+      case 'find':
+      case 'replace':
+        findPanel = { replace: action === 'replace' };
+        break;
+      case 'pasteSpecial':
+        pasteDialog = true;
+        break;
+      case 'insertCells':
+      case 'deleteCells':
+        shiftDialog = { insert: action === 'insertCells' };
+        break;
+      case 'sort':
+        void openSort();
+        break;
+    }
+  }
+
+  async function openSort(): Promise<void> {
+    const res = await sheetView?.sortInfo();
+    if (!res?.ok) return notify('請選取資料範圍中的儲存格再排序。');
+    sortDialog = { range: res.range, header: res.header };
+  }
+
+  function closeDialogs(): void {
+    sortDialog = null;
+    pasteDialog = false;
+    shiftDialog = null;
+    sheetView?.focus();
+  }
+
+  // ---- Find & replace ----
+
+  async function gotoHit(hit: HitDTO): Promise<void> {
+    const pos = { row: hit.row, col: hit.col };
+    if (hit.sheet !== active) {
+      selections.set(sheets[hit.sheet], single(pos));
+      await showSheet(hit.sheet);
+    } else {
+      sheetView?.goTo(pos);
+    }
+  }
+
+  async function findNext(opt: FindOptionsDTO, forward: boolean): Promise<string | null> {
+    const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
+    const hit = await sheetApi.findNext(active, pos.row, pos.col, opt, forward);
+    if (!hit) return '找不到符合的資料。';
+    await gotoHit(hit);
+    return null;
+  }
+
+  async function replace(opt: FindOptionsDTO, withText: string, all: boolean): Promise<string | null> {
+    await sheetView?.whenIdle();
+    const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
+    const res = await sheetApi.replace(active, opt, withText, all, pos.row, pos.col);
+    if (res.error) return res.error;
+    if (all) return res.value ? `已完成取代 ${res.value} 項。` : '找不到符合的資料。';
+    // 取代: replace the current match, then go to the next one.
+    const next = await findNext(opt, true);
+    return res.value ? null : next;
   }
 
   async function addSheet(): Promise<void> {
@@ -137,7 +220,7 @@
   onMount(() => {
     const offs = [
       documentApi.onMenu((action) => {
-        if (action === 'insertSheet' || action === 'formatCells') onAppAction(action);
+        if (action === 'insertSheet' || action === 'formatCells' || action === 'sort') onAppAction(action);
         else void sheetView?.runMenu(action);
       }),
       documentApi.onState((st) => (circular = st.circular)),
@@ -206,6 +289,7 @@
         bind:activeMerged
         onselectionchange={(sel) => selections.set(sheets[active], sel)}
         onappaction={onAppAction}
+        onnotify={notify}
       />
     {/key}
     <StatusBar {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench}>
@@ -240,6 +324,56 @@
         numberDialog = false;
         sheetView?.focus();
       }}
+    />
+  {/if}
+
+  {#if findPanel}
+    <FindPanel
+      bind:replaceMode={findPanel.replace}
+      {sheets}
+      onfind={findNext}
+      onfindall={(opt) => sheetApi.findAll(active, opt)}
+      onreplace={replace}
+      ongoto={(h) => void gotoHit(h)}
+      onclose={() => {
+        findPanel = null;
+        sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if sortDialog}
+    <SortDialog
+      range={sortDialog.range}
+      header={sortDialog.header}
+      columns={(header) => sheetView?.columnLabels(sortDialog!.range, header) ?? []}
+      onapply={(rg, keys, header) => {
+        sortDialog = null;
+        void sheetView?.sortRange(rg, keys, header);
+      }}
+      onclose={closeDialogs}
+    />
+  {/if}
+
+  {#if pasteDialog}
+    <PasteSpecialDialog
+      onapply={(mode, transpose, skip) => {
+        pasteDialog = false;
+        void sheetView?.pasteSpecial(mode, transpose, skip);
+      }}
+      onclose={closeDialogs}
+    />
+  {/if}
+
+  {#if shiftDialog}
+    <ShiftDialog
+      insert={shiftDialog.insert}
+      onapply={(rows) => {
+        const insert = shiftDialog!.insert;
+        shiftDialog = null;
+        void sheetView?.shiftSelection(rows, insert).then(() => sheetView?.focus());
+      }}
+      onclose={closeDialogs}
     />
   {/if}
 

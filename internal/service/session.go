@@ -95,6 +95,10 @@ type Session struct {
 
 	// Number of styles already sent with diff events.
 	stylesSent int
+
+	// CloseWindow closes the session's window; its closing hook then
+	// asks about unsaved changes. Set by main.
+	CloseWindow func()
 }
 
 func NewSession(doc *document.Document, emit Emitter) *Session {
@@ -213,7 +217,7 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 		diff := CellsChanged{Sheet: si, Version: s.doc.Version(), Cells: []ChangedCell{}}
 		diff.UsedRows, diff.UsedCols = sh.UsedRange()
 		cells := bySheet[si]
-		if len(cells) > maxDiffCells || ch.Structure {
+		if len(cells) > maxDiffCells || ch.Structure || ch.Shift != nil && si == ch.Sheet {
 			diff.Invalidate = true
 		} else {
 			for _, p := range cells {
@@ -269,8 +273,23 @@ func (s *Session) PublishState() {
 	s.publishState(s.State())
 }
 
+// Pristine reports an untitled document that was never edited, which
+// opening a file replaces instead of opening another window.
+func (s *Session) Pristine() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.doc.Path() == "" && !s.doc.History().CanUndo() && !s.doc.History().CanRedo()
+}
+
 func (s *Session) Dirty() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.doc.Dirty()
+}
+
+// Close releases the document when its window closes.
+func (s *Session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.doc.Close()
 }
