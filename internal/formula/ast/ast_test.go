@@ -102,3 +102,22 @@ func TestTranslate(t *testing.T) {
 		}
 	}
 }
+
+func TestSheetRewrites(t *testing.T) {
+	n := Binary{Op: "+", L: Ref{Sheet: "Data", Area: CellAt(0, 0, false, false)}, R: Ref{Area: CellAt(1, 1, false, false)}}
+	renamed, changed := RenameSheet(n, "data", "銷售 2026")
+	if !changed || Format(renamed) != "'銷售 2026'!A1+B2" {
+		t.Fatalf("rename = %q", Format(renamed))
+	}
+	removed, changed := RemoveSheet(n, "DATA")
+	if !changed || Format(removed) != "#REF!+B2" {
+		t.Fatalf("remove = %q", Format(removed))
+	}
+	if _, changed := RenameSheet(n, "Other", "X"); changed {
+		t.Fatal("unrelated rename changed the formula")
+	}
+	pre := WithFilePrefixes(Call{Name: "IFERROR", Args: []Node{Call{Name: "XLOOKUP", Args: []Node{Number{V: 1}}}}})
+	if Format(pre) != "IFERROR(_xlfn.XLOOKUP(1))" {
+		t.Fatalf("prefixes = %q", Format(pre))
+	}
+}

@@ -11,7 +11,7 @@ import (
 
 func TestSaveLoadAndDirty(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"book.wwx", "data.csv"} {
+	for _, name := range []string{"book.wwx", "data.csv", "book.xlsx"} {
 		t.Run(name, func(t *testing.T) {
 			d := New()
 			if d.Name() != UntitledName || d.Dirty() {
@@ -38,6 +38,7 @@ func TestSaveLoadAndDirty(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer loaded.Close()
 			if got := loaded.Workbook().Sheets[0].Get(1, 2); got != model.StringCell("台北") {
 				t.Fatalf("loaded cell = %+v", got)
 			}
@@ -71,7 +72,7 @@ func TestSaveFailureKeepsState(t *testing.T) {
 }
 
 func TestFormatForPath(t *testing.T) {
-	if FormatForPath("/a/B.CSV") != FormatCSV || FormatForPath("x.wwx") != FormatNative || FormatForPath("x") != FormatNative {
+	if FormatForPath("/a/B.CSV") != FormatCSV || FormatForPath("x.wwx") != FormatNative || FormatForPath("x") != FormatNative || FormatForPath("r.XLSX") != FormatXLSX {
 		t.Fatal("format detection")
 	}
 }

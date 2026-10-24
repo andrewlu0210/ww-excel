@@ -109,3 +109,13 @@ func TestParseErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestFilePrefixesDropped(t *testing.T) {
+	n, err := Parse("_xlfn.XLOOKUP(A1,B:B,C:C)+_xlfn._xlws.SORT(A1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ast.Format(n); got != "XLOOKUP(A1,B:B,C:C)+SORT(A1)" {
+		t.Fatalf("got %q", got)
+	}
+}

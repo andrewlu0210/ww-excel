@@ -48,6 +48,9 @@ type compiled struct {
 	node     ast.Node
 	areas    []depgraph.Area
 	volatile bool
+	// unparsed: stored text this engine cannot parse (e.g. a structured
+	// reference from an xlsx file). The cached value is kept as is.
+	unparsed bool
 }
 
 func New(wb *model.Workbook) *Engine {
@@ -127,14 +130,16 @@ func (e *Engine) compile(node ast.Node, sheet int) *compiled {
 }
 
 // ensure returns the compiled form of f, compiling stored text (e.g.
-// from a loaded file). Unparsable text evaluates to #NAME?.
+// from a loaded file). Text that cannot be parsed keeps its cached value.
 func (e *Engine) ensure(f *model.Formula, sheet int) *compiled {
 	if c, ok := f.Compiled.(*compiled); ok {
 		return c
 	}
 	node, err := parser.Parse(f.Text)
 	if err != nil {
-		node = ast.Error{Code: model.ErrName}
+		c := &compiled{node: ast.Error{Code: model.ErrName}, unparsed: true}
+		f.Compiled = c
+		return c
 	}
 	c := e.compile(node, sheet)
 	f.Compiled = c
@@ -158,9 +163,15 @@ func (e *Engine) Rebuild() []Key {
 	var all []Key
 	for si, sh := range e.wb.Sheets {
 		sh.EachInRange(model.Range{R1: model.MaxRows - 1, C1: model.MaxCols - 1}, func(row, col int, c model.Cell) {
-			if c.F != nil {
-				all = append(all, Key{Sheet: si, Row: row, Col: col})
+			if c.F == nil {
+				return
 			}
+			// Sheets may have been added, removed or moved: resolve sheet
+			// references again.
+			if old, ok := c.F.Compiled.(*compiled); ok && !old.unparsed {
+				c.F.Compiled = e.compile(old.node, si)
+			}
+			all = append(all, Key{Sheet: si, Row: row, Col: col})
 		})
 	}
 	return e.Update(all)
@@ -435,6 +446,9 @@ func (e *Engine) evalCell(k Key) bool {
 		return false
 	}
 	comp := e.ensure(c.F, k.Sheet)
+	if comp.unparsed {
+		return false
+	}
 	ev := eval.Evaluator{R: reader{e}, Sheet: k.Sheet, Row: k.Row, Col: k.Col, Now: e.Now(), Rand: e.Rand}
 	return e.setValue(k, ev.Eval(comp.node).ToCell())
 }
@@ -442,7 +456,7 @@ func (e *Engine) evalCell(k Key) bool {
 func (e *Engine) setValue(k Key, v model.Cell) bool {
 	sh := e.wb.Sheets[k.Sheet]
 	old := sh.Get(k.Row, k.Col)
-	v.F = old.F
+	v.F, v.S = old.F, old.S // keep the formula and the cell's format
 	if v.SameValue(old) {
 		return false
 	}

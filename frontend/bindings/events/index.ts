@@ -29,7 +29,17 @@ export const DocReset = "doc:reset";
 export const DocState = "doc:state";
 
 /**
+ * Name of the custom event "layout:changed".
+ */
+export const LayoutChanged = "layout:changed";
+
+/**
  * Name of the custom event "menu:action".
  */
 export const MenuAction = "menu:action";
+
+/**
+ * Name of the custom event "sheets:changed".
+ */
+export const SheetsChanged = "sheets:changed";
 

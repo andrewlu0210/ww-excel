@@ -6,7 +6,22 @@ export type EditMode = 'enter' | 'edit';
 // Status bar mode, as in Excel: 就緒 / 輸入 / 編輯 / 指向.
 export type SheetMode = 'ready' | EditMode | 'point';
 
-export type MenuAction = 'undo' | 'redo' | 'selectAll' | 'new' | 'open' | 'save' | 'saveAs' | 'close';
+export type MenuAction =
+  | 'undo'
+  | 'redo'
+  | 'selectAll'
+  | 'new'
+  | 'open'
+  | 'save'
+  | 'saveAs'
+  | 'close'
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'formatCells'
+  | 'insertSheet'
+  | 'autofitCols'
+  | 'autofitRows';
 
 export type Action =
   // Arrow keys. jump = ⌘ (data edge), extend = Shift.
@@ -75,6 +90,14 @@ function menuShortcut(e: KeyLike): MenuAction | null {
       return e.shiftKey ? 'saveAs' : 'save';
     case 'w':
       return e.shiftKey ? null : 'close';
+    case 'b':
+      return e.shiftKey ? null : 'bold';
+    case 'i':
+      return e.shiftKey ? null : 'italic';
+    case 'u':
+      return e.shiftKey ? null : 'underline';
+    case '1':
+      return e.shiftKey ? null : 'formatCells';
     default:
       return null;
   }

@@ -87,6 +87,20 @@ func TestPropagation(t *testing.T) {
 	s.expect("A3", "5")
 }
 
+func TestRecalcKeepsStyle(t *testing.T) {
+	s := newSheet(t)
+	s.set("A1", "1")
+	s.set("B1", "=A1*2")
+	sh := s.wb.Sheets[0]
+	c := sh.Get(0, 1)
+	c.S = 7
+	sh.Set(0, 1, c)
+	s.set("A1", "5")
+	if got := sh.Get(0, 1); got.Num != 10 || got.S != 7 {
+		t.Fatalf("B1 after recalc = %+v, want value 10 with style 7", got)
+	}
+}
+
 func TestCircular(t *testing.T) {
 	s := newSheet(t)
 	s.set("A1", "=B1+1")
@@ -137,14 +151,16 @@ func TestRebuildOnLoad(t *testing.T) {
 	sh := wb.Sheets[0]
 	sh.Set(0, 0, model.NumberCell(4))
 	sh.Set(1, 0, model.FormulaCell("A1*A1")) // uncompiled, as read from a file
-	sh.Set(2, 0, model.FormulaCell("A2+("))  // corrupt text
+	unknown := model.NumberCell(42)          // cached value from the file
+	unknown.F = &model.Formula{Text: "SUM(Table1[Qty])"}
+	sh.Set(2, 0, unknown)
 	e := New(wb)
 	e.Rebuild()
 	if got := sh.Get(1, 0).Display(); got != "16" {
 		t.Fatalf("A2 = %q", got)
 	}
-	if got := sh.Get(2, 0).Display(); got != model.ErrName {
-		t.Fatalf("corrupt formula = %q", got)
+	if got := sh.Get(2, 0); got.Display() != "42" || got.F.Text != "SUM(Table1[Qty])" {
+		t.Fatalf("unsupported formula should keep its cached value: %+v", got)
 	}
 	if e.Formulas() != 2 {
 		t.Fatalf("formulas = %d", e.Formulas())

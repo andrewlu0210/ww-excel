@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
   import { FpsMeter, type Samples } from '../grid/perf';
   import type { SheetMode } from '../input/keymap';
   import type { BlockCache } from '../stores/viewportCache';
 
   interface Props {
-    sheetName: string;
     mode: SheetMode;
+    // Sheet tabs, rendered next to the mode.
+    tabs?: Snippet;
     // First cell of a circular reference, or "".
     circular: string;
     cache?: BlockCache;
@@ -15,7 +16,7 @@
     onbench: () => void;
   }
 
-  let { sheetName, mode, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
+  let { mode, tabs, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
 
   const MODE_LABEL: Record<SheetMode, string> = { ready: '就緒', enter: '輸入', edit: '編輯', point: '指向' };
 
@@ -44,7 +45,7 @@
 <footer class="status">
   <div class="left">
     <span class="mode">{MODE_LABEL[mode]}</span>
-    <span class="tab active">{sheetName}</span>
+    {@render tabs?.()}
     {#if circular}
       <span class="circular" title="公式直接或間接參照到自己的儲存格，結果顯示為 0">循環參照：{circular}</span>
     {/if}
@@ -82,17 +83,6 @@
   }
   .circular {
     color: var(--error-fg);
-  }
-  .tab {
-    display: flex;
-    align-items: center;
-    padding: 0 14px;
-    color: var(--chrome-text);
-  }
-  .tab.active {
-    color: var(--accent);
-    font-weight: 600;
-    border-bottom: 2px solid var(--accent);
   }
   .hud {
     display: flex;

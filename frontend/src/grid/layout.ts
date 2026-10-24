@@ -13,6 +13,10 @@ class Fenwick {
     for (i++; i <= this.n; i += i & -i) this.tree[i] += delta;
   }
 
+  clear(): void {
+    this.tree.fill(0);
+  }
+
   // Sum of entries [0, i).
   prefix(i: number): number {
     let s = 0;
@@ -27,9 +31,22 @@ export class AxisLayout {
 
   constructor(
     readonly count: number,
-    readonly defaultSize: number,
+    public defaultSize: number,
   ) {
     this.deltas = new Fenwick(count);
+  }
+
+  // Replaces all sizes: a new default plus custom sizes (0 = hidden).
+  reset(defaultSize: number, sizes: Iterable<[number, number]>): void {
+    this.defaultSize = defaultSize;
+    this.deltas.clear();
+    this.overrides.clear();
+    for (const [i, px] of sizes) this.setSize(i, px);
+  }
+
+  // Custom sizes, for comparing layouts.
+  customSizes(): Map<number, number> {
+    return new Map(this.overrides);
   }
 
   size(i: number): number {

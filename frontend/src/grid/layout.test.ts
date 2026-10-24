@@ -44,6 +44,15 @@ describe('AxisLayout', () => {
     expect(a.size(2)).toBe(20);
   });
 
+  it('resets to new sizes', () => {
+    const a = new AxisLayout(100, 20);
+    a.setSize(3, 50);
+    a.reset(15, [[1, 30], [2, 0]]);
+    expect(a.size(3)).toBe(15);
+    expect(a.offset(3)).toBe(15 + 30 + 0);
+    expect(a.total).toBe(100 * 15 + 15 - 15);
+  });
+
   it('skips hidden entries', () => {
     const a = new AxisLayout(10, 10);
     a.setSize(1, 0);

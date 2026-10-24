@@ -3,6 +3,7 @@ package service
 import (
 	"path/filepath"
 
+	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 )
 
@@ -24,6 +25,8 @@ type Dialogs interface {
 	PickSave(suggestedName string) (string, error)
 	ShowError(title, message string)
 	ShowWarning(title, message string)
+	// Confirm asks an OK/Cancel question; true means OK.
+	Confirm(title, message, ok string) bool
 }
 
 type DocumentService struct {
@@ -97,7 +100,7 @@ func (ds *DocumentService) SaveAs() bool {
 	var name string
 	ds.s.read(func(d *document.Document) { name = d.Name() })
 	if name == document.UntitledName {
-		name += ".wwx"
+		name += ".xlsx"
 	}
 	path, err := ds.dialogs.PickSave(name)
 	if err != nil {
@@ -108,7 +111,7 @@ func (ds *DocumentService) SaveAs() bool {
 		return false
 	}
 	if filepath.Ext(path) == "" {
-		path += ".wwx"
+		path += ".xlsx"
 	}
 	return ds.saveTo(path)
 }
@@ -157,4 +160,59 @@ func (ds *DocumentService) confirmDiscard() bool {
 	default:
 		return false
 	}
+}
+
+// ---- Sheets ----
+
+// sheetChange runs a sheet operation as one undo step.
+func (ds *DocumentService) sheetChange(build func(d *document.Document) (command.Command, error)) error {
+	var err error
+	ds.s.change(false, func(d *document.Document) (document.Change, bool) {
+		var cmd command.Command
+		if cmd, err = build(d); err != nil || cmd == nil {
+			return document.Change{}, false
+		}
+		return d.Exec(cmd)
+	})
+	return err
+}
+
+// AddSheet inserts a new sheet (工作表N) at index and returns its index.
+func (ds *DocumentService) AddSheet(index int) int {
+	at := index
+	ds.sheetChange(func(d *document.Document) (command.Command, error) {
+		at = max(0, min(index, len(d.Workbook().Sheets)))
+		return d.AddSheetCommand(at, d.NextSheetName())
+	})
+	return at
+}
+
+// DeleteSheet removes a sheet, asking first when it has data.
+func (ds *DocumentService) DeleteSheet(index int) bool {
+	var name string
+	hasData := false
+	ds.s.read(func(d *document.Document) {
+		if sh := sheetAt(d, index); sh != nil {
+			name = sh.Name
+			rows, cols := sh.UsedRange()
+			hasData = rows > 0 || cols > 0
+		}
+	})
+	if hasData && !ds.dialogs.Confirm("要刪除工作表「"+name+"」嗎？", "工作表中的資料會一併刪除，參照它的公式會變成 #REF!。可以用「復原」還原。", "刪除") {
+		return false
+	}
+	if err := ds.sheetChange(func(d *document.Document) (command.Command, error) { return d.DeleteSheetCommand(index) }); err != nil {
+		ds.dialogs.ShowError("無法刪除工作表", err.Error())
+		return false
+	}
+	return true
+}
+
+// RenameSheet renames a sheet; the error explains invalid names.
+func (ds *DocumentService) RenameSheet(index int, name string) error {
+	return ds.sheetChange(func(d *document.Document) (command.Command, error) { return d.RenameSheetCommand(index, name) })
+}
+
+func (ds *DocumentService) MoveSheet(from, to int) {
+	ds.sheetChange(func(d *document.Document) (command.Command, error) { return d.MoveSheetCommand(from, to) })
 }

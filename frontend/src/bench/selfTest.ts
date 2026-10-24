@@ -2,7 +2,8 @@
 // controller with simulated key events and typed text, then checks the
 // Go model (source of truth) and the frontend cache. Native IME input
 // and menu accelerators cannot be simulated here; test those by hand.
-import { documentApi, sheetApi } from '../bridge/sheet';
+import { benchApi, documentApi, sheetApi, type FormatPatch } from '../bridge/sheet';
+import { styleStore } from '../stores/styles';
 import type { CellPos, Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import type { BlockCache } from '../stores/viewportCache';
@@ -18,6 +19,9 @@ export interface SheetDriver {
   getSelection(): Selection;
   getEditing(): { mode: string; pos: CellPos } | null;
   setSelectionForTest(sel: Selection): void;
+  applyFormat(patch: FormatPatch): Promise<string | null>;
+  mergeCells(center: boolean): Promise<string | null>;
+  focus(): void;
   getGrid(): { cache: BlockCache } | undefined;
 }
 
@@ -266,6 +270,8 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await key('ArrowUp');
   await key('Backspace');
 
+  await formatTests(sheet, { key, type, goTo, step, expect, expectCell });
+
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
   await type('=SUM(');
@@ -308,4 +314,154 @@ export async function multiRangeSnapshot(sheet: SheetDriver): Promise<void> {
     ],
   });
   await sheet.whenIdle();
+}
+
+interface Helpers {
+  key(k: string, mods?: Partial<KeyboardEventInit>): Promise<void>;
+  type(text: string): Promise<void>;
+  goTo(row: number, col: number): Promise<void>;
+  step(): Promise<void>;
+  expect(name: string, ok: boolean, detail: string | undefined): void;
+  expectCell(name: string, row: number, col: number, want: string): Promise<void>;
+}
+
+const area = (r0: number, c0: number, r1 = r0, c1 = c0): Selection => ({
+  active: { row: r0, col: c0 },
+  anchor: { row: r0, col: c0 },
+  focus: { row: r1, col: c1 },
+  ranges: [{ r0, c0, r1, c1 }],
+});
+
+// v0.4: formats, sizes, merges, sheets and an xlsx round trip. Values
+// and styles are read from Go (GetBlocks), which is the source of truth.
+async function formatTests(sheet: SheetDriver, h: Helpers): Promise<void> {
+  const { key, type, goTo, step, expect, expectCell } = h;
+  const cellAt = async (row: number, col: number, sheetIndex = 0) => {
+    const res = await sheetApi.getBlocks(sheetIndex, [{ row: Math.floor(row / 64), col: Math.floor(col / 32) }], 0);
+    const styles = new Map((res.styles ?? []).map((s) => [s.id, s]));
+    const c = res.blocks?.[0]?.cells?.find((x) => x.r === row % 64 && x.c === col % 32);
+    return { v: c?.v ?? '', style: styles.get(c?.st ?? 0) };
+  };
+  const layout = () => sheetApi.layout(0, 0);
+
+  // 24. Number formats and font styles from the toolbar.
+  await goTo(14, 0);
+  await type('1234.5');
+  await key('Enter');
+  sheet.setSelectionForTest(area(14, 0));
+  await sheet.applyFormat({ bold: true, numFmt: '#,##0.00', fill: 'FFF2CC', label: '格式' });
+  await step();
+  let c = await cellAt(14, 0);
+  expect('數值格式與粗體、填色', c.v === '1,234.50' && !!c.style?.font.bold && c.style.fill === 'FFF2CC', JSON.stringify(c));
+  expect('前端樣式表同步', styleStore.get(sheet.getGrid()?.cache.cell(14, 0)?.style ?? 0)?.dto.font.bold === true, '');
+
+  // 25. Typing detects formats.
+  await goTo(14, 1);
+  await type('2026/10/23');
+  await key('Tab');
+  await type('12%');
+  await key('Tab');
+  await type('$1,234');
+  await key('Enter');
+  expect('輸入日期自動套用日期格式', (await cellAt(14, 1)).v === '2026/10/23', JSON.stringify(await cellAt(14, 1)));
+  expect('輸入百分比', (await cellAt(14, 2)).v === '12%', JSON.stringify(await cellAt(14, 2)));
+  expect('輸入貨幣', (await cellAt(14, 3)).v.startsWith('$1,234'), JSON.stringify(await cellAt(14, 3)));
+  const widened = ((await layout()).cols ?? []).find((s) => s.i === 1);
+  expect('日期放不下時自動加寬欄', (widened?.px ?? 0) > 64, JSON.stringify(widened));
+
+  // 26. Editing keeps the format; Delete keeps it too.
+  await goTo(14, 0);
+  await type('99');
+  await key('Enter');
+  c = await cellAt(14, 0);
+  expect('修改值時保留格式', c.v === '99.00' && !!c.style?.font.bold, JSON.stringify(c));
+
+  // 27. Outside borders only on the range edges.
+  sheet.setSelectionForTest(area(16, 0, 17, 2));
+  await sheet.applyFormat({ border: 'outside', label: '框線' });
+  await step();
+  const corner = await cellAt(16, 0);
+  const middle = await cellAt(16, 1);
+  expect(
+    '外框線只套在邊緣',
+    corner.style?.top.style === 'thin' && corner.style.left.style === 'thin' && middle.style?.left.style !== 'thin',
+    JSON.stringify({ corner: corner.style, middle: middle.style }),
+  );
+
+  // 28. Merge & center; clicking inside selects the whole merge.
+  await goTo(19, 0);
+  await type('標題');
+  await key('Enter');
+  sheet.setSelectionForTest(area(19, 0, 19, 2));
+  await sheet.mergeCells(true);
+  await step();
+  const merges = (await layout()).merges ?? [];
+  expect('跨欄置中', merges.length === 1 && merges[0].c1 === 2 && (await cellAt(19, 0)).style?.alignH === 'center', JSON.stringify(merges));
+  await goTo(19, 0);
+  await key('ArrowRight');
+  expect('從合併儲存格往右移跳過整個合併', sheet.getSelection().active.col === 3, JSON.stringify(sheet.getSelection().active));
+
+  // 29. Column width and auto row height for larger fonts.
+  await sheetApi.setSizes(0, false, [4], 120);
+  sheet.setSelectionForTest(area(14, 0));
+  await sheet.applyFormat({ fontSize: 20, label: '字型大小' });
+  await step();
+  const l = await layout();
+  const col = (l.cols ?? []).find((s) => s.i === 4);
+  const row = (l.rows ?? []).find((s) => s.i === 14);
+  expect('調整欄寬', col?.px === 120, JSON.stringify(l.cols));
+  expect('放大字型後自動加高列', (row?.px ?? 0) > 20, JSON.stringify(l.rows));
+
+  // 30. A line break turns on wrapping and grows the row.
+  await goTo(21, 0);
+  await type('第一行');
+  await key('Enter', { altKey: true });
+  await type('第二行');
+  await key('Enter');
+  await step();
+  const wrapped = await cellAt(21, 0);
+  const row22 = ((await layout()).rows ?? []).find((s) => s.i === 21);
+  expect('換行自動開啟自動換行', !!wrapped.style?.wrap, JSON.stringify(wrapped));
+  expect('換行後自動加高列', (row22?.px ?? 0) > 30, JSON.stringify(row22));
+
+  // 31. Sheets: add, cross-sheet formula, rename, delete, undo.
+  await documentApi.addSheet(1);
+  await step();
+  let st = await documentApi.state();
+  expect('新增工作表', st.sheets?.length === 2 && st.sheets[1] === '工作表2', JSON.stringify(st.sheets));
+  await sheetApi.setCell(1, 0, 0, '42');
+  await goTo(14, 4);
+  await type('=工作表2!A1');
+  await key('Enter');
+  expect('跨工作表公式', (await cellAt(14, 4)).v === '42', JSON.stringify(await cellAt(14, 4)));
+  const renameErr = await documentApi.renameSheet(1, '報表');
+  await step();
+  await expectCell('改名後公式跟著更新', 14, 4, '=報表!A1');
+  expect('改名成功', renameErr === null, String(renameErr));
+  expect('不合法的名稱被拒絕', (await documentApi.renameSheet(1, 'a/b')) !== null, '');
+  await documentApi.deleteSheet(1);
+  await step();
+  expect('刪除後參照變成 #REF!', (await cellAt(14, 4)).v === '#REF!', JSON.stringify(await cellAt(14, 4)));
+  await key('z', { metaKey: true });
+  await step();
+  st = await documentApi.state();
+  expect('復原刪除工作表', st.sheets?.length === 2 && (await cellAt(14, 4)).v === '42', JSON.stringify(st.sheets));
+
+  // 32. xlsx round trip: save, reopen, check values, formats and layout.
+  const path = await benchApi.saveCopy('selftest-roundtrip.xlsx');
+  await documentApi.openPath(path);
+  await step();
+  await step();
+  c = await cellAt(14, 0);
+  const after = await layout();
+  st = await documentApi.state();
+  expect('xlsx 存讀：數值格式與粗體', c.v === '99.00' && !!c.style?.font.bold && c.style.font.size === 20, JSON.stringify(c));
+  expect('xlsx 存讀：合併與欄寬', (after.merges ?? []).length === 1 && (after.cols ?? []).some((s) => s.i === 4 && s.px === 120), JSON.stringify(after.cols));
+  expect('xlsx 存讀：工作表與跨表公式', st.sheets?.join(',') === '工作表1,報表' && (await cellAt(14, 4)).v === '42', JSON.stringify(st.sheets));
+  expect('xlsx 存讀：日期與換行', (await cellAt(14, 1)).v === '2026/10/23' && !!(await cellAt(21, 0)).style?.wrap, '');
+  expect('xlsx 存讀：貨幣格式', (await cellAt(14, 3)).v.startsWith('$1,234'), JSON.stringify(await cellAt(14, 3)));
+
+  // Leave the formatted area on screen for the snapshot.
+  sheet.setSelectionForTest(area(14, 0));
+  await step();
 }

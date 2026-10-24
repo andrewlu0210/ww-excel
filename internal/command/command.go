@@ -17,6 +17,13 @@ type Effect struct {
 	Cells []CellRef
 	// Bounds of the edit; nil when nothing changed.
 	Bounds *model.Range
+	// LayoutChanged: row/column sizes or styles or merges of Sheet
+	// changed. Structure: sheets were added, removed, renamed or moved.
+	LayoutChanged bool
+	Structure     bool
+	// Other cells changed on other sheets (e.g. formulas rewritten when
+	// a sheet is renamed), keyed by sheet index after the change.
+	Others map[int][]CellRef
 }
 
 type Command interface {
@@ -83,3 +90,57 @@ func grow(r *model.Range, row, col int) *model.Range {
 	r.R1, r.C1 = max(r.R1, row), max(r.C1, col)
 	return r
 }
+
+// Layout replaces a sheet's layout and, optionally, some cells in one
+// undo step (formatting whole columns, merging, resizing).
+type Layout struct {
+	Sheet  int
+	Name   string
+	After  model.Layout
+	before model.Layout
+	Cells  *SetCells // optional cell changes on the same sheet
+	Area   *model.Range
+}
+
+func (l *Layout) Label() string { return l.Name }
+
+func (l *Layout) Do(wb *model.Workbook) Effect {
+	sh := wb.Sheets[l.Sheet]
+	l.before = sh.Layout.Clone()
+	sh.Layout = l.After.Clone()
+	eff := Effect{Sheet: l.Sheet, LayoutChanged: true, Bounds: l.Area}
+	if l.Cells != nil {
+		ce := l.Cells.Do(wb)
+		eff.Cells = ce.Cells
+		if eff.Bounds == nil {
+			eff.Bounds = ce.Bounds
+		}
+	}
+	return eff
+}
+
+func (l *Layout) Undo(wb *model.Workbook) Effect {
+	sh := wb.Sheets[l.Sheet]
+	eff := Effect{Sheet: l.Sheet, LayoutChanged: true, Bounds: l.Area}
+	if l.Cells != nil {
+		ce := l.Cells.Undo(wb)
+		eff.Cells = ce.Cells
+		if eff.Bounds == nil {
+			eff.Bounds = ce.Bounds
+		}
+	}
+	sh.Layout = l.before.Clone()
+	return eff
+}
+
+// Func is a command built from closures, for operations whose undo
+// state is easiest to capture by the caller (sheet operations).
+type Func struct {
+	Name   string
+	DoFn   func(wb *model.Workbook) Effect
+	UndoFn func(wb *model.Workbook) Effect
+}
+
+func (f *Func) Label() string                  { return f.Name }
+func (f *Func) Do(wb *model.Workbook) Effect   { return f.DoFn(wb) }
+func (f *Func) Undo(wb *model.Workbook) Effect { return f.UndoFn(wb) }

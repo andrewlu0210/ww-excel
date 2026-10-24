@@ -9,10 +9,23 @@
   // appears next to the cell. The formula bar is a second input showing
   // the same text; whichever one has focus is the "active input".
   import { onMount, untrack } from 'svelte';
-  import { documentApi, sheetApi, type CellsChanged, type FuncInfo, type RangeDTO, type SheetInfo } from '../bridge/sheet';
+  import {
+    documentApi,
+    sheetApi,
+    type CellsChanged,
+    type FormatPatch,
+    type FuncInfo,
+    type LayoutDTO,
+    type RangeDTO,
+    type SheetInfo,
+    type StyleDTO,
+  } from '../bridge/sheet';
   import { callAt, canPoint, findRefs, refText, toggleAbsolute, wordAt } from '../formula/refs';
   import { cellAddress } from '../grid/layout';
-  import { HEADER_W, REF_COLORS, type Highlight } from '../grid/renderer';
+  import { areaOf, expand, mergeAt, snap, stepStart } from '../grid/merges';
+  import { metrics, REF_COLORS, type Highlight } from '../grid/renderer';
+  import { LINE_HEIGHT, TextCache } from '../grid/text';
+  import { styleStore } from '../stores/styles';
   import {
     clampPos,
     current,
@@ -38,17 +51,32 @@
     type MenuAction,
     type SheetMode,
   } from '../input/keymap';
-  import type { GridPointer } from '../input/pointer';
+  import type { GridPointer, ResizeRequest } from '../input/pointer';
   import Grid from './Grid.svelte';
 
   interface Props {
     sheet: number;
     info: SheetInfo;
-    // Output for the status bar.
+    initialSelection?: Selection;
+    // Outputs for the status bar and the toolbar.
     mode?: SheetMode;
+    activeStyle?: StyleDTO | null;
+    activeMerged?: boolean;
+    onselectionchange?: (sel: Selection) => void;
+    // Menu actions handled by the app (sheet tabs, dialogs).
+    onappaction?: (action: MenuAction) => void;
   }
 
-  let { sheet, info, mode = $bindable('ready') }: Props = $props();
+  let {
+    sheet,
+    info,
+    initialSelection,
+    mode = $bindable('ready'),
+    activeStyle = $bindable(null),
+    activeMerged = $bindable(false),
+    onselectionchange,
+    onappaction,
+  }: Props = $props();
 
   // Fixed for the lifetime of the component: the grid is always full size.
   const lim = untrack(() => ({ rows: info.rows, cols: info.cols }));
@@ -57,7 +85,12 @@
   let root: HTMLDivElement;
   let editor: HTMLTextAreaElement;
   let bar: HTMLTextAreaElement;
-  let selection = $state<Selection>(single({ row: 0, col: 0 }));
+  let selection = $state<Selection>(untrack(() => initialSelection) ?? single({ row: 0, col: 0 }));
+  let layout = $state<LayoutDTO | null>(null);
+  let merges = $derived((layout?.merges ?? []).map((m) => ({ r0: m.r0, c0: m.c0, r1: m.r1, c1: m.c1 })));
+  // Bumped when cells, styles or the layout change, to refresh the
+  // toolbar state.
+  let styleTick = $state(0);
   let editing = $state<{ mode: EditMode; pos: CellPos } | null>(null);
   let activeInput: 'cell' | 'bar' = 'cell';
   // Mirror of the text being edited, for highlights and popups.
@@ -80,6 +113,19 @@
 
   $effect(() => {
     mode = !editing ? 'ready' : point ? 'point' : editing.mode;
+  });
+
+  // The active cell's style, for the toolbar.
+  $effect(() => {
+    void styleTick;
+    const { row, col } = selection.active;
+    const id = grid?.styleAt(row, col) ?? 0;
+    activeStyle = styleStore.get(id)?.dto ?? null;
+    activeMerged = mergeAt(merges, selection.active) !== null;
+  });
+
+  $effect(() => {
+    onselectionchange?.(selection);
   });
 
   let address = $derived(cellAddress(selection.active.row, selection.active.col));
@@ -126,10 +172,22 @@
     refreshFormula();
   }
 
+  // A single-cell selection; a merged area selects as one cell.
+  function singleAt(pos: CellPos): Selection {
+    const anchor = snap(merges, pos);
+    const area = areaOf(merges, anchor);
+    return { active: anchor, anchor, focus: anchor, ranges: [area] };
+  }
+
+  function withMerges(sel: Selection): Selection {
+    if (merges.length === 0) return sel;
+    return { ...sel, ranges: sel.ranges.map((r) => expand(merges, r)) };
+  }
+
   function moved(pos: CellPos, extend: boolean): void {
     const p = clampPos(pos, lim);
-    if (extend) setSelection(extendTo(selection, p), p);
-    else setSelection(single(p));
+    if (extend) setSelection(withMerges(extendTo(selection, p)), p);
+    else setSelection(singleAt(p));
   }
 
   // While idle the formula bar shows the active cell's edit text.
@@ -138,9 +196,13 @@
     if (editing || !bar) return;
     const token = ++formulaToken;
     const { row, col } = selection.active;
-    sheetApi.editText(sheet, row, col).then((text) => {
-      if (token === formulaToken && !editing) bar.value = text;
-    });
+    sheetApi
+      .editText(sheet, row, col)
+      .then((text) => {
+        if (token === formulaToken && !editing && bar) bar.value = text;
+      })
+      // Best effort: the call is dropped when this view unmounts.
+      .catch(() => {});
   }
 
   const toDTO = (r: Range): RangeDTO => ({ r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 });
@@ -159,7 +221,8 @@
           const p = await sheetApi.dataEdge(sheet, base.row, base.col, a.dr, a.dc);
           moved(p, a.extend);
         } else {
-          moved({ row: base.row + a.dr, col: base.col + a.dc }, a.extend);
+          const from = stepStart(merges, base, a.dr, a.dc);
+          moved({ row: from.row + a.dr, col: from.col + a.dc }, a.extend);
         }
         break;
       case 'page': {
@@ -212,7 +275,7 @@
       setSelection(cycleActive(sel, dir === 'down', backward));
       return;
     }
-    const { row, col } = sel.active;
+    const { row, col } = stepStart(merges, sel.active, dir === 'down' ? (backward ? -1 : 1) : 0, dir === 'right' ? (backward ? -1 : 1) : 0);
     const step = backward ? -1 : 1;
     if (dir === 'right') {
       if (tabStartCol === null) tabStartCol = col;
@@ -251,6 +314,23 @@
       case 'selectAll':
         if (editing) input().select();
         else setSelection(selectAll(lim), selection.active);
+        return;
+      case 'bold':
+      case 'italic':
+      case 'underline':
+        // Excel formats the cell; rich text inside the editor comes later.
+        if (!editing) await toggleFont(action);
+        return;
+      case 'autofitCols':
+        await autofit(false);
+        return;
+      case 'autofitRows':
+        await autofit(true);
+        return;
+      case 'formatCells':
+      case 'insertSheet':
+        if (editing) commit('stay');
+        onappaction?.(action);
         return;
     }
 
@@ -344,10 +424,19 @@
     const { pos } = editing;
     const text = input().value;
     endEditing();
-    enqueue(async () => {
+    const written = enqueue(async () => {
       const err = await sheetApi.setCell(sheet, pos.row, pos.col, text);
       if (err) restoreEdit(pos, text, err);
     });
+    // Follow-ups run after the write, outside the queue (they enqueue
+    // their own calls). A line break turns on wrapping: grow the row.
+    // A number too wide for a default-width column widens it.
+    if (text.includes('\n')) {
+      const row = pos.row;
+      void written.then(() => autofitRowsOf([{ r0: row, c0: 0, r1: row, c1: 0 }], true));
+    } else if (text !== '' && !text.startsWith('=') && !text.startsWith("'")) {
+      void written.then(() => widenForNumber(pos));
+    }
     switch (then) {
       case 'down':
       case 'up':
@@ -586,10 +675,17 @@
   function layoutEditor(): void {
     if (!grid || !editor) return;
     const pos = editing?.pos ?? selection.active;
-    const rc = grid.cellRect(pos);
+    const rc = grid.areaRect(areaOf(merges, pos));
     const vp = grid.viewport();
     const st = editor.style;
-    st.left = `${Math.max(rc.x, HEADER_W) - 1}px`;
+    // The editor uses the cell's font.
+    const cellStyle = styleStore.get(grid.styleAt(pos.row, pos.col));
+    if (cellStyle) {
+      st.font = cellStyle.font;
+      st.lineHeight = `${Math.round(cellStyle.fontPx * LINE_HEIGHT)}px`;
+      st.color = cellStyle.color ?? '';
+    }
+    st.left = `${Math.max(rc.x, metrics.headerW) - 1}px`;
     st.top = `${rc.y - 1}px`;
     if (!editing) {
       st.width = `${rc.w + 1}px`;
@@ -637,14 +733,15 @@
         } else if (e.kind === 'down') {
           if (e.shift) {
             dragBase = sel.ranges.slice(0, -1);
-            setSelection(extendTo(sel, e.pos), e.pos);
+            setSelection(withMerges(extendTo(sel, e.pos)), e.pos);
           } else {
             dragBase = e.meta ? sel.ranges : [];
-            const s = single(e.pos);
+            const s = singleAt(e.pos);
             setSelection({ ...s, ranges: [...dragBase, ...s.ranges] });
           }
         } else if (e.kind === 'drag') {
-          setSelection({ ...sel, focus: e.pos, ranges: [...dragBase, rangeOf(sel.anchor, e.pos)] }, e.pos);
+          const r = expand(merges, rangeOf(sel.anchor, e.pos));
+          setSelection({ ...sel, focus: e.pos, ranges: [...dragBase, r] }, e.pos);
         }
         break;
       case 'col':
@@ -671,8 +768,10 @@
   // ---- Backend events ----
 
   function onCellsChanged(d: CellsChanged): void {
+    styleStore.merge(d.styles);
     if (d.sheet !== sheet) return;
     grid?.cache.applyDiff(d);
+    styleTick++;
     used = { rows: d.usedRows, cols: d.usedCols };
     if (d.select) setSelection(fromRange(d.select));
     else refreshFormula();
@@ -687,8 +786,21 @@
     setSelection(single({ row: 0, col: 0 }));
   }
 
+  async function loadLayout(): Promise<void> {
+    layout = await sheetApi.layout(sheet, styleStore.known);
+    styleTick++;
+  }
+
   onMount(() => {
-    const offs = [sheetApi.onCellsChanged(onCellsChanged), documentApi.onReset(() => void onReset())];
+    const offs = [
+      sheetApi.onCellsChanged(onCellsChanged),
+      sheetApi.onLayoutChanged((e) => {
+        if (e.sheet === sheet) void loadLayout();
+      }),
+      documentApi.onReset(() => void onReset()),
+      styleStore.subscribe(() => styleTick++),
+    ];
+    void loadLayout();
     sheetApi.functions().then((list) => {
       functions = list;
       funcByName = new Map(list.map((f) => [f.name, f]));
@@ -698,14 +810,149 @@
     return () => offs.forEach((off) => off());
   });
 
-  // ---- Test / bench hooks ----
+  // ---- Formatting ----
 
-  export function getGrid() {
-    return grid;
+  // Applies a toolbar change to the selection.
+  export async function applyFormat(patch: FormatPatch): Promise<string | null> {
+    if (editing) commit('stay');
+    const ranges = selection.ranges.map(toDTO);
+    let err: string | null = null;
+    await enqueue(async () => {
+      err = await sheetApi.format(sheet, ranges, patch);
+    });
+    // Bigger fonts and wrapping make rows taller, as in Excel.
+    if (!err && (patch.fontSize || patch.wrap || patch.fontName)) await autofitRowsOf(selection.ranges, true);
+    focus();
+    return err;
+  }
+
+  async function toggleFont(attr: 'bold' | 'italic' | 'underline'): Promise<void> {
+    const on = !(activeStyle?.font[attr] ?? false);
+    const label = { bold: '粗體', italic: '斜體', underline: '底線' }[attr];
+    await applyFormat({ [attr]: on, label });
+  }
+
+  export async function mergeCells(center: boolean): Promise<string | null> {
+    if (editing) commit('stay');
+    const r = current(selection);
+    if (activeMerged) {
+      await enqueue(() => sheetApi.unmerge(sheet, selection.ranges.map(toDTO)));
+      focus();
+      return null;
+    }
+    let err: string | null = null;
+    await enqueue(async () => {
+      err = await sheetApi.merge(sheet, toDTO(r), center);
+    });
+    focus();
+    return err;
+  }
+
+  export async function clearRanges(mode: 'contents' | 'formats' | 'all'): Promise<void> {
+    if (editing) commit('stay');
+    await enqueue(() => sheetApi.clear(sheet, selection.ranges.map(toDTO), mode));
+    focus();
+  }
+
+  // Header border dragged: resize that row/column, or all selected whole
+  // rows/columns when it is one of them (Excel).
+  function onResize(r: ResizeRequest): void {
+    const indices = selectedFull(r.rows).includes(r.index) ? selectedFull(r.rows) : [r.index];
+    void enqueue(() => sheetApi.setSizes(sheet, r.rows, indices, r.px));
+  }
+
+  // Indices of whole rows/columns in the selection (capped).
+  function selectedFull(rows: boolean): number[] {
+    const out: number[] = [];
+    for (const r of selection.ranges) {
+      const full = rows ? r.c0 === 0 && r.c1 === lim.cols - 1 : r.r0 === 0 && r.r1 === lim.rows - 1;
+      if (!full) continue;
+      const [a, b] = rows ? [r.r0, r.r1] : [r.c0, r.c1];
+      for (let i = a; i <= b && out.length < 1000; i++) out.push(i);
+    }
+    return out;
+  }
+
+  let textCache: TextCache | null = null;
+  function measurer(): TextCache {
+    textCache ??= new TextCache(document.createElement('canvas').getContext('2d')!);
+    return textCache;
+  }
+
+  // Auto-fit selected columns (or rows) to their content.
+  async function autofit(rows: boolean): Promise<void> {
+    const list = selectedFull(rows);
+    const targets = list.length > 0 ? list : rows ? spanOf(current(selection), true) : spanOf(current(selection), false);
+    for (const i of targets.slice(0, 200)) await autofitOne(rows, i);
+  }
+
+  function spanOf(r: Range, rows: boolean): number[] {
+    const [a, b] = rows ? [r.r0, r.r1] : [r.c0, r.c1];
+    return Array.from({ length: Math.min(200, b - a + 1) }, (_, k) => a + k);
+  }
+
+  async function autofitRowsOf(ranges: Range[], onlyAuto: boolean): Promise<void> {
+    const custom = new Set((layout?.rows ?? []).map((s) => s.i));
+    for (const r of ranges) {
+      if (r.r1 - r.r0 > 500) continue;
+      for (let row = r.r0; row <= r.r1; row++) {
+        if (!onlyAuto || !custom.has(row)) await autofitOne(true, row);
+      }
+    }
+  }
+
+  // Excel widens a column of default width when a typed number or date
+  // does not fit (instead of showing ####).
+  async function widenForNumber(pos: CellPos): Promise<void> {
+    if ((layout?.cols ?? []).some((s) => s.i === pos.col)) return; // custom width
+    const res = await sheetApi.getBlocks(sheet, [{ row: Math.floor(pos.row / 64), col: Math.floor(pos.col / 32) }], styleStore.known);
+    styleStore.merge(res.styles);
+    const cell = res.blocks?.[0]?.cells?.find((c) => c.r === pos.row % 64 && c.c === pos.col % 32);
+    const st = styleStore.get(cell?.st ?? 0);
+    if (!cell?.n || !st) return;
+    const want = Math.ceil(measurer().width(st.font, cell.v) + 10);
+    if (want > (grid?.colWidth(pos.col) ?? 0)) await enqueue(() => sheetApi.setSizes(sheet, false, [pos.col], want));
+  }
+
+  async function autofitOne(rows: boolean, index: number): Promise<void> {
+    const m = measurer();
+    let size: number;
+    if (rows) {
+      const samples = await sheetApi.rowTexts(sheet, index);
+      size = layout?.defaultRow ?? 20;
+      for (const t of samples) {
+        const st = styleStore.get(t.st);
+        if (!st) continue;
+        const lineH = st.fontPx * LINE_HEIGHT;
+        const lines = st.dto.wrap ? m.wrap(st.font, t.v, Math.max(1, (grid?.colWidth(t.col) ?? 64) - 6)).length : 1;
+        size = Math.max(size, Math.ceil(lines * lineH + 5));
+      }
+      if (size === grid?.rowHeight(index)) return;
+    } else {
+      const samples = await sheetApi.autoFitColumn(sheet, index);
+      if (samples.length === 0) {
+        size = -1; // back to the default width
+      } else {
+        size = 0;
+        for (const t of samples) {
+          const st = styleStore.get(t.st);
+          if (!st) continue;
+          const widest = Math.max(...t.v.split('\n').map((line) => m.width(st.font, line)));
+          size = Math.max(size, Math.ceil(widest + 10));
+        }
+      }
+    }
+    await enqueue(() => sheetApi.setSizes(sheet, rows, [index], size));
   }
 
   export function getSelection(): Selection {
     return selection;
+  }
+
+  // ---- Test / bench hooks ----
+
+  export function getGrid() {
+    return grid;
   }
 
   export function getEditing() {
@@ -767,7 +1014,18 @@
     ></textarea>
   </header>
 
-  <Grid bind:this={grid} {sheet} {info} {selection} {highlights} onpointer={onPointer} onviewport={layoutEditor}>
+  <Grid
+    bind:this={grid}
+    {sheet}
+    {info}
+    {layout}
+    {selection}
+    {highlights}
+    onpointer={onPointer}
+    onresize={onResize}
+    onautofit={(r) => void autofitOne(r.rows, r.index)}
+    onviewport={layoutEditor}
+  >
     <textarea
       bind:this={editor}
       class="cell-editor"

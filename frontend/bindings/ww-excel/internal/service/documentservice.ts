@@ -10,11 +10,29 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 import * as $models from "./models.js";
 
 /**
+ * AddSheet inserts a new sheet (工作表N) at index and returns its index.
+ */
+export function AddSheet(index: number): $CancellablePromise<number> {
+    return $Call.ByID(676910355, index);
+}
+
+/**
  * ConfirmClose is called before the window closes. It returns true when
  * it is OK to close.
  */
 export function ConfirmClose(): $CancellablePromise<boolean> {
     return $Call.ByID(47952273);
+}
+
+/**
+ * DeleteSheet removes a sheet, asking first when it has data.
+ */
+export function DeleteSheet(index: number): $CancellablePromise<boolean> {
+    return $Call.ByID(2222027513, index);
+}
+
+export function MoveSheet($from: number, to: number): $CancellablePromise<void> {
+    return $Call.ByID(304792907, $from, to);
 }
 
 /**
@@ -37,6 +55,13 @@ export function Open(): $CancellablePromise<boolean> {
  */
 export function OpenPath(path: string): $CancellablePromise<void> {
     return $Call.ByID(1593076422, path);
+}
+
+/**
+ * RenameSheet renames a sheet; the error explains invalid names.
+ */
+export function RenameSheet(index: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(1833280266, index, name);
 }
 
 /**

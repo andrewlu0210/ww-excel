@@ -2,8 +2,14 @@ import type { BlockDTO, BlockRef, BlocksResult, CellsChanged } from '../bridge/s
 
 export interface CellView {
   text: string;
-  numeric: boolean; // right-aligned
-  center: boolean; // logicals and errors are centered
+  numeric: boolean; // right-aligned by default
+  center: boolean; // logicals and errors are centered by default
+  style: number; // style ID (0 = default)
+  color: string | null; // number-format color such as [Red], "#RRGGBB"
+}
+
+function view(v: string, n: boolean | undefined, x: boolean | undefined, st: number | undefined, fc: string | undefined): CellView {
+  return { text: v, numeric: n === true, center: x === true, style: st ?? 0, color: fc ? `#${fc}` : null };
 }
 
 export interface BlockRange {
@@ -133,7 +139,8 @@ export class BlockCache {
         const block = this.blocks.get(this.key(Math.floor(c.row / this.blockRows), Math.floor(c.col / this.blockCols)));
         if (!block) continue;
         const i = (c.row % this.blockRows) * this.blockCols + (c.col % this.blockCols);
-        block.cells[i] = c.v === '' ? undefined : { text: c.v, numeric: c.n === true, center: c.x === true };
+        // Keep empty-but-styled cells: their style still renders.
+        block.cells[i] = c.v === '' && !c.st ? undefined : view(c.v, c.n, c.x, c.st, c.fc);
       }
     }
     this.onUpdate();
@@ -142,7 +149,7 @@ export class BlockCache {
   private store(dto: BlockDTO): void {
     const cells: (CellView | undefined)[] = new Array(this.blockRows * this.blockCols);
     for (const c of dto.cells ?? []) {
-      cells[c.r * this.blockCols + c.c] = { text: c.v, numeric: c.n === true, center: c.x === true };
+      cells[c.r * this.blockCols + c.c] = view(c.v, c.n, c.x, c.st, c.fc);
     }
     this.blocks.set(this.key(dto.row, dto.col), { cells });
   }

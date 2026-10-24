@@ -1,58 +1,19 @@
 package formula
 
 import (
-	"bufio"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"ww-excel/internal/formula/golden"
+	"ww-excel/internal/io/xlsxfile"
 	"ww-excel/internal/model"
 	"ww-excel/internal/numfmt"
 )
 
-// fixture builds the workbook the golden formulas refer to.
-func fixture(t *testing.T) (*model.Workbook, *Engine) {
-	t.Helper()
-	wb := &model.Workbook{Sheets: []*model.Sheet{model.NewSheet("Sheet1"), model.NewSheet("Sheet2")}}
-	s := wb.Sheets[0]
-	set := func(addr string, c model.Cell) {
-		row, col := parseAddr(t, addr)
-		s.Set(row, col, c)
-	}
-	for i, v := range []float64{10, 20, 30, 40, 50} {
-		s.Set(i, 0, model.NumberCell(v)) // A1:A5
-	}
-	for i, v := range []string{"台北", "新竹", "台中", "台南", "高雄"} {
-		s.Set(i, 1, model.StringCell(v)) // B1:B5
-	}
-	set("C1", model.NumberCell(1.5))
-	set("C2", model.NumberCell(-2))
-	set("C3", model.BoolCell(true))
-	set("C4", model.StringCell("abc"))
-	// C5 stays empty
-	set("D1", model.NumberCell(numfmt.DateSerial(2026, 10, 23)))
-	set("D2", model.NumberCell(0.75))
-	set("D3", model.NumberCell(numfmt.DateSerial(2026, 10, 23)+0.5))
-	for i, v := range []string{"apple", "banana", "cherry", "台北"} {
-		s.Set(i, 4, model.StringCell(v)) // E1:E4
-		s.Set(i, 5, model.NumberCell(float64((i+1)*100)))
-	}
-	for i, v := range []float64{1, 3, 5, 7, 9} {
-		s.Set(i, 6, model.NumberCell(v)) // G1:G5
-	}
-	for i, v := range []string{"一", "三", "五", "七", "九"} {
-		s.Set(i, 7, model.StringCell(v)) // H1:H5
-	}
-	set("I1", model.ErrorCell(model.ErrDiv0))
-	set("J1", model.StringCell("  hello   world  "))
-	wb.Sheets[1].Set(0, 0, model.NumberCell(7))
+const goldenDir = "../../testdata/golden"
 
-	e := New(wb)
-	e.Rebuild()
-	return wb, e
-}
-
-func parseAddr(t *testing.T, addr string) (int, int) {
+func parseAddr(t testing.TB, addr string) (int, int) {
 	t.Helper()
 	col := 0
 	i := 0
@@ -67,45 +28,65 @@ func parseAddr(t *testing.T, addr string) (int, int) {
 }
 
 func TestGolden(t *testing.T) {
-	f, err := os.Open("../../testdata/golden/functions.tsv")
+	cases, err := golden.Load(filepath.Join(goldenDir, "functions.tsv"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-
-	wb, e := fixture(t)
-	const row, col = 999, 25 // Z1000
+	wb := golden.Fixture()
+	e := New(wb)
+	e.Rebuild()
 	sheet := wb.Sheets[0]
-
-	sc := bufio.NewScanner(f)
-	line, cases := 0, 0
-	for sc.Scan() {
-		line++
-		text := sc.Text()
-		if text == "" || strings.HasPrefix(text, "#") {
-			continue
-		}
-		formula, want, ok := strings.Cut(text, "\t")
-		if !ok {
-			t.Fatalf("line %d: missing tab", line)
-		}
-		if want == "(empty)" {
-			want = ""
-		}
-		cases++
-		compiled, err := e.Compile(strings.TrimPrefix(formula, "="), 0)
+	for _, c := range cases {
+		compiled, err := e.Compile(strings.TrimPrefix(c.Formula, "="), 0)
 		if err != nil {
-			t.Errorf("line %d: %s: compile error: %v", line, formula, err)
+			t.Errorf("line %d: %s: compile error: %v", c.Line, c.Formula, err)
 			continue
 		}
-		sheet.Set(row, col, model.Cell{F: compiled})
-		e.Update([]Key{{Sheet: 0, Row: row, Col: col}})
-		if got := sheet.Get(row, col).Display(); got != want {
-			t.Errorf("line %d: %s = %q, want %q", line, formula, got, want)
+		sheet.Set(golden.CaseRow, golden.CaseCol, model.Cell{F: compiled})
+		e.Update([]Key{{Sheet: 0, Row: golden.CaseRow, Col: golden.CaseCol}})
+		if got := sheet.Get(golden.CaseRow, golden.CaseCol).Display(); got != c.Expected {
+			t.Errorf("line %d: %s = %q, want %q", c.Line, c.Formula, got, c.Expected)
 		}
 	}
-	if cases < 200 {
-		t.Fatalf("only %d golden cases", cases)
+	if len(cases) < 200 {
+		t.Fatalf("only %d golden cases", len(cases))
 	}
-	t.Logf("%d golden cases", cases)
+	t.Logf("%d golden cases", len(cases))
+}
+
+// TestExcelGolden compares against values calculated by real Excel. The
+// file comes from tools/goldenxlsx: open excel-check.xlsx in Excel and
+// save it as excel-saved.xlsx (see testdata/golden/README.md).
+func TestExcelGolden(t *testing.T) {
+	path := filepath.Join(goldenDir, "excel-saved.xlsx")
+	wb, src, err := xlsxfile.Read(path)
+	if err != nil {
+		t.Skipf("no Excel-saved golden file (%v); see testdata/golden/README.md", err)
+	}
+	defer src.Close()
+	cases, err := golden.Load(filepath.Join(goldenDir, "functions.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet := wb.Sheets[0]
+	checked := 0
+	for i, c := range cases {
+		if c.PositionDependent() {
+			continue
+		}
+		cell := sheet.Get(golden.CaseRow+i, golden.CaseCol)
+		if cell.F == nil {
+			t.Errorf("line %d: %s missing from the Excel file", c.Line, c.Formula)
+			continue
+		}
+		excel := cell.Display()
+		if cell.Kind == model.KindNumber {
+			excel = numfmt.General(cell.Num)
+		}
+		if excel != c.Expected {
+			t.Errorf("line %d: %s: Excel says %q, functions.tsv says %q", c.Line, c.Formula, excel, c.Expected)
+		}
+		checked++
+	}
+	t.Logf("checked %d cases against Excel", checked)
 }

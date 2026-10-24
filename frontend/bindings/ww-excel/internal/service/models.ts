@@ -25,11 +25,18 @@ export interface BlockRef {
 
 /**
  * BlocksResult carries the document version the blocks were read at, so
- * the frontend can drop results that raced with an edit.
+ * the frontend can drop results that raced with an edit, and any styles
+ * the caller does not know yet.
  */
 export interface BlocksResult {
     "version": number;
     "blocks": BlockDTO[] | null;
+    "styles": StyleDTO[] | null;
+}
+
+export interface BorderLineDTO {
+    "style"?: string;
+    "color"?: string;
 }
 
 /**
@@ -46,6 +53,12 @@ export interface CellDTO {
      */
     "n"?: boolean;
     "x"?: boolean;
+
+    /**
+     * St is the style ID; Fc a color from the number format ([Red]).
+     */
+    "st"?: number;
+    "fc"?: string;
 }
 
 export interface CellPos {
@@ -74,6 +87,11 @@ export interface CellsChanged {
      * Select is set for undo/redo: Excel selects the affected area.
      */
     "select"?: RangeDTO | null;
+
+    /**
+     * Styles created since the last event.
+     */
+    "styles": StyleDTO[] | null;
 }
 
 export interface ChangedCell {
@@ -86,6 +104,12 @@ export interface ChangedCell {
      */
     "n"?: boolean;
     "x"?: boolean;
+
+    /**
+     * St is the style ID; Fc a color from the number format ([Red]).
+     */
+    "st"?: number;
+    "fc"?: string;
 }
 
 export interface DocState {
@@ -101,6 +125,86 @@ export interface DocState {
      * Circular is the first cell in a circular reference, or "".
      */
     "circular": string;
+
+    /**
+     * Sheets are the sheet names in order.
+     */
+    "sheets": string[] | null;
+}
+
+export interface FontDTO {
+    "name": string;
+    "size": number;
+    "bold"?: boolean;
+    "italic"?: boolean;
+    "underline"?: boolean;
+    "strike"?: boolean;
+    "color"?: string;
+}
+
+/**
+ * FormatPatch is a formatting change from the toolbar; nil fields are
+ * left as they are.
+ */
+export interface FormatPatch {
+    "fontName"?: string | null;
+    "fontSize"?: number | null;
+    "bold"?: boolean | null;
+    "italic"?: boolean | null;
+    "underline"?: boolean | null;
+    "strike"?: boolean | null;
+    "fontColor"?: string | null;
+    "fill"?: string | null;
+    "alignH"?: string | null;
+    "alignV"?: string | null;
+    "wrap"?: boolean | null;
+    "numFmt"?: string | null;
+
+    /**
+     * Decimals adds (+) or removes (-) decimal places.
+     */
+    "decimals"?: number;
+
+    /**
+     * Border applies a preset: bottom, top, left, right, all, outside,
+     * thickOutside, thickBottom, doubleBottom, none.
+     */
+    "border"?: string;
+
+    /**
+     * BorderColor for the preset; "" is automatic.
+     */
+    "borderColor"?: string;
+
+    /**
+     * Label names the change in the Undo menu.
+     */
+    "label"?: string;
+}
+
+/**
+ * LayoutChanged tells the frontend to refetch a sheet's layout.
+ */
+export interface LayoutChanged {
+    "sheet": number;
+}
+
+/**
+ * LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
+ */
+export interface LayoutDTO {
+    "defaultRow": number;
+    "defaultCol": number;
+    "rows": SizeDTO[] | null;
+    "cols": SizeDTO[] | null;
+    "rowStyles": StyleRefDTO[] | null;
+    "colStyles": StyleRefDTO[] | null;
+    "merges": RangeDTO[] | null;
+
+    /**
+     * Styles the caller does not know yet (IDs >= the known count).
+     */
+    "styles": StyleDTO[] | null;
 }
 
 export interface MemStats {
@@ -124,4 +228,41 @@ export interface SheetInfo {
     "usedCols": number;
     "blockRows": number;
     "blockCols": number;
+}
+
+export interface SizeDTO {
+    "i": number;
+    "px": number;
+    "hidden"?: boolean;
+}
+
+export interface StyleDTO {
+    "id": number;
+    "font": FontDTO;
+    "fill"?: string;
+    "left": BorderLineDTO;
+    "right": BorderLineDTO;
+    "top": BorderLineDTO;
+    "bottom": BorderLineDTO;
+    "alignH"?: string;
+    "alignV"?: string;
+    "wrap"?: boolean;
+    "indent"?: number;
+    "numFmt"?: string;
+}
+
+export interface StyleRefDTO {
+    "i": number;
+    "s": number;
+}
+
+/**
+ * TextSample is a cell's display text and style, for measuring when
+ * auto-fitting columns and rows.
+ */
+export interface TextSample {
+    "row": number;
+    "col": number;
+    "v": string;
+    "st": number;
 }

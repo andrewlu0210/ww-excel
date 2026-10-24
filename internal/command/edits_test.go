@@ -22,7 +22,7 @@ func TestFillRanges(t *testing.T) {
 	wb := model.NewWorkbook()
 	h := NewHistory(0)
 	seven := func(int, int) model.Cell { return model.NumberCell(7) }
-	cmd, err := FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: 2, C1: 1}, {R0: 10, C0: 10, R1: 10, C1: 10}}, seven)
+	cmd, err := FillRanges(wb, 0, []model.Range{{R0: 0, C0: 0, R1: 2, C1: 1}, {R0: 10, C0: 10, R1: 10, C1: 10}}, seven)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestFillRanges(t *testing.T) {
 		t.Fatal("fill not applied")
 	}
 
-	_, err = FillRanges(0, []model.Range{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 1}}, seven)
+	_, err = FillRanges(wb, 0, []model.Range{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 1}}, seven)
 	if !errors.Is(err, ErrFillTooLarge) {
 		t.Fatalf("err = %v, want ErrFillTooLarge", err)
 	}
@@ -53,7 +53,7 @@ func TestClearRangesWholeColumn(t *testing.T) {
 
 	col := model.Range{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 0}
 	// Overlapping ranges must not record a cell twice.
-	cmd := ClearRanges(wb, 0, []model.Range{col, {R0: 0, C0: 0, R1: 0, C1: 0}})
+	cmd := ClearRanges(wb, 0, []model.Range{col, {R0: 0, C0: 0, R1: 0, C1: 0}}, ClearContents)
 	if got := len(cmd.(*SetCells).Changes); got != 2 {
 		t.Fatalf("changes = %d, want 2", got)
 	}
@@ -65,7 +65,7 @@ func TestClearRangesWholeColumn(t *testing.T) {
 	if s.Get(900_000, 0) != model.NumberCell(2) {
 		t.Fatal("undo did not restore")
 	}
-	if ClearRanges(wb, 0, []model.Range{{R0: 50, C0: 50, R1: 60, C1: 60}}) != nil {
+	if ClearRanges(wb, 0, []model.Range{{R0: 50, C0: 50, R1: 60, C1: 60}}, ClearContents) != nil {
 		t.Fatal("clearing empty range should be nil")
 	}
 }

@@ -37,10 +37,36 @@ type MemStats struct {
 // WW_BENCH_OUT (default docs/perf-latest.md) and the app quits.
 type BenchService struct {
 	sheets *SheetService
+	docs   *DocumentService
 }
 
-func NewBenchService(sheets *SheetService) *BenchService {
-	return &BenchService{sheets: sheets}
+func NewBenchService(sheets *SheetService, docs *DocumentService) *BenchService {
+	b := &BenchService{sheets: sheets, docs: docs}
+	if b.BenchMode() || b.SelfTestMode() {
+		// A broken run must never leave the app open.
+		go func() {
+			time.Sleep(3 * time.Minute)
+			fmt.Fprintln(os.Stderr, "bench/self-test watchdog: exiting")
+			os.Exit(2)
+		}()
+	}
+	return b
+}
+
+// SaveCopy saves the document as name next to the self-test report,
+// without dialogs, and returns the full path (self-test only).
+func (b *BenchService) SaveCopy(name string) (string, error) {
+	if !b.SelfTestMode() {
+		return "", fmt.Errorf("SaveCopy is only available in self-test mode")
+	}
+	path, err := filepath.Abs(filepath.Join(filepath.Dir(benchOutPath()), filepath.Base(name)))
+	if err != nil {
+		return "", err
+	}
+	if !b.docs.saveTo(path) {
+		return "", fmt.Errorf("save %s failed", path)
+	}
+	return path, nil
 }
 
 // BenchMode reports whether the frontend should run the benchmark
@@ -79,7 +105,7 @@ func (b *BenchService) EmitBurst(count, blocksPerEvent int) {
 	for i := range refs {
 		refs[i] = BlockRef{Row: i}
 	}
-	blocks := b.sheets.GetBlocks(0, refs).Blocks
+	blocks := b.sheets.GetBlocks(0, refs, 0).Blocks
 
 	app := application.Get()
 	for i := 0; i < count; i++ {
@@ -143,6 +169,11 @@ func (b *BenchService) ReportBench(report string) error {
 		go func() {
 			time.Sleep(200 * time.Millisecond)
 			application.Get().Quit()
+		}()
+		// Quit runs on the UI thread, which a runaway page can starve.
+		go func() {
+			time.Sleep(2 * time.Second)
+			os.Exit(0)
 		}()
 	}
 	return nil

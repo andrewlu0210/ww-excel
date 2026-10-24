@@ -44,7 +44,7 @@ func newTestSession(fake bool) (*Session, *recorder) {
 
 func TestGetBlocks(t *testing.T) {
 	sess, _ := newTestSession(true)
-	got := NewSheetService(sess).GetBlocks(0, []BlockRef{{0, 0}, {5000, 5000}, {0, 1}}).Blocks
+	got := NewSheetService(sess).GetBlocks(0, []BlockRef{{0, 0}, {5000, 5000}, {0, 1}}, 0).Blocks
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))
 	}
@@ -62,7 +62,7 @@ func TestGetBlocks(t *testing.T) {
 
 func TestGetBlocksBadSheet(t *testing.T) {
 	sess, _ := newTestSession(true)
-	got := NewSheetService(sess).GetBlocks(9, []BlockRef{{0, 0}}).Blocks
+	got := NewSheetService(sess).GetBlocks(9, []BlockRef{{0, 0}}, 0).Blocks
 	if len(got) != 1 || len(got[0].Cells) != 0 {
 		t.Fatalf("unexpected %+v", got)
 	}
@@ -71,20 +71,20 @@ func TestGetBlocksBadSheet(t *testing.T) {
 func TestEditEmitsOneDiffAndBumpsVersion(t *testing.T) {
 	sess, rec := newTestSession(false)
 	svc := NewSheetService(sess)
-	v0 := svc.GetBlocks(0, nil).Version
+	v0 := svc.GetBlocks(0, nil, 0).Version
 
 	svc.SetCell(0, 2, 3, "12.5")
 	d := rec.lastDiff(t)
 	if len(rec.diffs) != 1 || d.Version <= v0 {
 		t.Fatalf("diffs=%d version=%d (was %d)", len(rec.diffs), d.Version, v0)
 	}
-	if len(d.Cells) != 1 || d.Cells[0] != (ChangedCell{Row: 2, Col: 3, V: "12.5", N: true}) {
+	if len(d.Cells) != 1 || d.Cells[0] != (ChangedCell{Row: 2, Col: 3, V: "12.5", N: true}) || len(d.Styles) != 0 {
 		t.Fatalf("diff cells = %+v", d.Cells)
 	}
 	if d.UsedRows != 3 || d.UsedCols != 4 || d.Select != nil {
 		t.Fatalf("diff meta = %+v", d)
 	}
-	if got := svc.GetBlocks(0, nil).Version; got != d.Version {
+	if got := svc.GetBlocks(0, nil, 0).Version; got != d.Version {
 		t.Fatalf("GetBlocks version %d != diff version %d", got, d.Version)
 	}
 
@@ -125,7 +125,7 @@ func TestUndoSelectsAffectedArea(t *testing.T) {
 func TestLargeClearInvalidates(t *testing.T) {
 	sess, rec := newTestSession(true)
 	svc := NewSheetService(sess)
-	svc.Clear(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 4}})
+	svc.Clear(0, []RangeDTO{{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: 4}}, "contents")
 	d := rec.lastDiff(t)
 	if !d.Invalidate || len(d.Cells) != 0 {
 		t.Fatalf("expected invalidation, got %d cells", len(d.Cells))
@@ -194,7 +194,7 @@ func TestFormulaEditing(t *testing.T) {
 	// Undo recalculates dependents too.
 	svc.SetCell(0, 0, 0, "7")
 	svc.Undo()
-	if got := svc.GetBlocks(0, []BlockRef{{0, 0}}).Blocks[0].Cells[1].V; got != "50" {
+	if got := svc.GetBlocks(0, []BlockRef{{0, 0}}, 0).Blocks[0].Cells[1].V; got != "50" {
 		t.Fatalf("B1 after undo = %q", got)
 	}
 
@@ -203,6 +203,76 @@ func TestFormulaEditing(t *testing.T) {
 	svc.SetCell(0, 10, 0, "=A10")
 	if st := sess.State(); st.Circular != "A10" {
 		t.Fatalf("circular = %q", st.Circular)
+	}
+}
+
+func TestFormattingAndSheets(t *testing.T) {
+	sess, rec := newTestSession(false)
+	svc := NewSheetService(sess)
+	docs := NewDocumentService(sess, &fakeDialogs{})
+	svc.SetCell(0, 0, 0, "1234.5")
+	b := true
+	code := "#,##0.00"
+	n := len(rec.diffs)
+	if err := svc.Format(0, []RangeDTO{{0, 0, 0, 0}}, FormatPatch{Bold: &b, NumFmt: &code, Label: "粗體"}); err != nil {
+		t.Fatal(err)
+	}
+	d := rec.lastDiff(t)
+	if len(rec.diffs) != n+1 || d.Cells[0].V != "1,234.50" || len(d.Styles) != 1 || !d.Styles[0].Font.Bold || d.Cells[0].St != d.Styles[0].ID {
+		t.Fatalf("format diff = %+v", d)
+	}
+	if sess.State().UndoLabel != "粗體" {
+		t.Fatalf("undo label = %q", sess.State().UndoLabel)
+	}
+
+	// Outside border: only the edges of the range.
+	svc.Format(0, []RangeDTO{{2, 2, 4, 4}}, FormatPatch{Border: "outside"})
+	blocks := svc.GetBlocks(0, []BlockRef{{0, 0}}, 0)
+	styles := map[uint32]StyleDTO{}
+	for _, st := range blocks.Styles {
+		styles[st.ID] = st
+	}
+	at := func(r, c int) StyleDTO {
+		for _, cell := range blocks.Blocks[0].Cells {
+			if cell.R == r && cell.C == c {
+				return styles[cell.St]
+			}
+		}
+		return StyleDTO{}
+	}
+	if at(2, 2).Top.Style != "thin" || at(2, 2).Left.Style != "thin" || at(3, 3).Top.Style != "" || at(4, 4).Bottom.Style != "thin" {
+		t.Fatalf("outside border: %+v %+v %+v", at(2, 2), at(3, 3), at(4, 4))
+	}
+
+	// Sizes and merges change the layout.
+	svc.SetSizes(0, false, []int{1}, 120)
+	if err := svc.Merge(0, RangeDTO{6, 0, 6, 3}, true); err != nil {
+		t.Fatal(err)
+	}
+	l := svc.Layout(0, 0)
+	if len(l.Cols) != 1 || l.Cols[0].Px != 120 || len(l.Merges) != 1 || len(l.Styles) == 0 {
+		t.Fatalf("layout = %+v", l)
+	}
+	if rec.events[len(rec.events)-3] != EventLayoutChanged {
+		t.Fatalf("events = %v", rec.events[len(rec.events)-4:])
+	}
+
+	// Sheets.
+	if idx := docs.AddSheet(1); idx != 1 || len(sess.State().Sheets) != 2 {
+		t.Fatalf("add sheet = %d, %v", idx, sess.State().Sheets)
+	}
+	if err := docs.RenameSheet(1, "a:b"); err == nil {
+		t.Fatal("invalid name accepted")
+	}
+	if err := docs.RenameSheet(1, "報表"); err != nil || sess.State().Sheets[1] != "報表" {
+		t.Fatalf("rename: %v %v", err, sess.State().Sheets)
+	}
+	docs.MoveSheet(1, 0)
+	if sess.State().Sheets[0] != "報表" {
+		t.Fatal("move")
+	}
+	if !docs.DeleteSheet(0) || len(sess.State().Sheets) != 1 {
+		t.Fatal("delete")
 	}
 }
 
@@ -245,6 +315,10 @@ func (f *fakeDialogs) PickOpen() (string, error)         { return f.openPath, ni
 func (f *fakeDialogs) PickSave(string) (string, error)   { return f.savePath, nil }
 func (f *fakeDialogs) ShowError(title, msg string)       { f.errors = append(f.errors, title+": "+msg) }
 func (f *fakeDialogs) ShowWarning(title, message string) {}
+func (f *fakeDialogs) Confirm(title, message, ok string) bool {
+	f.asked++
+	return f.choice != ChoiceCancel
+}
 
 func TestDocumentFlow(t *testing.T) {
 	dir := t.TempDir()
@@ -269,14 +343,14 @@ func TestDocumentFlow(t *testing.T) {
 		t.Fatalf("save failed: %v", dlg.errors)
 	}
 	st := docs.State()
-	if st.Name != "book.wwx" || st.Dirty {
+	if st.Name != "book.xlsx" || st.Dirty {
 		t.Fatalf("state after save = %+v", st)
 	}
 
 	// Open the saved file into a fresh session state.
 	sheets.SetCell(0, 0, 1, "dirty")
 	dlg.choice = ChoiceDiscard
-	dlg.openPath = filepath.Join(dir, "book.wwx")
+	dlg.openPath = filepath.Join(dir, "book.xlsx")
 	if !docs.Open() {
 		t.Fatalf("open failed: %v", dlg.errors)
 	}
@@ -300,7 +374,7 @@ func TestDocumentFlow(t *testing.T) {
 		t.Fatal("ConfirmClose with Save should save")
 	}
 
-	if err := docs.OpenPath(filepath.Join(dir, "missing.wwx")); err == nil || len(dlg.errors) == 0 {
+	if err := docs.OpenPath(filepath.Join(dir, "missing.xlsx")); err == nil || len(dlg.errors) == 0 {
 		t.Fatal("opening a missing file should report an error")
 	}
 }
@@ -317,6 +391,6 @@ func BenchmarkGetBlocksViewport(b *testing.B) {
 		}
 	}
 	for b.Loop() {
-		s.GetBlocks(0, refs)
+		s.GetBlocks(0, refs, 0)
 	}
 }

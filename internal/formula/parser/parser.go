@@ -13,6 +13,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"ww-excel/internal/formula/ast"
 	"ww-excel/internal/formula/lexer"
@@ -215,7 +216,9 @@ func (p *parser) closeParen() error {
 
 func (p *parser) call(name lexer.Token) (ast.Node, error) {
 	p.advance() // "("
-	call := ast.Call{Name: name.Text}
+	// xlsx files prefix newer functions (_xlfn.XLOOKUP); drop it.
+	fn := strings.TrimPrefix(strings.TrimPrefix(name.Text, "_XLFN."), "_XLWS.")
+	call := ast.Call{Name: fn}
 	if p.peek().Kind == lexer.RParen {
 		p.advance()
 		return call, nil

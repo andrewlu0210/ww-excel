@@ -3,6 +3,7 @@ package numfmt
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestDateSerial(t *testing.T) {
@@ -140,5 +141,96 @@ func TestFormatText(t *testing.T) {
 	}
 	if got := FormatText("abc", `@" 元"`); got != "abc 元" {
 		t.Errorf("lone @ section = %q", got)
+	}
+}
+
+func TestRenderColorsAndLocale(t *testing.T) {
+	date := DateSerial(2026, 10, 23) + (15*3600+4*60)/86400.0
+	tests := []struct {
+		v                 float64
+		code, text, color string
+	}{
+		{-5, "0;[Red]-0", "-5", "FF0000"},
+		{5, "0;[Red]-0", "5", ""},
+		{-5, "#,##0;[Color3](#,##0)", "(5)", "FF0000"},
+		{date, "[$-404]e/m/d", "115/10/23", ""},
+		{date, `[$-404]gge"年"m"月"d"日"`, "民國115年10月23日", ""},
+		{date, `上午/下午 hh"時"mm"分"`, "下午 03時04分", ""},
+		{1234, "[$NT$-404]#,##0", "NT$1,234", ""},
+		{0.5, "General", "0.5", ""},
+	}
+	for _, tt := range tests {
+		text, color := Render(tt.v, tt.code)
+		if text != tt.text || color != tt.color {
+			t.Errorf("Render(%v, %q) = %q %q, want %q %q", tt.v, tt.code, text, color, tt.text, tt.color)
+		}
+	}
+	for id, want := range map[int]string{14: "2026/10/23", 27: "115/10/23", 22: "2026/10/23 15:04"} {
+		code, _ := Builtin(id)
+		if got := Format(date, code); got != want {
+			t.Errorf("builtin %d (%q) = %q, want %q", id, code, got, want)
+		}
+	}
+	if !IsDate("yyyy/m/d") || IsDate("#,##0.00") {
+		t.Error("IsDate")
+	}
+}
+
+func TestDetect(t *testing.T) {
+	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		in   string
+		v    float64
+		code string
+		ok   bool
+	}{
+		{"12%", 0.12, "0%", true},
+		{"12.5%", 0.125, "0.00%", true},
+		{"1,234", 1234, "#,##0", true},
+		{"-1,234.5", -1234.5, "#,##0.00", true},
+		{"12,34", 0, "", false},
+		{"$12", 12, `"$"#,##0_);[Red]\("$"#,##0\)`, true},
+		{"$1,234.50", 1234.5, `"$"#,##0.00_);[Red]\("$"#,##0.00\)`, true},
+		{"2026/10/23", 46318, "yyyy/m/d", true},
+		{"2026-1-5", DateSerial(2026, 1, 5), "yyyy/m/d", true},
+		{"2026/2/30", 0, "", false},
+		{"2026/10/23 13:30", 46318 + 13.5/24, "yyyy/m/d h:mm", true},
+		{"10/23", 46318, `m"月"d"日"`, true},
+		{"13:05", (13*60 + 5) / 1440.0, "h:mm", true},
+		{"1:05 PM", (13*60 + 5) / 1440.0, "h:mm AM/PM", true},
+		{"25:00", 0, "", false},
+		{"abc", 0, "", false},
+		{"12", 0, "", false}, // plain numbers need no format
+	}
+	for _, tt := range tests {
+		v, code, ok := Detect(tt.in, now)
+		if ok != tt.ok || code != tt.code || math.Abs(v-tt.v) > 1e-9 {
+			t.Errorf("Detect(%q) = %v %q %v, want %v %q %v", tt.in, v, code, ok, tt.v, tt.code, tt.ok)
+		}
+	}
+}
+
+func TestAdjustDecimals(t *testing.T) {
+	tests := []struct {
+		code  string
+		delta int
+		want  string
+	}{
+		{"", 1, "0.0"},
+		{"", -1, "0"},
+		{"0", 1, "0.0"},
+		{"0.00", 1, "0.000"},
+		{"0.00", -1, "0.0"},
+		{"0.0", -1, "0"},
+		{"#,##0", 1, "#,##0.0"},
+		{"0%", 2, "0.00%"},
+		{`"$"#,##0.00_);[Red]\("$"#,##0.00\)`, -1, `"$"#,##0.0_);[Red]\("$"#,##0.0\)`},
+		{`0.0" 元"`, 1, `0.00" 元"`},
+		{"yyyy/m/d", 1, "yyyy/m/d"},
+	}
+	for _, tt := range tests {
+		if got := AdjustDecimals(tt.code, tt.delta); got != tt.want {
+			t.Errorf("AdjustDecimals(%q, %d) = %q, want %q", tt.code, tt.delta, got, tt.want)
+		}
 	}
 }

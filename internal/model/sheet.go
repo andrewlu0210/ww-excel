@@ -3,7 +3,11 @@
 // blocks around the viewport.
 package model
 
-import "ww-excel/internal/numfmt"
+import (
+	"strings"
+
+	"ww-excel/internal/numfmt"
+)
 
 const (
 	MaxRows = 1 << 20 // 1,048,576 rows, same as Excel
@@ -75,9 +79,11 @@ type Formula struct {
 }
 
 // Cell holds a value. For formula cells (F != nil) the value is the last
-// calculated result.
+// calculated result. S is the style ID (0 = inherit the row/column
+// style, else the workbook default); a cell may hold only a style.
 type Cell struct {
 	Kind CellKind
+	S    uint32
 	Num  float64
 	Str  string
 	F    *Formula
@@ -96,8 +102,17 @@ func BoolCell(b bool) Cell {
 
 func FormulaCell(text string) Cell { return Cell{F: &Formula{Text: text}} }
 
-// IsEmpty reports whether the cell holds neither a value nor a formula.
-func (c Cell) IsEmpty() bool { return c.Kind == KindEmpty && c.F == nil }
+// IsEmpty reports whether the cell holds no value, formula or style.
+func (c Cell) IsEmpty() bool { return c.Kind == KindEmpty && c.F == nil && c.S == 0 }
+
+// HasContent reports whether the cell holds a value or formula.
+func (c Cell) HasContent() bool { return c.Kind != KindEmpty || c.F != nil }
+
+// Value returns the cell without its style, e.g. to compare contents.
+func (c Cell) Value() Cell {
+	c.S = 0
+	return c
+}
 
 // SameInput reports whether two cells hold the same user input: equal
 // formula text, or equal values for non-formula cells.
@@ -170,6 +185,11 @@ func (b *Block) Each(fn func(r, c int, cell Cell)) {
 // Sheet stores cells sparsely: only blocks containing data are allocated.
 type Sheet struct {
 	Name   string
+	Layout Layout
+	// SourceName is the sheet's name in the xlsx file it was loaded
+	// from ("" for new sheets), so in-place saves can map sheets.
+	SourceName string
+
 	blocks map[BlockKey]*Block
 
 	// Used range bounds (exclusive), i.e. the last used row/col + 1.
@@ -177,7 +197,7 @@ type Sheet struct {
 }
 
 func NewSheet(name string) *Sheet {
-	return &Sheet{Name: name, blocks: make(map[BlockKey]*Block)}
+	return &Sheet{Name: name, Layout: NewLayout(), blocks: make(map[BlockKey]*Block)}
 }
 
 func (s *Sheet) Get(row, col int) Cell {
@@ -213,7 +233,7 @@ func (s *Sheet) Set(row, col int, cell Cell) {
 		}
 	}
 
-	if !cell.IsEmpty() {
+	if cell.HasContent() {
 		s.usedRows = max(s.usedRows, row+1)
 		s.usedCols = max(s.usedCols, col+1)
 	}
@@ -230,8 +250,37 @@ func (s *Sheet) UsedRange() (rows, cols int) { return s.usedRows, s.usedCols }
 
 type Workbook struct {
 	Sheets []*Sheet
+	Styles *StyleTable
 }
 
 func NewWorkbook() *Workbook {
-	return &Workbook{Sheets: []*Sheet{NewSheet("Sheet1")}}
+	return &Workbook{Sheets: []*Sheet{NewSheet("工作表1")}, Styles: NewStyleTable(Style{Font: DefaultFont})}
+}
+
+// StyleTable returns the workbook's styles, creating the default table
+// for workbooks built without one.
+func (wb *Workbook) StyleTable() *StyleTable {
+	if wb.Styles == nil {
+		wb.Styles = NewStyleTable(Style{Font: DefaultFont})
+	}
+	return wb.Styles
+}
+
+// SheetIndex finds a sheet by name, case-insensitively like Excel.
+func (wb *Workbook) SheetIndex(name string) int {
+	for i, s := range wb.Sheets {
+		if strings.EqualFold(s.Name, name) {
+			return i
+		}
+	}
+	return -1
+}
+
+// EffectiveStyle is the style ID that applies at a position: the cell's
+// own style, else the row or column style.
+func (s *Sheet) EffectiveStyle(row, col int) uint32 {
+	if c := s.Get(row, col); c.S != 0 {
+		return c.S
+	}
+	return s.Layout.StyleAt(row, col)
 }

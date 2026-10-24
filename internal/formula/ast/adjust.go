@@ -22,46 +22,25 @@ type Shift struct {
 // the sheet the formula lives on (for references without a sheet).
 func Adjust(n Node, formulaSheet string, s Shift) (Node, bool) {
 	changed := false
-	var rewrite func(Node) Node
-	rewrite = func(n Node) Node {
-		switch x := n.(type) {
-		case Ref:
-			sheet := x.Sheet
-			if sheet == "" {
-				sheet = formulaSheet
-			}
-			if !strings.EqualFold(sheet, s.Sheet) {
-				return x
-			}
-			a, ok, moved := adjustArea(x.Area, s)
-			if !ok {
-				changed = true
-				return Error{Code: model.ErrRef}
-			}
-			if moved {
-				changed = true
-				x.Area = a
-			}
-			return x
-		case Paren:
-			return Paren{X: rewrite(x.X)}
-		case Unary:
-			return Unary{Op: x.Op, X: rewrite(x.X)}
-		case Percent:
-			return Percent{X: rewrite(x.X)}
-		case Binary:
-			return Binary{Op: x.Op, L: rewrite(x.L), R: rewrite(x.R)}
-		case Call:
-			args := make([]Node, len(x.Args))
-			for i, a := range x.Args {
-				args[i] = rewrite(a)
-			}
-			return Call{Name: x.Name, Args: args}
-		default:
-			return n
+	out := mapRefs(n, func(x Ref) Node {
+		sheet := x.Sheet
+		if sheet == "" {
+			sheet = formulaSheet
 		}
-	}
-	out := rewrite(n)
+		if !strings.EqualFold(sheet, s.Sheet) {
+			return x
+		}
+		a, ok, moved := adjustArea(x.Area, s)
+		if !ok {
+			changed = true
+			return Error{Code: model.ErrRef}
+		}
+		if moved {
+			changed = true
+			x.Area = a
+		}
+		return x
+	})
 	return out, changed
 }
 
@@ -129,35 +108,14 @@ func Translate(n Node, dr, dc int) Node {
 	if dr == 0 && dc == 0 {
 		return n
 	}
-	var rewrite func(Node) Node
-	rewrite = func(n Node) Node {
-		switch x := n.(type) {
-		case Ref:
-			a, ok := translateArea(x.Area, dr, dc)
-			if !ok {
-				return Error{Code: model.ErrRef}
-			}
-			x.Area = a
-			return x
-		case Paren:
-			return Paren{X: rewrite(x.X)}
-		case Unary:
-			return Unary{Op: x.Op, X: rewrite(x.X)}
-		case Percent:
-			return Percent{X: rewrite(x.X)}
-		case Binary:
-			return Binary{Op: x.Op, L: rewrite(x.L), R: rewrite(x.R)}
-		case Call:
-			args := make([]Node, len(x.Args))
-			for i, a := range x.Args {
-				args[i] = rewrite(a)
-			}
-			return Call{Name: x.Name, Args: args}
-		default:
-			return n
+	return mapRefs(n, func(x Ref) Node {
+		a, ok := translateArea(x.Area, dr, dc)
+		if !ok {
+			return Error{Code: model.ErrRef}
 		}
-	}
-	return rewrite(n)
+		x.Area = a
+		return x
+	})
 }
 
 func translateArea(a Area, dr, dc int) (Area, bool) {
@@ -187,4 +145,90 @@ func translateArea(a Area, dr, dc int) (Area, bool) {
 		a.C0, a.C1, a.AbsC0, a.AbsC1 = a.C1, a.C0, a.AbsC1, a.AbsC0
 	}
 	return a, true
+}
+
+// RenameSheet rewrites references to sheet old (case-insensitive) to
+// use name; returns whether anything changed.
+func RenameSheet(n Node, old, name string) (Node, bool) {
+	changed := false
+	out := mapRefs(n, func(r Ref) Node {
+		if r.Sheet != "" && strings.EqualFold(r.Sheet, old) {
+			r.Sheet = name
+			changed = true
+		}
+		return r
+	})
+	return out, changed
+}
+
+// RemoveSheet turns references to a deleted sheet into #REF!.
+func RemoveSheet(n Node, name string) (Node, bool) {
+	changed := false
+	out := mapRefs(n, func(r Ref) Node {
+		if r.Sheet != "" && strings.EqualFold(r.Sheet, name) {
+			changed = true
+			return Error{Code: model.ErrRef}
+		}
+		return r
+	})
+	return out, changed
+}
+
+// Functions added after Excel 2007 are stored with an _xlfn. prefix in
+// xlsx files; without it Excel shows #NAME?.
+var futureFunctions = map[string]bool{
+	"IFS": true, "SWITCH": true, "XOR": true, "IFNA": true, "CONCAT": true,
+	"TEXTJOIN": true, "XLOOKUP": true, "DAYS": true, "MAXIFS": true, "MINIFS": true,
+}
+
+// WithFilePrefixes adds _xlfn. to newer functions for writing xlsx.
+func WithFilePrefixes(n Node) Node {
+	return mapCalls(n, func(c Call) Call {
+		if futureFunctions[c.Name] {
+			c.Name = "_xlfn." + c.Name
+		}
+		return c
+	})
+}
+
+func mapRefs(n Node, fn func(Ref) Node) Node {
+	return rewriteTree(n, fn, nil)
+}
+
+func mapCalls(n Node, fn func(Call) Call) Node {
+	return rewriteTree(n, nil, fn)
+}
+
+func rewriteTree(n Node, refFn func(Ref) Node, callFn func(Call) Call) Node {
+	var rewrite func(Node) Node
+	rewrite = func(n Node) Node {
+		switch x := n.(type) {
+		case Ref:
+			if refFn != nil {
+				return refFn(x)
+			}
+			return x
+		case Paren:
+			return Paren{X: rewrite(x.X)}
+		case Unary:
+			return Unary{Op: x.Op, X: rewrite(x.X)}
+		case Percent:
+			return Percent{X: rewrite(x.X)}
+		case Binary:
+			return Binary{Op: x.Op, L: rewrite(x.L), R: rewrite(x.R)}
+		case Call:
+			args := make([]Node, len(x.Args))
+			for i, a := range x.Args {
+				args[i] = rewrite(a)
+			}
+			c := Call{Name: x.Name, Args: args}
+			if callFn != nil {
+				c = callFn(c)
+			}
+			return c
+		default:
+			return n
+		}
+	}
+	return rewrite(n)
 }

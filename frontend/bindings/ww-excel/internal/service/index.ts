@@ -15,12 +15,21 @@ export type {
     BlockDTO,
     BlockRef,
     BlocksResult,
+    BorderLineDTO,
     CellDTO,
     CellPos,
     CellsChanged,
     ChangedCell,
     DocState,
+    FontDTO,
+    FormatPatch,
+    LayoutChanged,
+    LayoutDTO,
     MemStats,
     RangeDTO,
-    SheetInfo
+    SheetInfo,
+    SizeDTO,
+    StyleDTO,
+    StyleRefDTO,
+    TextSample
 } from "./models.js";

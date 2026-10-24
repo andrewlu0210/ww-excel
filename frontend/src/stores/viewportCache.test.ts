@@ -14,7 +14,7 @@ function fakeFetcher() {
       col: r.col,
       cells: [{ r: 1, c: 2, v: `${r.row}:${r.col}`, n: true }],
     }));
-    return { version: state.version, blocks };
+    return { version: state.version, blocks, styles: [] };
   };
   return { calls, fetcher, state };
 }
@@ -35,7 +35,7 @@ describe('BlockCache', () => {
     expect(calls).toHaveLength(1);
 
     await flush();
-    expect(cache.cell(5 * 64 + 1, 2)).toEqual({ text: '5:0', numeric: true, center: false });
+    expect(cache.cell(5 * 64 + 1, 2)).toEqual({ text: '5:0', numeric: true, center: false, style: 0, color: null });
     expect(cache.cell(5 * 64, 0)).toBeUndefined();
   });
 
@@ -67,20 +67,21 @@ describe('BlockCache', () => {
       version: 1,
       usedRows: 0,
       usedCols: 0,
+      styles: [],
       cells: [
         { row: 0, col: 0, v: '台北' },
         { row: 1, col: 2, v: '' },
         { row: 5000, col: 0, v: 'not cached' },
       ],
     });
-    expect(cache.cell(0, 0)).toEqual({ text: '台北', numeric: false, center: false });
+    expect(cache.cell(0, 0)).toEqual({ text: '台北', numeric: false, center: false, style: 0, color: null });
     expect(cache.cell(1, 2)).toBeUndefined();
   });
 
   it('drops fetches answered before the latest edit', async () => {
     const { calls, fetcher, state } = fakeFetcher();
     const cache = new BlockCache(fetcher, 64, 32, 100, 100, 0);
-    cache.applyDiff({ sheet: 0, version: 5, usedRows: 0, usedCols: 0, cells: [] });
+    cache.applyDiff({ sheet: 0, version: 5, usedRows: 0, usedCols: 0, cells: [], styles: [] });
 
     state.version = 4; // stale answer
     cache.ensure({ r0: 0, r1: 0, c0: 0, c1: 0 });
@@ -99,7 +100,7 @@ describe('BlockCache', () => {
     const cache = new BlockCache(fetcher, 64, 32, 100, 100, 0);
     cache.ensure({ r0: 0, r1: 0, c0: 0, c1: 0 });
     await flush();
-    cache.applyDiff({ sheet: 0, version: 1, usedRows: 0, usedCols: 0, cells: [], invalidate: true });
+    cache.applyDiff({ sheet: 0, version: 1, usedRows: 0, usedCols: 0, cells: [], styles: [], invalidate: true });
     expect(cache.size).toBe(0);
   });
 

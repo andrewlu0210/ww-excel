@@ -12,10 +12,12 @@ import (
 
 // Event names pushed from Go to the frontend.
 const (
-	EventCellsChanged = "cells:changed"
-	EventDocState     = "doc:state"
-	EventDocReset     = "doc:reset"
-	EventMenuAction   = "menu:action"
+	EventCellsChanged  = "cells:changed"
+	EventLayoutChanged = "layout:changed"
+	EventSheetsChanged = "sheets:changed"
+	EventDocState      = "doc:state"
+	EventDocReset      = "doc:reset"
+	EventMenuAction    = "menu:action"
 )
 
 // Diffs larger than this are sent as an invalidation instead of a cell
@@ -38,6 +40,9 @@ type ChangedCell struct {
 	// N: number (right-aligned). X: logical or error (centered).
 	N bool `json:"n,omitempty"`
 	X bool `json:"x,omitempty"`
+	// St is the style ID; Fc a color from the number format ([Red]).
+	St uint32 `json:"st,omitempty"`
+	Fc string `json:"fc,omitempty"`
 }
 
 // CellsChanged is emitted once per edit, undo or redo for each sheet
@@ -53,6 +58,13 @@ type CellsChanged struct {
 	UsedCols   int  `json:"usedCols"`
 	// Select is set for undo/redo: Excel selects the affected area.
 	Select *RangeDTO `json:"select,omitempty"`
+	// Styles created since the last event.
+	Styles []StyleDTO `json:"styles"`
+}
+
+// LayoutChanged tells the frontend to refetch a sheet's layout.
+type LayoutChanged struct {
+	Sheet int `json:"sheet"`
 }
 
 type DocState struct {
@@ -65,6 +77,8 @@ type DocState struct {
 	RedoLabel string `json:"redoLabel"`
 	// Circular is the first cell in a circular reference, or "".
 	Circular string `json:"circular"`
+	// Sheets are the sheet names in order.
+	Sheets []string `json:"sheets"`
 }
 
 type Emitter func(name string, data any)
@@ -78,13 +92,18 @@ type Session struct {
 	// OnState is called after every state change, e.g. to update the
 	// window title and menu labels. Optional.
 	OnState func(DocState)
+
+	// Number of styles already sent with diff events.
+	stylesSent int
 }
 
 func NewSession(doc *document.Document, emit Emitter) *Session {
 	if emit == nil {
 		emit = func(string, any) {}
 	}
-	return &Session{doc: doc, emit: emit}
+	// Existing styles reach the frontend through GetBlocks/Layout; diff
+	// events only carry styles created later.
+	return &Session{doc: doc, emit: emit, stylesSent: doc.Workbook().StyleTable().Len()}
 }
 
 func (s *Session) read(fn func(d *document.Document)) {
@@ -110,11 +129,21 @@ func (s *Session) stateLocked() DocState {
 		UndoLabel: h.UndoLabel(),
 		RedoLabel: h.RedoLabel(),
 		Circular:  s.doc.Circular(),
+		Sheets:    s.sheetNamesLocked(),
 	}
 }
 
-// change runs a mutation under the write lock, then emits one diff
-// event per touched sheet and the new document state.
+func (s *Session) sheetNamesLocked() []string {
+	names := make([]string, len(s.doc.Workbook().Sheets))
+	for i, sh := range s.doc.Workbook().Sheets {
+		names[i] = sh.Name
+	}
+	return names
+}
+
+// change runs a mutation under the write lock, then emits the events
+// for it: one diff per touched sheet, layout or sheet-list changes, and
+// the new document state.
 func (s *Session) change(selectAfter bool, fn func(d *document.Document) (document.Change, bool)) bool {
 	s.mu.Lock()
 	ch, ok := fn(s.doc)
@@ -126,46 +155,70 @@ func (s *Session) change(selectAfter bool, fn func(d *document.Document) (docume
 	}
 	s.mu.Unlock()
 
-	if ok {
-		for _, d := range diffs {
-			s.emit(EventCellsChanged, d)
-		}
-		s.publishState(state)
+	if !ok {
+		return false
 	}
-	return ok
+	if ch.Structure {
+		s.emit(EventSheetsChanged, state)
+	}
+	if ch.LayoutChanged {
+		s.emit(EventLayoutChanged, LayoutChanged{Sheet: ch.Sheet})
+	}
+	for _, d := range diffs {
+		s.emit(EventCellsChanged, d)
+	}
+	s.publishState(state)
+	return true
 }
 
-func cellDisplay(c model.Cell) (v string, numeric, centered bool) {
-	return c.Display(), c.Kind == model.KindNumber, c.Kind == model.KindBool || c.Kind == model.KindError
+// cellView renders a cell for the frontend with its effective style.
+func cellView(wb *model.Workbook, sh *model.Sheet, row, col int, c model.Cell) (v string, n, x bool, st uint32, fc string) {
+	st = c.S
+	if st == 0 {
+		st = sh.Layout.StyleAt(row, col)
+	}
+	v, fc = display(c, wb.StyleTable().Get(st))
+	return v, c.Kind == model.KindNumber, c.Kind == model.KindBool || c.Kind == model.KindError, st, fc
 }
 
 func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChanged {
 	type pos struct{ row, col int }
-	bySheet := map[int][]pos{ch.Sheet: nil}
+	wb := s.doc.Workbook()
+	bySheet := map[int][]pos{}
+	if !ch.Structure {
+		bySheet[ch.Sheet] = nil
+	}
 	for _, c := range ch.Cells {
 		bySheet[ch.Sheet] = append(bySheet[ch.Sheet], pos{c.Row, c.Col})
+	}
+	for sheet, cells := range ch.Others {
+		for _, c := range cells {
+			bySheet[sheet] = append(bySheet[sheet], pos{c.Row, c.Col})
+		}
 	}
 	for _, k := range ch.Recalc {
 		bySheet[k.Sheet] = append(bySheet[k.Sheet], pos{k.Row, k.Col})
 	}
 	sheets := make([]int, 0, len(bySheet))
 	for sh := range bySheet {
-		sheets = append(sheets, sh)
+		if sh >= 0 && sh < len(wb.Sheets) {
+			sheets = append(sheets, sh)
+		}
 	}
 	sort.Ints(sheets)
 
 	var out []CellsChanged
 	for _, si := range sheets {
-		sh := s.doc.Workbook().Sheets[si]
+		sh := wb.Sheets[si]
 		diff := CellsChanged{Sheet: si, Version: s.doc.Version(), Cells: []ChangedCell{}}
 		diff.UsedRows, diff.UsedCols = sh.UsedRange()
 		cells := bySheet[si]
-		if len(cells) > maxDiffCells {
+		if len(cells) > maxDiffCells || ch.Structure {
 			diff.Invalidate = true
 		} else {
 			for _, p := range cells {
-				v, n, x := cellDisplay(sh.Get(p.row, p.col))
-				diff.Cells = append(diff.Cells, ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x})
+				v, n, x, st, fc := cellView(wb, sh, p.row, p.col, sh.Get(p.row, p.col))
+				diff.Cells = append(diff.Cells, ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc})
 			}
 		}
 		if selectAfter && si == ch.Sheet && ch.Bounds != nil {
@@ -174,15 +227,31 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 		}
 		out = append(out, diff)
 	}
+	// New styles ride along with the first diff.
+	if n := wb.StyleTable().Len(); n > s.stylesSent {
+		if len(out) == 0 {
+			out = append(out, CellsChanged{Sheet: ch.Sheet, Version: s.doc.Version(), Cells: []ChangedCell{}})
+		}
+		out[0].Styles = stylesSince(wb, s.stylesSent)
+		s.stylesSent = n
+	}
+	for i := range out {
+		if out[i].Styles == nil {
+			out[i].Styles = []StyleDTO{}
+		}
+	}
 	return out
 }
 
 // replace swaps in a new document and tells the frontend to reload.
 func (s *Session) replace(doc *document.Document) {
 	s.mu.Lock()
+	old := s.doc
 	s.doc = doc
+	s.stylesSent = doc.Workbook().StyleTable().Len()
 	state := s.stateLocked()
 	s.mu.Unlock()
+	old.Close()
 
 	s.emit(EventDocReset, state)
 	s.publishState(state)

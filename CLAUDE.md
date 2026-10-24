@@ -7,9 +7,9 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v0.3 完成**（2026-10-23），下一步是 v0.4（格式與 xlsx）
+- 目前階段：**v0.4 完成**（2026-10-24），下一步是 v0.5（生產力操作）
 - 完成一個版本後，更新此區塊並勾選下方對應項目
-- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、Svelte 5、Vite 8、vitest 5
+- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、Svelte 5、Vite 8、vitest 5
 
 ## 常用指令
 
@@ -32,7 +32,9 @@ WW_BENCH=1 WW_BENCH_OUT="$PWD/docs/perf-latest.md" ./bin/ww-excel
 # docs/selftest-latest.md + docs/selftest.png, quits (60s watchdog)
 WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
 
-./bin/ww-excel path/to/file.csv     # open a .csv / .wwx on launch
+./bin/ww-excel path/to/file.xlsx    # open a .xlsx / .csv / .wwx on launch
+
+go run ./tools/goldenxlsx           # build testdata/golden/excel-check.xlsx (see testdata/golden/README.md)
 ```
 
 - 要確認畫面時，跑上面的量測模式，再讀 `docs/snapshot-origin.png` 和 `docs/snapshot-end.png`，不需要螢幕錄製權限
@@ -41,6 +43,7 @@ WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
 - 新增鍵盤或編輯行為時，在 `frontend/src/bench/selfTest.ts` 加上對應檢查項
 - 新增或修改函數時，在 `testdata/golden/functions.tsv` 加上案例（`go test ./internal/formula -run TestGolden`）
 - self-test 模擬不了原生 IME 和選單快捷鍵，這兩項每版都要手動確認
+- 跑 self-test 或量測前先確認沒有殘留的 `bin/ww-excel` 程序（`pgrep -fl bin/ww-excel`）；Go 端有看門狗會在 3 分鐘後強制結束
 
 ---
 
@@ -173,13 +176,27 @@ ww-excel/
 - 留到後續版本：公式文字的參照上色（textarea 無法上色）、拖曳參照框調整範圍、`INDEX` 回傳參照（`A1:INDEX(...)`）、空格交集運算子、動態陣列與溢出、具名範圍（v0.6）、日期字串自動轉換（`="2026/1/1"+1`）
 
 ### v0.4 — 格式與 xlsx
-- [ ] 樣式系統（字型、填滿、框線、對齊、換行）與 style table
-- [ ] 數值格式解析器（`internal/numfmt`）
-- [ ] 調整列高欄寬、雙擊自動欄寬
-- [ ] 合併儲存格
-- [ ] 多工作表（新增 / 刪除 / 改名 / 排序）
-- [ ] xlsx 匯入匯出（excelize），不支援的內容盡量原樣保留
-- **驗收**：一般報表 xlsx 外觀大致正確，存回後 Excel 能正常開啟
+- [x] 樣式系統（字型、填滿、框線、對齊、換行）與 style table
+- [x] 數值格式解析器（`internal/numfmt`）：色彩區段、民國年、上午/下午、內建格式 ID、輸入自動判斷格式
+- [x] 調整列高欄寬（拖曳標題邊界）、雙擊自動調整
+- [x] 合併儲存格（跨欄置中、合併感知的選取與移動）
+- [x] 多工作表（新增 / 刪除 / 改名 / 排序，公式參照跟著更新）
+- [x] xlsx 匯入匯出（excelize），原地存檔保留不支援的內容
+- [x] UI：常用工具列、顏色選擇器、⌘1 數值格式對話框、工作表分頁
+- **驗收**：self-test 75/75（含 xlsx 存讀）✅；效能維持 60fps ✅（見 `docs/perf.md`）；**用真實 Excel 開啟存出的檔案 → 待手動確認**
+- 設計重點：
+  - `model.Cell.S` 是樣式 ID，`StyleTable` 去重且 ID 永不重用（Undo 安全）；`Layout` 存列高欄寬、整列整欄樣式、合併
+  - 整欄 / 整列格式寫進 `Layout.ColStyles/RowStyles`，不建立儲存格；有效樣式 = 儲存格 → 列 → 欄
+  - Delete 只清內容、保留格式；輸入時保留格式，格式為「通用」時才套用自動判斷的格式；公式結果沿用第一個參照的格式（`=A1+7` 仍是日期）
+  - **xlsx 原地存檔**：保留開檔時的 excelize 檔案，只寫入變動的儲存格與版面（`Document.changedCells/layoutDirty`），圖表、註解、資料驗證等不會遺失；工作表先改成暫存名再改名，處理名稱互換
+  - **不要用 excelize 的 `GetCellStyle` 讀檔**：它會在記憶體中補滿空儲存格，讓原地存檔膨脹；樣式和公式位置由 `rawcells.go` 直接串流解析 XML 取得
+  - 較新函數寫檔時加 `_xlfn.` 前綴（`ast.WithFilePrefixes`），讀檔時去掉
+  - 貨幣（ID 5–8）與地區相關的內建格式一律寫成自訂格式碼，excelize 會丟掉它們
+  - 我們看不懂的公式（例如結構化參照）保留 Excel 的快取值，不重算
+  - 前端：`styleStore` 隨 GetBlocks / Layout / diff 同步樣式；`Grid` 套用版面時要 `untrack`，否則會觸發無限 effect；元件卸載後的回呼（區塊抓取、公式列更新）必須忽略
+  - 工作表結構變動時 App 依名稱找回目前工作表並重新掛載 Sheet（快取以工作表索引為 key）
+- 已知限制：存出的 xlsx 不含文字 / 錯誤 / 布林公式結果的快取值（Excel 開啟會重算，Quick Look 會看到空白）；xlsx 開檔 10 萬格約 1 秒；不支援的格式屬性（文字旋轉、圖樣填滿等）在**被編輯過的儲存格**上會遺失
+- 留到後續版本：Golden 期望值用真實 Excel 驗證（工具已備好，見 `testdata/golden/README.md`）、編輯中的部分文字格式（rich text）、條件式格式（v0.6）、凍結窗格與隱藏列欄 UI（v0.5）、稀疏 block 節省記憶體
 
 ### v0.5 — 生產力操作
 - [ ] 剪貼簿與 Excel 互通（TSV 與 HTML）

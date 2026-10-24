@@ -9,3 +9,10 @@ export interface GridPointer {
   shift: boolean;
   meta: boolean;
 }
+
+// A header border dragged to resize a row or column.
+export interface ResizeRequest {
+  rows: boolean;
+  index: number;
+  px: number;
+}

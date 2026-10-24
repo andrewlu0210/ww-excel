@@ -1,6 +1,10 @@
 package service
 
-import "github.com/wailsapp/wails/v3/pkg/application"
+import (
+	"os"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
 
 // WailsDialogs shows native macOS dialogs, attached as sheets to the
 // window returned by Window.
@@ -28,7 +32,7 @@ func (w WailsDialogs) AskSave(docName string) SaveChoice {
 func (w WailsDialogs) PickOpen() (string, error) {
 	d := application.Get().Dialog.OpenFile().
 		CanChooseFiles(true).
-		AddFilter("試算表（*.wwx, *.csv）", "*.wwx;*.csv")
+		AddFilter("試算表（*.xlsx, *.wwx, *.csv）", "*.xlsx;*.xlsm;*.wwx;*.csv")
 	if win := w.window(); win != nil {
 		d.AttachToWindow(win)
 	}
@@ -39,11 +43,29 @@ func (w WailsDialogs) PickSave(suggestedName string) (string, error) {
 	d := application.Get().Dialog.SaveFile().
 		SetFilename(suggestedName).
 		CanCreateDirectories(true).
-		SetMessage("副檔名 .wwx 為原生格式；.csv 只保存第一個工作表的值。")
+		SetMessage("可存成 .xlsx（Excel 活頁簿）、.wwx（原生格式）或 .csv（只保存第一個工作表的值）。")
 	if win := w.window(); win != nil {
 		d.AttachToWindow(win)
 	}
 	return d.PromptForSingleSelection()
+}
+
+func (w WailsDialogs) Confirm(title, message, ok string) bool {
+	// The unattended self-test cannot click; it confirms everything.
+	if os.Getenv("WW_SELFTEST") == "1" {
+		return true
+	}
+	answer := make(chan bool, 1)
+	d := application.Get().Dialog.Question().SetTitle(title).SetMessage(message)
+	d.AddButton(ok).OnClick(func() { answer <- true })
+	cancel := d.AddButton("取消").OnClick(func() { answer <- false })
+	// Deleting is destructive, so Cancel is the default.
+	d.SetDefaultButton(cancel).SetCancelButton(cancel)
+	if win := w.window(); win != nil {
+		d.AttachToWindow(win)
+	}
+	d.Show()
+	return <-answer
 }
 
 func (w WailsDialogs) ShowError(title, message string) {

@@ -37,6 +37,15 @@ type section struct {
 	cond   *condition
 	// Set when the section prints its own sign, e.g. "(0.0)".
 	hasText bool
+	// color is a [Red]-style color as "RRGGBB", "" for none.
+	color string
+	// roc: Taiwan locale ([$-404]); "e" is the ROC year and "g" the era.
+	roc bool
+}
+
+var namedColors = map[string]string{
+	"black": "000000", "blue": "0000FF", "cyan": "00FFFF", "green": "00FF00",
+	"magenta": "FF00FF", "red": "FF0000", "white": "FFFFFF", "yellow": "FFFF00",
 }
 
 var monthNames = []string{"January", "February", "March", "April", "May", "June", "July",
@@ -45,23 +54,51 @@ var dayNames = []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", 
 
 // Format renders a number with an Excel format code.
 func Format(v float64, code string) string {
+	text, _ := Render(v, code)
+	return text
+}
+
+// Render is Format that also returns the section color ("RRGGBB" or "")
+// from codes such as "0;[Red]-0".
+func Render(v float64, code string) (string, string) {
+	if code == "" || strings.EqualFold(code, "General") {
+		return General(v), ""
+	}
 	secs := parse(code)
 	sec, useAbs := pick(secs, v)
 	if sec == nil {
-		return General(v)
+		return General(v), ""
 	}
 	if useAbs {
 		v = math.Abs(v)
 	}
 	if sec.isDate {
-		return formatDate(v, sec.tokens)
+		return formatDate(v, sec), sec.color
 	}
-	return formatNumber(v, sec.tokens, !useAbs)
+	return formatNumber(v, sec.tokens, !useAbs), sec.color
+}
+
+// IsDate reports whether a format code shows dates or times.
+func IsDate(code string) bool {
+	for _, s := range parse(code) {
+		if s.isDate {
+			return true
+		}
+	}
+	return false
 }
 
 // FormatText renders a text value: the fourth section (or a lone
 // section containing @) substitutes the text for @.
 func FormatText(s, code string) string {
+	text, _ := RenderText(s, code)
+	return text
+}
+
+func RenderText(s, code string) (string, string) {
+	if code == "" {
+		return s, ""
+	}
 	secs := parse(code)
 	var sec *section
 	if len(secs) >= 4 {
@@ -70,7 +107,7 @@ func FormatText(s, code string) string {
 		sec = &secs[0]
 	}
 	if sec == nil {
-		return s
+		return s, ""
 	}
 	var b strings.Builder
 	for _, t := range sec.tokens {
@@ -81,7 +118,7 @@ func FormatText(s, code string) string {
 			b.WriteString(t.text)
 		}
 	}
-	return b.String()
+	return b.String(), sec.color
 }
 
 func containsKind(ts []token, k tokKind) bool {
@@ -188,7 +225,10 @@ func parse(code string) []section {
 		case hasPrefixFold(rs[i:], "A/P"):
 			cur.date("A/P")
 			i += 2
-		case strings.ContainsRune("ymdhsYMDHS", r):
+		case hasPrefixFold(rs[i:], "上午/下午"):
+			cur.date("上午/下午")
+			i += len([]rune("上午/下午")) - 1
+		case strings.ContainsRune("ymdhsegYMDHSEG", r):
 			j := i
 			for j < len(rs) && unicode.ToLower(rs[j]) == unicode.ToLower(r) {
 				j++
@@ -243,9 +283,30 @@ func (s *section) bracket(content string) {
 		if v, err := strconv.ParseFloat(strings.TrimSpace(rest), 64); err == nil {
 			s.cond = &condition{op: op, val: v}
 		}
+	case namedColors[lower] != "":
+		s.color = namedColors[lower]
+	case strings.HasPrefix(lower, "color") && len(lower) > 5:
+		if n, err := strconv.Atoi(lower[5:]); err == nil && n >= 1 && n <= len(paletteColors) {
+			s.color = paletteColors[n-1]
+		}
+	case strings.HasPrefix(content, "$"):
+		// [$NT$-404]: currency symbol and/or locale.
+		sym, loc, _ := strings.Cut(content[1:], "-")
+		if sym != "" {
+			s.lit(sym)
+		}
+		if strings.Contains(loc, "404") || strings.Contains(strings.ToLower(loc), "zh-tw") {
+			s.roc = true
+		}
 	default:
-		// Colors ([Red]) and locale tags ([$-404]) are ignored for now.
+		// Other tags (e.g. [DBNum1]) are not supported yet.
 	}
+}
+
+// The first colors of Excel's legacy palette, for [ColorN].
+var paletteColors = []string{
+	"000000", "FFFFFF", "FF0000", "00FF00", "0000FF", "FFFF00", "FF00FF", "00FFFF",
+	"800000", "008000", "000080", "808000", "800080", "008080", "C0C0C0", "808080",
 }
 
 // ---- Numbers ----
@@ -500,13 +561,14 @@ func abs(v int) int {
 
 // ---- Dates ----
 
-func formatDate(v float64, toks []token) string {
+func formatDate(v float64, sec *section) string {
+	toks := sec.tokens
 	if v < 0 {
 		return "#######"
 	}
 	twelve := false
 	for _, t := range toks {
-		if t.text == "AM/PM" || t.text == "A/P" {
+		if t.text == "AM/PM" || t.text == "A/P" || t.text == "上午/下午" {
 			twelve = true
 		}
 	}
@@ -592,6 +654,27 @@ func formatDate(v float64, toks []token) string {
 				b.WriteString("A")
 			} else {
 				b.WriteString("P")
+			}
+		case c == "上午/下午":
+			if h < 12 {
+				b.WriteString("上午")
+			} else {
+				b.WriteString("下午")
+			}
+		case c[0] == 'e':
+			// Era year: the ROC (民國) year in the Taiwan locale.
+			ey := y
+			if sec.roc {
+				ey = y - 1911
+			}
+			if len(c) >= 2 {
+				b.WriteString(pad2(ey))
+			} else {
+				b.WriteString(strconv.Itoa(ey))
+			}
+		case c[0] == 'g':
+			if sec.roc {
+				b.WriteString("民國")
 			}
 		case c == "[h]" || c == "[hh]":
 			b.WriteString(strconv.Itoa(int(math.Floor(v*24 + 1e-9))))

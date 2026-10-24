@@ -1,6 +1,8 @@
 package service
 
 import (
+	"sort"
+
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 	"ww-excel/internal/formula"
@@ -16,6 +18,9 @@ type CellDTO struct {
 	// N: number (right-aligned). X: logical or error (centered).
 	N bool `json:"n,omitempty"`
 	X bool `json:"x,omitempty"`
+	// St is the style ID; Fc a color from the number format ([Red]).
+	St uint32 `json:"st,omitempty"`
+	Fc string `json:"fc,omitempty"`
 }
 
 type BlockRef struct {
@@ -30,10 +35,12 @@ type BlockDTO struct {
 }
 
 // BlocksResult carries the document version the blocks were read at, so
-// the frontend can drop results that raced with an edit.
+// the frontend can drop results that raced with an edit, and any styles
+// the caller does not know yet.
 type BlocksResult struct {
 	Version uint64     `json:"version"`
 	Blocks  []BlockDTO `json:"blocks"`
+	Styles  []StyleDTO `json:"styles"`
 }
 
 type SheetInfo struct {
@@ -49,6 +56,15 @@ type SheetInfo struct {
 type CellPos struct {
 	Row int `json:"row"`
 	Col int `json:"col"`
+}
+
+// TextSample is a cell's display text and style, for measuring when
+// auto-fitting columns and rows.
+type TextSample struct {
+	Row int    `json:"row"`
+	Col int    `json:"col"`
+	V   string `json:"v"`
+	St  uint32 `json:"st"`
 }
 
 type SheetService struct {
@@ -98,19 +114,23 @@ func (s *SheetService) Info(sheet int) SheetInfo {
 
 // GetBlocks returns the requested blocks in one call. Empty blocks are
 // returned with no cells so the frontend can mark them as loaded.
-func (s *SheetService) GetBlocks(sheet int, refs []BlockRef) BlocksResult {
+// knownStyles is how many styles the caller has; newer ones are included.
+func (s *SheetService) GetBlocks(sheet int, refs []BlockRef, knownStyles int) BlocksResult {
 	res := BlocksResult{Blocks: make([]BlockDTO, 0, len(refs))}
 	s.s.read(func(d *document.Document) {
+		wb := d.Workbook()
 		res.Version = d.Version()
+		res.Styles = stylesSince(wb, knownStyles)
 		sh := sheetAt(d, sheet)
 		for _, ref := range refs {
 			dto := BlockDTO{Row: ref.Row, Col: ref.Col, Cells: []CellDTO{}}
 			if sh != nil {
 				if b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)}); b != nil {
 					dto.Cells = make([]CellDTO, 0, b.Count())
+					r0, c0 := ref.Row*model.BlockRows, ref.Col*model.BlockCols
 					b.Each(func(r, c int, cell model.Cell) {
-						v, n, x := cellDisplay(cell)
-						dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x})
+						v, n, x, st, fc := cellView(wb, sh, r0+r, c0+c, cell)
+						dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc})
 					})
 				}
 			}
@@ -118,6 +138,20 @@ func (s *SheetService) GetBlocks(sheet int, refs []BlockRef) BlocksResult {
 		}
 	})
 	return res
+}
+
+// Layout returns a sheet's sizes, row/column styles and merges.
+func (s *SheetService) Layout(sheet int, knownStyles int) LayoutDTO {
+	var out LayoutDTO
+	s.s.read(func(d *document.Document) {
+		sh := sheetAt(d, sheet)
+		if sh == nil {
+			out = layoutDTO(d.Workbook(), model.NewLayout(), knownStyles)
+			return
+		}
+		out = layoutDTO(d.Workbook(), sh.Layout, knownStyles)
+	})
+	return out
 }
 
 // EditText returns the text to show when editing a cell (F2).
@@ -140,11 +174,11 @@ func (s *SheetService) SetCell(sheet, row, col int, text string) error {
 		if sheetAt(d, sheet) == nil || !validCell(row, col) {
 			return document.Change{}, false
 		}
-		var cell model.Cell
-		if cell, err = d.InputCell(sheet, text); err != nil {
+		var in document.Input
+		if in, err = d.InputCell(sheet, text); err != nil {
 			return document.Change{}, false
 		}
-		return d.Exec(command.SetCell(d.Workbook(), sheet, row, col, cell))
+		return d.Exec(command.SetCell(d.Workbook(), sheet, row, col, in.Cell, in.NumFmt, in.Wrap))
 	})
 	return err
 }
@@ -162,7 +196,7 @@ func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string, activeRow
 			return document.Change{}, false
 		}
 		var cmd command.Command
-		if cmd, err = command.FillRanges(sheet, toModelRanges(ranges), cellAt); err != nil {
+		if cmd, err = command.FillRanges(d.Workbook(), sheet, toModelRanges(ranges), cellAt); err != nil {
 			return document.Change{}, false
 		}
 		return d.Exec(cmd)
@@ -170,14 +204,137 @@ func (s *SheetService) Fill(sheet int, ranges []RangeDTO, text string, activeRow
 	return err
 }
 
-// Clear empties the ranges (Delete key).
-func (s *SheetService) Clear(sheet int, ranges []RangeDTO) {
+// Clear empties the ranges: mode "contents" (Delete key), "formats" or
+// "all".
+func (s *SheetService) Clear(sheet int, ranges []RangeDTO, mode string) {
+	m := command.ClearContents
+	switch mode {
+	case "formats":
+		m = command.ClearFormats
+	case "all":
+		m = command.ClearAll
+	}
 	s.s.change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
-		return d.Exec(command.ClearRanges(d.Workbook(), sheet, toModelRanges(ranges)))
+		return d.Exec(command.ClearRanges(d.Workbook(), sheet, toModelRanges(ranges), m))
 	})
+}
+
+// Format applies a formatting change to the ranges.
+func (s *SheetService) Format(sheet int, ranges []RangeDTO, patch FormatPatch) error {
+	label := patch.Label
+	if label == "" {
+		label = "格式設定"
+	}
+	var err error
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+		if sheetAt(d, sheet) == nil {
+			return document.Change{}, false
+		}
+		var cmd command.Command
+		if cmd, err = command.ApplyStyle(d.Workbook(), sheet, toModelRanges(ranges), label, patch.apply); err != nil || cmd == nil {
+			return document.Change{}, false
+		}
+		return d.Exec(cmd)
+	})
+	return err
+}
+
+// SetSizes sets row heights (rows = true) or column widths in pixels;
+// px < 0 restores the default.
+func (s *SheetService) SetSizes(sheet int, rows bool, indices []int, px float64) {
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+		if sheetAt(d, sheet) == nil || len(indices) == 0 {
+			return document.Change{}, false
+		}
+		return d.Exec(command.SetSizes(d.Workbook(), sheet, rows, indices, px))
+	})
+}
+
+// Merge merges rg; center also centers it (跨欄置中).
+func (s *SheetService) Merge(sheet int, rg RangeDTO, center bool) error {
+	var err error
+	s.s.change(true, func(d *document.Document) (document.Change, bool) {
+		if sheetAt(d, sheet) == nil {
+			return document.Change{}, false
+		}
+		var cmd command.Command
+		if cmd, err = command.Merge(d.Workbook(), sheet, rg.model(), center); err != nil || cmd == nil {
+			return document.Change{}, false
+		}
+		return d.Exec(cmd)
+	})
+	return err
+}
+
+func (s *SheetService) Unmerge(sheet int, ranges []RangeDTO) {
+	s.s.change(false, func(d *document.Document) (document.Change, bool) {
+		if sheetAt(d, sheet) == nil {
+			return document.Change{}, false
+		}
+		return d.Exec(command.Unmerge(d.Workbook(), sheet, toModelRanges(ranges)))
+	})
+}
+
+// AutoFitColumn returns the longest texts of a column (by characters,
+// per style), which the frontend measures to auto-fit the width.
+func (s *SheetService) AutoFitColumn(sheet, col int) []TextSample {
+	const keep = 40
+	var out []TextSample
+	s.s.read(func(d *document.Document) {
+		sh := sheetAt(d, sheet)
+		if sh == nil || col < 0 || col >= model.MaxCols {
+			return
+		}
+		wb := d.Workbook()
+		sh.EachInRange(model.Range{R0: 0, C0: col, R1: model.MaxRows - 1, C1: col}, func(row, c int, cell model.Cell) {
+			if !cell.HasContent() {
+				return
+			}
+			v, _, _, st, _ := cellView(wb, sh, row, c, cell)
+			out = append(out, TextSample{Row: row, Col: c, V: v, St: st})
+		})
+	})
+	sort.SliceStable(out, func(i, j int) bool { return len([]rune(out[i].V)) > len([]rune(out[j].V)) })
+	if len(out) > keep {
+		out = out[:keep]
+	}
+	return out
+}
+
+// RowTexts returns the cells of a row, for auto-fitting its height.
+func (s *SheetService) RowTexts(sheet, row int) []TextSample {
+	var out []TextSample
+	s.s.read(func(d *document.Document) {
+		sh := sheetAt(d, sheet)
+		if sh == nil || row < 0 || row >= model.MaxRows {
+			return
+		}
+		wb := d.Workbook()
+		sh.EachInRange(model.Range{R0: row, C0: 0, R1: row, C1: model.MaxCols - 1}, func(r, col int, cell model.Cell) {
+			if cell.HasContent() {
+				v, _, _, st, _ := cellView(wb, sh, r, col, cell)
+				out = append(out, TextSample{Row: r, Col: col, V: v, St: st})
+			}
+		})
+	})
+	return out
+}
+
+// PreviewFormat renders a cell's value with a format code, for the
+// number format dialog. Empty cells preview the number 1234.5678.
+func (s *SheetService) PreviewFormat(sheet, row, col int, code string) string {
+	var out string
+	s.s.read(func(d *document.Document) {
+		c := model.NumberCell(1234.5678)
+		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) && sh.Get(row, col).HasContent() {
+			c = sh.Get(row, col)
+		}
+		out, _ = display(c, model.Style{NumFmt: code})
+	})
+	return out
 }
 
 func (s *SheetService) Undo() bool {

@@ -14,10 +14,19 @@ import * as formula$0 from "../formula/models.js";
 import * as $models from "./models.js";
 
 /**
- * Clear empties the ranges (Delete key).
+ * AutoFitColumn returns the longest texts of a column (by characters,
+ * per style), which the frontend measures to auto-fit the width.
  */
-export function Clear(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
-    return $Call.ByID(2111196366, sheet, ranges);
+export function AutoFitColumn(sheet: number, col: number): $CancellablePromise<$models.TextSample[] | null> {
+    return $Call.ByID(508441899, sheet, col);
+}
+
+/**
+ * Clear empties the ranges: mode "contents" (Delete key), "formats" or
+ * "all".
+ */
+export function Clear(sheet: number, ranges: $models.RangeDTO[] | null, mode: string): $CancellablePromise<void> {
+    return $Call.ByID(2111196366, sheet, ranges, mode);
 }
 
 /**
@@ -43,6 +52,13 @@ export function Fill(sheet: number, ranges: $models.RangeDTO[] | null, text: str
 }
 
 /**
+ * Format applies a formatting change to the ranges.
+ */
+export function Format(sheet: number, ranges: $models.RangeDTO[] | null, patch: $models.FormatPatch): $CancellablePromise<void> {
+    return $Call.ByID(3015178646, sheet, ranges, patch);
+}
+
+/**
  * Functions lists worksheet functions for autocomplete and hints.
  */
 export function Functions(): $CancellablePromise<formula$0.FuncInfo[] | null> {
@@ -52,9 +68,10 @@ export function Functions(): $CancellablePromise<formula$0.FuncInfo[] | null> {
 /**
  * GetBlocks returns the requested blocks in one call. Empty blocks are
  * returned with no cells so the frontend can mark them as loaded.
+ * knownStyles is how many styles the caller has; newer ones are included.
  */
-export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null): $CancellablePromise<$models.BlocksResult> {
-    return $Call.ByID(3691041957, sheet, refs);
+export function GetBlocks(sheet: number, refs: $models.BlockRef[] | null, knownStyles: number): $CancellablePromise<$models.BlocksResult> {
+    return $Call.ByID(3691041957, sheet, refs, knownStyles);
 }
 
 /**
@@ -64,8 +81,37 @@ export function Info(sheet: number): $CancellablePromise<$models.SheetInfo> {
     return $Call.ByID(3398240161, sheet);
 }
 
+/**
+ * Layout returns a sheet's sizes, row/column styles and merges.
+ */
+export function Layout(sheet: number, knownStyles: number): $CancellablePromise<$models.LayoutDTO> {
+    return $Call.ByID(3578316963, sheet, knownStyles);
+}
+
+/**
+ * Merge merges rg; center also centers it (跨欄置中).
+ */
+export function Merge(sheet: number, rg: $models.RangeDTO, center: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1999170995, sheet, rg, center);
+}
+
+/**
+ * PreviewFormat renders a cell's value with a format code, for the
+ * number format dialog. Empty cells preview the number 1234.5678.
+ */
+export function PreviewFormat(sheet: number, row: number, col: number, code: string): $CancellablePromise<string> {
+    return $Call.ByID(3688061788, sheet, row, col, code);
+}
+
 export function Redo(): $CancellablePromise<boolean> {
     return $Call.ByID(547917765);
+}
+
+/**
+ * RowTexts returns the cells of a row, for auto-fitting its height.
+ */
+export function RowTexts(sheet: number, row: number): $CancellablePromise<$models.TextSample[] | null> {
+    return $Call.ByID(897558681, sheet, row);
 }
 
 /**
@@ -77,6 +123,18 @@ export function SetCell(sheet: number, row: number, col: number, text: string): 
     return $Call.ByID(4134490611, sheet, row, col, text);
 }
 
+/**
+ * SetSizes sets row heights (rows = true) or column widths in pixels;
+ * px < 0 restores the default.
+ */
+export function SetSizes(sheet: number, rows: boolean, indices: number[] | null, px: number): $CancellablePromise<void> {
+    return $Call.ByID(2793758031, sheet, rows, indices, px);
+}
+
 export function Undo(): $CancellablePromise<boolean> {
     return $Call.ByID(3900349779);
+}
+
+export function Unmerge(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3017305422, sheet, ranges);
 }

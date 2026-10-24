@@ -22,6 +22,8 @@ func init() {
 	// Registered events get strongly typed TS bindings.
 	application.RegisterEvent[service.BenchEvent](service.BenchEventName)
 	application.RegisterEvent[service.CellsChanged](service.EventCellsChanged)
+	application.RegisterEvent[service.LayoutChanged](service.EventLayoutChanged)
+	application.RegisterEvent[service.DocState](service.EventSheetsChanged)
 	application.RegisterEvent[service.DocState](service.EventDocState)
 	application.RegisterEvent[service.DocState](service.EventDocReset)
 	application.RegisterEvent[string](service.EventMenuAction)
@@ -46,7 +48,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(sheets),
 			application.NewService(docs),
-			application.NewService(service.NewBenchService(sheets)),
+			application.NewService(service.NewBenchService(sheets, docs)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -166,6 +168,19 @@ func buildMenu(app *application.App) *appMenus {
 	edit.AddRole(application.Copy)
 	edit.AddRole(application.Paste)
 	edit.Add("全選").SetAccelerator("CmdOrCtrl+A").OnClick(send("selectAll"))
+
+	insert := root.AddSubmenu("插入")
+	insert.Add("工作表").SetAccelerator("Shift+F11").OnClick(send("insertSheet"))
+
+	format := root.AddSubmenu("格式")
+	format.Add("儲存格格式…").SetAccelerator("CmdOrCtrl+1").OnClick(send("formatCells"))
+	format.AddSeparator()
+	format.Add("粗體").SetAccelerator("CmdOrCtrl+B").OnClick(send("bold"))
+	format.Add("斜體").SetAccelerator("CmdOrCtrl+I").OnClick(send("italic"))
+	format.Add("底線").SetAccelerator("CmdOrCtrl+U").OnClick(send("underline"))
+	format.AddSeparator()
+	format.Add("自動調整欄寬").OnClick(send("autofitCols"))
+	format.Add("自動調整列高").OnClick(send("autofitRows"))
 
 	root.AddRole(application.WindowMenu)
 	return m

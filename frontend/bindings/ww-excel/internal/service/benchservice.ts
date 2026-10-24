@@ -64,6 +64,14 @@ export function ReportBench(report: string): $CancellablePromise<void> {
 }
 
 /**
+ * SaveCopy saves the document as name next to the self-test report,
+ * without dialogs, and returns the full path (self-test only).
+ */
+export function SaveCopy(name: string): $CancellablePromise<string> {
+    return $Call.ByID(389330960, name);
+}
+
+/**
  * SaveSnapshot writes a PNG data URL next to the bench report so grid
  * rendering can be checked without screen-capture permissions.
  */
