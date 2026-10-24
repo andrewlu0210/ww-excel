@@ -251,6 +251,7 @@ func (s *Sheet) UsedRange() (rows, cols int) { return s.usedRows, s.usedCols }
 type Workbook struct {
 	Sheets []*Sheet
 	Styles *StyleTable
+	Names  []*DefinedName
 }
 
 func NewWorkbook() *Workbook {

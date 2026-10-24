@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 
@@ -24,6 +26,8 @@ type Changes struct {
 	// Row/column insertions and deletions to replay on the source first,
 	// in order, so untouched content (charts, comments) moves along.
 	Shifts map[*model.Sheet][]Shift
+	// Names: the defined names changed; rewrite them.
+	Names bool
 }
 
 // Shift is an insertion (Count > 0) or deletion (Count < 0) of rows or
@@ -55,6 +59,11 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 		}
 		if err != nil {
 			return nil, fmt.Errorf("工作表「%s」：%w", sh.Name, err)
+		}
+	}
+	if ch.Names || src == nil {
+		if err := w.names(); err != nil {
+			return nil, err
 		}
 	}
 	// No cached values are written for text results, so let Excel
@@ -141,6 +150,70 @@ func (w *writer) sheets(full map[*model.Sheet]bool) error {
 	}
 	if idx, err := f.GetSheetIndex(w.wb.Sheets[0].Name); err == nil {
 		f.SetActiveSheet(idx)
+	}
+	return nil
+}
+
+// tables replaces tables that changed. A totals row is written as a
+// normal row below the table (excelize cannot write one).
+func (w *writer) tables(sh *model.Sheet, old, cur []model.Table) error {
+	same := func(a, b model.Table) bool { return a == b }
+	find := func(list []model.Table, name string) (model.Table, bool) {
+		for _, t := range list {
+			if strings.EqualFold(t.Name, name) {
+				return t, true
+			}
+		}
+		return model.Table{}, false
+	}
+	for _, t := range old {
+		if n, ok := find(cur, t.Name); !ok || !same(n, t) {
+			if err := w.f.DeleteTable(t.Name); err != nil {
+				return err
+			}
+		}
+	}
+	for _, t := range cur {
+		if o, ok := find(old, t.Name); ok && same(o, t) {
+			continue
+		}
+		rg := t.Range
+		if t.TotalsRow {
+			rg.R1--
+		}
+		stripes := !t.NoBands
+		if err := w.f.AddTable(sh.Name, &excelize.Table{
+			Range: formatSqref([]model.Range{rg}), Name: t.Name, StyleName: t.Style, ShowRowStripes: &stripes,
+		}); err != nil {
+			return fmt.Errorf("表格「%s」：%w", t.Name, err)
+		}
+	}
+	return nil
+}
+
+// names replaces the file's defined names with the workbook's, keeping
+// built-in ones (_xlnm.*: print areas, filter ranges).
+func (w *writer) names() error {
+	for _, dn := range w.f.GetDefinedName() {
+		if strings.HasPrefix(dn.Name, "_xlnm.") {
+			continue
+		}
+		scope := dn.Scope
+		if scope == "Workbook" {
+			scope = ""
+		}
+		if err := w.f.DeleteDefinedName(&excelize.DefinedName{Name: dn.Name, Scope: scope}); err != nil {
+			return err
+		}
+	}
+	for _, n := range w.wb.Names {
+		dn := &excelize.DefinedName{Name: n.Name, RefersTo: n.Formula, Comment: n.Comment}
+		if n.Scope != nil {
+			dn.Scope = n.Scope.Name
+		}
+		if err := w.f.SetDefinedName(dn); err != nil {
+			return fmt.Errorf("名稱「%s」：%w", n.Name, err)
+		}
 	}
 	return nil
 }
@@ -383,6 +456,48 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 			}
 		}
 	}
+	for pos := range unionPos(old.Notes, l.Notes) {
+		before, had := old.Notes[pos]
+		after, has := l.Notes[pos]
+		if had == has && before == after {
+			continue
+		}
+		cell := cellName(pos[0], pos[1])
+		if had {
+			if err := f.DeleteComment(sh.Name, cell); err != nil {
+				return err
+			}
+		}
+		if has {
+			author := after.Author
+			if author == "" {
+				author = "WW Excel"
+			}
+			if err := f.AddComment(sh.Name, excelize.Comment{
+				Cell:   cell,
+				Author: author,
+				Paragraph: []excelize.RichTextRun{
+					{Text: author + ":", Font: &excelize.Font{Bold: true}},
+					{Text: "\n" + after.Text},
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := w.tables(sh, old.Tables, l.Tables); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(l.Validations, old.Validations) {
+		if err := writeValidations(f, sh.Name, l.Validations); err != nil {
+			return err
+		}
+	}
+	if !reflect.DeepEqual(l.CondFormats, old.CondFormats) {
+		if err := writeCondFormats(f, sh.Name, l.CondFormats); err != nil {
+			return err
+		}
+	}
 	if l.FreezeRows != old.FreezeRows || l.FreezeCols != old.FreezeCols {
 		panes := &excelize.Panes{}
 		if l.FreezeRows > 0 || l.FreezeCols > 0 {
@@ -408,6 +523,17 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 		}
 	}
 	return nil
+}
+
+func unionPos[V any](a, b map[[2]int]V) map[[2]int]bool {
+	out := make(map[[2]int]bool, len(a)+len(b))
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		out[k] = true
+	}
+	return out
 }
 
 func union[V any](a, b map[int]V) map[int]bool {

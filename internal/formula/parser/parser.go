@@ -174,6 +174,8 @@ func (p *parser) prefix() (ast.Node, error) {
 		return ast.Ref{Sheet: t.Text, Area: ref.Area}, nil
 	case lexer.Name:
 		return ast.Name{Name: t.Text}, nil
+	case lexer.StructRef:
+		return ast.TableRef{Table: t.Text, Spec: t.Spec}, nil
 	case lexer.Func:
 		return p.call(t)
 	case lexer.LParen:

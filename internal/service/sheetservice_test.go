@@ -149,7 +149,7 @@ func TestFormulaEditing(t *testing.T) {
 	sess, rec := newTestSession(false)
 	svc := NewSheetService(sess)
 	svc.SetCell(bg, 0, 0, 0, "2")
-	if err := svc.SetCell(bg, 0, 0, 1, "=a1*10"); err != nil {
+	if _, err := svc.SetCell(bg, 0, 0, 1, "=a1*10"); err != nil {
 		t.Fatal(err)
 	}
 	if got := svc.EditText(bg, 0, 0, 1); got != "=A1*10" {
@@ -169,10 +169,10 @@ func TestFormulaEditing(t *testing.T) {
 
 	// Rejected formulas change nothing and explain why.
 	n = len(rec.diffs)
-	if err := svc.SetCell(bg, 0, 0, 2, "=SUM("); err == nil {
+	if _, err := svc.SetCell(bg, 0, 0, 2, "=SUM("); err == nil {
 		t.Fatal("expected an error")
 	}
-	if err := svc.SetCell(bg, 0, 0, 2, "=ROUND(1)"); err == nil || !strings.Contains(err.Error(), "引數太少") {
+	if _, err := svc.SetCell(bg, 0, 0, 2, "=ROUND(1)"); err == nil || !strings.Contains(err.Error(), "引數太少") {
 		t.Fatalf("err = %v", err)
 	}
 	if len(rec.diffs) != n {

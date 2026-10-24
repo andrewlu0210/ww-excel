@@ -16,6 +16,7 @@ export type {
     BlockRef,
     BlocksResult,
     BorderLineDTO,
+    CFRuleDTO,
     CellDTO,
     CellPos,
     CellsChanged,
@@ -30,13 +31,19 @@ export type {
     LayoutChanged,
     LayoutDTO,
     MemStats,
+    NameDTO,
+    NoteDTO,
     PasteResult,
     RangeDTO,
+    SetCellResult,
     SheetInfo,
     SizeDTO,
     SortInfo,
     SortKeyDTO,
     StyleDTO,
     StyleRefDTO,
-    TextSample
+    TableDTO,
+    TargetDTO,
+    TextSample,
+    ValidationDTO
 } from "./models.js";

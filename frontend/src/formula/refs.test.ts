@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { callAt, canPoint, findRefs, refText, toggleAbsolute, wordAt } from './refs';
+import { absoluteRef, callAt, canPoint, findRefs, quoteSheet, refText, toggleAbsolute, wordAt } from './refs';
 
 describe('findRefs', () => {
   it('finds cells, ranges, whole columns/rows and sheet prefixes', () => {
@@ -75,5 +75,19 @@ describe('toggleAbsolute', () => {
   it('toggles both corners of a range and keeps the sheet', () => {
     expect(toggleAbsolute('=SUM(Sheet2!A1:B2)', 17)).toEqual({ text: '=SUM(Sheet2!$A$1:$B$2)', caret: 21 });
     expect(toggleAbsolute('=1+2', 4)).toBeNull();
+  });
+});
+
+describe('absoluteRef', () => {
+  it('quotes sheet names when needed', () => {
+    expect(absoluteRef('工作表1', 0, 0, 4, 1)).toBe('工作表1!$A$1:$B$5');
+    expect(absoluteRef('My Sheet', 2, 2, 2, 2)).toBe("'My Sheet'!$C$3");
+    expect(quoteSheet('A1')).toBe("'A1'");
+  });
+});
+
+describe('wordAt with names', () => {
+  it('matches Chinese names', () => {
+    expect(wordAt('=SUM(銷售', 7)).toEqual({ start: 5, word: '銷售' });
   });
 });

@@ -191,7 +191,7 @@ export function callAt(text: string, caret: number): { name: string; arg: number
 export function wordAt(text: string, caret: number): { start: number; word: string } | null {
   if (!text.startsWith('=') || insideString(text, caret)) return null;
   const before = text.slice(0, caret);
-  const m = /[A-Za-z_][A-Za-z0-9_.]*$/.exec(before);
+  const m = /[\p{L}_][\p{L}\p{N}_.]*$/u.exec(before);
   if (!m) return null;
   const start = caret - m[0].length;
   if (!canPoint(text, start)) return null;
@@ -223,3 +223,17 @@ export function toggleAbsolute(text: string, caret: number): { text: string; car
   };
 }
 
+
+// Quotes a sheet name for a reference when needed: 'My Sheet'!A1.
+export function quoteSheet(name: string): string {
+  if (/^[\p{L}_][\p{L}\p{N}_.]*$/u.test(name) && !/^[A-Za-z]{1,3}\d+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
+// Absolute reference to a range on a sheet: 工作表1!$A$1:$B$5.
+export function absoluteRef(sheet: string, r0: number, c0: number, r1: number, c1: number): string {
+  const abs = (row: number, col: number) => cellAddress(row, col).replace(/^([A-Z]+)(\d+)$/, '$$$1$$$2');
+  const a = abs(r0, c0);
+  const ref = r0 === r1 && c0 === c1 ? a : `${a}:${abs(r1, c1)}`;
+  return `${quoteSheet(sheet)}!${ref}`;
+}

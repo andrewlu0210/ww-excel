@@ -32,28 +32,37 @@ type (
 	}
 	// Array is an array constant {1,2;3,4}; elements are literals.
 	Array struct{ Rows [][]Node }
-	// Name is an identifier that is not a function or reference, e.g. a
-	// defined name (v0.6). Evaluates to #NAME? for now.
+	// Name is an identifier that is not a function or reference: a
+	// defined name.
 	Name struct{ Name string }
-	Ref  struct {
+	// TableRef is a structured reference: Table1[Col], [@Col],
+	// Table1[[#Headers],[A]:[B]]. Table is "" inside a table (the table
+	// containing the formula); Spec is the text between the outer
+	// brackets, kept as typed.
+	TableRef struct {
+		Table string
+		Spec  string
+	}
+	Ref struct {
 		Sheet string // "" means the formula's own sheet
 		Area  Area
 	}
 )
 
-func (Number) node()  {}
-func (String) node()  {}
-func (Bool) node()    {}
-func (Error) node()   {}
-func (Missing) node() {}
-func (Paren) node()   {}
-func (Unary) node()   {}
-func (Percent) node() {}
-func (Binary) node()  {}
-func (Call) node()    {}
-func (Array) node()   {}
-func (Name) node()    {}
-func (Ref) node()     {}
+func (Number) node()   {}
+func (String) node()   {}
+func (Bool) node()     {}
+func (Error) node()    {}
+func (Missing) node()  {}
+func (Paren) node()    {}
+func (Unary) node()    {}
+func (Percent) node()  {}
+func (Binary) node()   {}
+func (Call) node()     {}
+func (Array) node()    {}
+func (Name) node()     {}
+func (Ref) node()      {}
+func (TableRef) node() {}
 
 type AreaKind uint8
 

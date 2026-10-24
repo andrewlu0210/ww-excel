@@ -13,6 +13,10 @@ import * as formula$0 from "../formula/models.js";
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function AddCondFormat(sheet: number, ranges: $models.RangeDTO[] | null, rule: $models.CFRuleDTO): $CancellablePromise<void> {
+    return $Call.ByID(1008702819, sheet, ranges, rule);
+}
+
 /**
  * AutoFitColumn returns the longest texts of a column (by characters,
  * per style), which the frontend measures to auto-fit the width.
@@ -37,11 +41,37 @@ export function ClearClip(): $CancellablePromise<void> {
 }
 
 /**
+ * ClearCondFormats removes rules from ranges, or from the whole sheet
+ * when ranges is empty.
+ */
+export function ClearCondFormats(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
+    return $Call.ByID(4249871606, sheet, ranges);
+}
+
+/**
+ * CondFormats lists the sheet's rules in priority order.
+ */
+export function CondFormats(sheet: number): $CancellablePromise<$models.CFRuleDTO[] | null> {
+    return $Call.ByID(3589988031, sheet);
+}
+
+export function ConvertTable(sheet: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(1074722128, sheet, name);
+}
+
+/**
  * Copy captures a range for pasting and puts its text (tab-separated,
  * as Excel does) and an HTML table on the system clipboard.
  */
 export function Copy(sheet: number, rg: $models.RangeDTO, cut: boolean): $CancellablePromise<$models.CopyResult> {
     return $Call.ByID(205989728, sheet, rg, cut);
+}
+
+/**
+ * CreateTable makes a table and returns its name.
+ */
+export function CreateTable(sheet: number, rg: $models.RangeDTO, hasHeaders: boolean, style: string): $CancellablePromise<string> {
+    return $Call.ByID(1740180003, sheet, rg, hasHeaders, style);
 }
 
 /**
@@ -56,6 +86,10 @@ export function CurrentRegion(sheet: number, row: number, col: number): $Cancell
  */
 export function DataEdge(sheet: number, row: number, col: number, dr: number, dc: number): $CancellablePromise<$models.CellPos> {
     return $Call.ByID(3175328864, sheet, row, col, dr, dc);
+}
+
+export function DeleteCondFormat(sheet: number, index: number): $CancellablePromise<void> {
+    return $Call.ByID(3473322353, sheet, index);
 }
 
 /**
@@ -158,6 +192,13 @@ export function Layout(sheet: number, knownStyles: number): $CancellablePromise<
 }
 
 /**
+ * ListValues returns the dropdown choices of a cell with a list rule.
+ */
+export function ListValues(sheet: number, row: number, col: number): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1514217691, sheet, row, col);
+}
+
+/**
  * Merge merges rg; center also centers it (跨欄置中).
  */
 export function Merge(sheet: number, rg: $models.RangeDTO, center: boolean): $CancellablePromise<void> {
@@ -194,6 +235,10 @@ export function Redo(): $CancellablePromise<boolean> {
     return $Call.ByID(547917765);
 }
 
+export function RenameTable(sheet: number, old: string, name: string): $CancellablePromise<void> {
+    return $Call.ByID(3685673385, sheet, old, name);
+}
+
 /**
  * Replace replaces matches: every match when all, else only the cell at
  * (sheet, row, col) if it matches. Returns how many cells changed.
@@ -211,10 +256,11 @@ export function RowTexts(sheet: number, row: number): $CancellablePromise<$model
 
 /**
  * SetCell commits typed text into one cell. A formula that cannot be
- * entered (syntax error, wrong argument count) returns an error whose
- * message is shown to the user; nothing changes.
+ * entered (syntax error, wrong argument count) or a value refused by
+ * data validation returns an error whose message is shown to the user;
+ * nothing changes. Typing right below or next to a table extends it.
  */
-export function SetCell(sheet: number, row: number, col: number, text: string): $CancellablePromise<void> {
+export function SetCell(sheet: number, row: number, col: number, text: string): $CancellablePromise<$models.SetCellResult> {
     return $Call.ByID(4134490611, sheet, row, col, text);
 }
 
@@ -226,11 +272,29 @@ export function SetFilter(sheet: number, col: number, shown: string[] | null, al
 }
 
 /**
+ * SetNote sets a cell's note; empty text deletes it.
+ */
+export function SetNote(sheet: number, row: number, col: number, text: string): $CancellablePromise<void> {
+    return $Call.ByID(3493409311, sheet, row, col, text);
+}
+
+/**
  * SetSizes sets row heights (rows = true) or column widths in pixels;
  * px < 0 restores the default.
  */
 export function SetSizes(sheet: number, rows: boolean, indices: number[] | null, px: number): $CancellablePromise<void> {
     return $Call.ByID(2793758031, sheet, rows, indices, px);
+}
+
+export function SetTableStyle(sheet: number, name: string, style: string, bands: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2620821090, sheet, name, style, bands);
+}
+
+/**
+ * SetValidation applies a rule to ranges; nil clears validation there.
+ */
+export function SetValidation(sheet: number, ranges: $models.RangeDTO[] | null, v: $models.ValidationDTO | null): $CancellablePromise<void> {
+    return $Call.ByID(3658201104, sheet, ranges, v);
 }
 
 /**
@@ -262,10 +326,36 @@ export function SortInfo(sheet: number, sel: $models.RangeDTO): $CancellableProm
 }
 
 /**
+ * TableAt returns the table containing a cell, or nil.
+ */
+export function TableAt(sheet: number, row: number, col: number): $CancellablePromise<$models.TableDTO | null> {
+    return $Call.ByID(3135251558, sheet, row, col);
+}
+
+/**
+ * TableRange suggests the range for 格式化為表格: the selection, or the
+ * data region around the active cell, and whether it has headers.
+ */
+export function TableRange(sheet: number, sel: $models.RangeDTO): $CancellablePromise<$models.SortInfo> {
+    return $Call.ByID(1395050152, sheet, sel);
+}
+
+/**
+ * TableStyleList lists the styles offered for tables.
+ */
+export function TableStyleList(): $CancellablePromise<string[] | null> {
+    return $Call.ByID(1170216844);
+}
+
+/**
  * ToggleFilter turns the AutoFilter on (around the selection) or off.
  */
 export function ToggleFilter(sheet: number, sel: $models.RangeDTO): $CancellablePromise<void> {
     return $Call.ByID(1239779915, sheet, sel);
+}
+
+export function ToggleTableTotals(sheet: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(1551114656, sheet, name);
 }
 
 export function Undo(): $CancellablePromise<boolean> {
@@ -274,4 +364,11 @@ export function Undo(): $CancellablePromise<boolean> {
 
 export function Unmerge(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
     return $Call.ByID(3017305422, sheet, ranges);
+}
+
+/**
+ * Validation returns the rule of a cell, or nil.
+ */
+export function Validation(sheet: number, row: number, col: number): $CancellablePromise<$models.ValidationDTO | null> {
+    return $Call.ByID(2871948222, sheet, row, col);
 }

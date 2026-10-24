@@ -33,6 +33,18 @@ type Layout struct {
 	FreezeCols int
 	// Filter is the sheet's AutoFilter, or nil.
 	Filter *AutoFilter
+	// Notes (註解) by cell position {row, col}.
+	Notes map[[2]int]Note
+	// Data validation and conditional formatting rules.
+	Validations []Validation
+	CondFormats []CFRule
+	Tables      []Table
+}
+
+// Note is a cell note (Excel's classic comment).
+type Note struct {
+	Author string
+	Text   string
 }
 
 // AutoFilter is a filtered range: its first row holds the dropdown
@@ -75,6 +87,10 @@ func (l Layout) Clone() Layout {
 	out.ColStyles = cloneMap(l.ColStyles)
 	out.Merges = append([]Range(nil), l.Merges...)
 	out.Filter = l.Filter.Clone()
+	out.Notes = cloneMap(l.Notes)
+	out.Validations = cloneValidations(l.Validations)
+	out.CondFormats = cloneCF(l.CondFormats)
+	out.Tables = append([]Table(nil), l.Tables...)
 	return out
 }
 

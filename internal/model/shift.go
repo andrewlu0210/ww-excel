@@ -138,6 +138,43 @@ func (l *Layout) shift(rows bool, at, count int) {
 			l.Filter = f
 		}
 	}
+	var vs []Validation
+	for _, v := range l.Validations {
+		if v.Ranges = shiftRanges(v.Ranges, rows, at, count); len(v.Ranges) > 0 {
+			vs = append(vs, v)
+		}
+	}
+	l.Validations = vs
+	var cfs []CFRule
+	for _, r := range l.CondFormats {
+		if r.Ranges = shiftRanges(r.Ranges, rows, at, count); len(r.Ranges) > 0 {
+			cfs = append(cfs, r)
+		}
+	}
+	l.CondFormats = cfs
+	var tables []Table
+	for _, t := range l.Tables {
+		if rs := shiftRanges([]Range{t.Range}, rows, at, count); len(rs) == 1 {
+			// A table keeps at least its header row.
+			t.Range = rs[0]
+			tables = append(tables, t)
+		}
+	}
+	l.Tables = tables
+	if len(l.Notes) > 0 {
+		notes := make(map[[2]int]Note, len(l.Notes))
+		for pos, n := range l.Notes {
+			k := 1
+			if rows {
+				k = 0
+			}
+			if i, keep := shiftIndex(pos[k], at, count); keep {
+				pos[k] = i
+				notes[pos] = n
+			}
+		}
+		l.Notes = notes
+	}
 	if rows {
 		l.FreezeRows = shiftFreeze(l.FreezeRows, at, count)
 	} else {

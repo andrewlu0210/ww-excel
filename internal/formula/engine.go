@@ -41,6 +41,9 @@ type Engine struct {
 	// recalculations: a cycle stays reported until one of its cells is
 	// recalculated without it.
 	circular map[Key]bool
+
+	// Parsed formulas of defined names, by formula text.
+	names map[string]ast.Node
 }
 
 // compiled is stored in model.Formula.Compiled.
@@ -54,7 +57,7 @@ type compiled struct {
 }
 
 func New(wb *model.Workbook) *Engine {
-	return &Engine{wb: wb, graph: depgraph.New(), Now: time.Now, Rand: rand.Float64, circular: map[Key]bool{}}
+	return &Engine{wb: wb, graph: depgraph.New(), Now: time.Now, Rand: rand.Float64, circular: map[Key]bool{}, names: map[string]ast.Node{}}
 }
 
 // CompileError is a formula the user cannot enter, with a message for
@@ -110,23 +113,154 @@ func checkCalls(node ast.Node) error {
 
 func (e *Engine) compile(node ast.Node, sheet int) *compiled {
 	c := &compiled{node: node, volatile: eval.IsVolatile(node)}
-	ast.Walk(node, func(n ast.Node) {
-		r, ok := n.(ast.Ref)
-		if !ok {
-			return
-		}
-		s := sheet
-		if r.Sheet != "" {
-			idx, ok := e.sheetIndex(r.Sheet)
-			if !ok {
-				return // evaluates to #REF!
-			}
-			s = idx
-		}
-		a := r.Area
-		c.areas = append(c.areas, depgraph.Area{Sheet: s, R0: a.R0, C0: a.C0, R1: a.R1, C1: a.C1})
-	})
+	e.collectAreas(node, sheet, c, 0)
 	return c
+}
+
+// collectAreas records the areas a formula depends on, following
+// defined names to the references they stand for.
+func (e *Engine) collectAreas(node ast.Node, sheet int, c *compiled, depth int) {
+	ast.Walk(node, func(n ast.Node) {
+		switch r := n.(type) {
+		case ast.Ref:
+			s := sheet
+			if r.Sheet != "" {
+				idx, ok := e.sheetIndex(r.Sheet)
+				if !ok {
+					return // evaluates to #REF!
+				}
+				s = idx
+			}
+			a := r.Area
+			c.areas = append(c.areas, depgraph.Area{Sheet: s, R0: a.R0, C0: a.C0, R1: a.R1, C1: a.C1})
+		case ast.TableRef:
+			if r.Table == "" {
+				// [@Col] inside a table: the position is not known here,
+				// so depend on that column of every table on the sheet
+				// (not the whole table, which would include the formula).
+				if sheet >= 0 && sheet < len(e.wb.Sheets) {
+					for _, t := range e.wb.Sheets[sheet].Layout.Tables {
+						if ref, code := e.table(ast.TableRef{Table: t.Name, Spec: r.Spec}, sheet, -1, -1); code == "" {
+							c.areas = append(c.areas, depgraph.Area{Sheet: ref.Sheet, R0: ref.R0, C0: ref.C0, R1: ref.R1, C1: ref.C1})
+						}
+					}
+				}
+				return
+			}
+			if ref, code := e.table(r, sheet, -1, -1); code == "" {
+				c.areas = append(c.areas, depgraph.Area{Sheet: ref.Sheet, R0: ref.R0, C0: ref.C0, R1: ref.R1, C1: ref.C1})
+			}
+		case ast.Name:
+			if depth > 16 {
+				return
+			}
+			if target, ok := e.name(r.Name, sheet); ok {
+				c.volatile = c.volatile || eval.IsVolatile(target)
+				e.collectAreas(target, sheet, c, depth+1)
+			}
+		}
+	})
+}
+
+// Table resolves a structured reference in a formula at a position.
+func (e *Engine) Table(ref ast.TableRef, sheet, row, col int) (eval.Ref, string) {
+	return e.table(ref, sheet, row, col)
+}
+
+// table resolves a structured reference. row < 0 means the formula's
+// position is unknown (dependency tracking): "this row" then covers
+// all data rows.
+func (e *Engine) table(ref ast.TableRef, sheet, row, col int) (eval.Ref, string) {
+	var t *model.Table
+	var sh *model.Sheet
+	if ref.Table == "" {
+		if sheet < 0 || sheet >= len(e.wb.Sheets) {
+			return eval.Ref{}, model.ErrRef
+		}
+		sh = e.wb.Sheets[sheet]
+		t = sh.Layout.TableAt(row, col)
+	} else {
+		t, sh = e.wb.FindTable(ref.Table)
+	}
+	if t == nil {
+		return eval.Ref{}, model.ErrRef
+	}
+	spec, err := ast.ParseTableSpec(ref.Spec)
+	if err != nil {
+		return eval.Ref{}, model.ErrRef
+	}
+	si, _ := e.sheetIndex(sh.Name)
+	out := eval.Ref{Sheet: si, C0: t.Range.C0, C1: t.Range.C1}
+	if spec.Col0 != "" {
+		c0, ok := t.ColumnIndex(sh, spec.Col0)
+		if !ok {
+			return eval.Ref{}, model.ErrRef
+		}
+		c1 := c0
+		if spec.Col1 != "" {
+			if c1, ok = t.ColumnIndex(sh, spec.Col1); !ok {
+				return eval.Ref{}, model.ErrRef
+			}
+		}
+		out.C0, out.C1 = min(c0, c1), max(c0, c1)
+	}
+	data := t.DataRows()
+	switch {
+	case spec.ThisRow:
+		if row < 0 {
+			out.R0, out.R1 = data.R0, max(data.R0, data.R1)
+		} else if row < data.R0 || row > data.R1 {
+			return eval.Ref{}, model.ErrValue
+		} else {
+			out.R0, out.R1 = row, row
+		}
+	default:
+		headers, rows, totals := spec.Headers, spec.Data, spec.Totals
+		if !headers && !rows && !totals {
+			rows = true
+		}
+		if totals && !t.TotalsRow && !rows && !headers {
+			return eval.Ref{}, model.ErrRef
+		}
+		out.R0, out.R1 = data.R0, data.R1
+		if headers {
+			out.R0 = t.Range.R0
+			if !rows {
+				out.R1 = t.Range.R0
+			}
+		}
+		if totals && t.TotalsRow {
+			out.R1 = t.Range.R1
+			if !rows && !headers {
+				out.R0 = t.Range.R1
+			}
+		}
+		if out.R1 < out.R0 {
+			return eval.Ref{}, model.ErrRef
+		}
+	}
+	return out, ""
+}
+
+// name parses the formula of a defined name visible from sheet.
+func (e *Engine) name(name string, sheet int) (ast.Node, bool) {
+	var sh *model.Sheet
+	if sheet >= 0 && sheet < len(e.wb.Sheets) {
+		sh = e.wb.Sheets[sheet]
+	}
+	d := e.wb.LookupName(name, sh)
+	if d == nil {
+		return nil, false
+	}
+	if n, ok := e.names[d.Formula]; ok {
+		return n, true
+	}
+	n, err := parser.Parse(d.Formula)
+	if err != nil {
+		n = ast.Error{Code: model.ErrName}
+	}
+	e.names[d.Formula] = n
+	return n, true
 }
 
 // ensure returns the compiled form of f, compiling stored text (e.g.
@@ -464,6 +598,21 @@ func (e *Engine) setValue(k Key, v model.Cell) bool {
 	return true
 }
 
+// EvalAt evaluates a formula as if it were in (sheet, row, col), e.g.
+// a validation or conditional format rule. References are read as
+// values.
+func (e *Engine) EvalAt(node ast.Node, sheet, row, col int) eval.Value {
+	ev := eval.Evaluator{R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
+	return ev.Eval(node)
+}
+
+// ReferenceAt evaluates a formula without reading references, so a
+// list source such as $H$1:$H$5 stays a range.
+func (e *Engine) ReferenceAt(node ast.Node, sheet, row, col int) eval.Value {
+	ev := eval.Evaluator{R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
+	return ev.Reference(node)
+}
+
 // reader adapts the workbook to eval.Reader.
 type reader struct{ e *Engine }
 
@@ -475,6 +624,14 @@ func (r reader) Cell(sheet, row, col int) model.Cell {
 }
 
 func (r reader) SheetIndex(name string) (int, bool) { return r.e.sheetIndex(name) }
+func (r reader) SheetCount() int                    { return len(r.e.wb.Sheets) }
+func (r reader) Table(ref ast.TableRef, sheet, row, col int) (eval.Ref, string) {
+	return r.e.table(ref, sheet, row, col)
+}
+
+func (r reader) Name(name string, sheet int) (ast.Node, bool) {
+	return r.e.name(name, sheet)
+}
 
 func (r reader) Each(sheet int, rg model.Range, fn func(row, col int, c model.Cell)) {
 	if sheet < 0 || sheet >= len(r.e.wb.Sheets) {

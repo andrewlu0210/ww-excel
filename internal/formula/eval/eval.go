@@ -17,6 +17,12 @@ type Reader interface {
 	Each(sheet int, rg model.Range, fn func(row, col int, c model.Cell))
 	// Used returns the used row/column counts of a sheet.
 	Used(sheet int) (rows, cols int)
+	SheetCount() int
+	// Name resolves a defined name visible from sheet to its formula.
+	Name(name string, sheet int) (ast.Node, bool)
+	// Table resolves a structured reference in a formula at (sheet, row,
+	// col) to an area, or returns an error code.
+	Table(ref ast.TableRef, sheet, row, col int) (Ref, string)
 }
 
 // Evaluator evaluates one formula at a fixed position.
@@ -25,6 +31,10 @@ type Evaluator struct {
 	Sheet, Row, Col int
 	Now             time.Time
 	Rand            func() float64
+
+	// Depth of nested defined names, to stop names defined in terms of
+	// each other.
+	nameDepth int
 
 	// >0 while evaluating arguments of array functions (SUMPRODUCT):
 	// multi-cell references then become arrays instead of being
@@ -60,9 +70,21 @@ func (e *Evaluator) eval(n ast.Node) Value {
 	case ast.Paren:
 		return e.eval(x.X)
 	case ast.Name:
-		return Err(model.ErrName)
+		node, ok := e.R.Name(x.Name, e.Sheet)
+		if !ok || e.nameDepth > 16 {
+			return Err(model.ErrName)
+		}
+		e.nameDepth++
+		defer func() { e.nameDepth-- }()
+		return e.eval(node)
 	case ast.Ref:
 		return e.ref(x)
+	case ast.TableRef:
+		r, code := e.R.Table(x, e.Sheet, e.Row, e.Col)
+		if code != "" {
+			return Err(code)
+		}
+		return RefOf(&r)
 	case ast.Array:
 		arr := &Array{Rows: len(x.Rows), Cols: len(x.Rows[0])}
 		for _, row := range x.Rows {
@@ -107,6 +129,12 @@ func (e *Evaluator) eval(n ast.Node) Value {
 		return def.Fn(&Args{ev: e, nodes: x.Args, vals: make([]Value, len(x.Args)), done: make([]bool, len(x.Args))})
 	}
 	return Err(model.ErrValue)
+}
+
+// Reference evaluates a reference expression (INDIRECT) without
+// dereferencing it.
+func (e *Evaluator) Reference(n ast.Node) Value {
+	return e.eval(n)
 }
 
 func (e *Evaluator) ref(x ast.Ref) Value {

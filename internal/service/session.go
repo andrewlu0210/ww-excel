@@ -43,6 +43,9 @@ type ChangedCell struct {
 	// St is the style ID; Fc a color from the number format ([Red]).
 	St uint32 `json:"st,omitempty"`
 	Fc string `json:"fc,omitempty"`
+	// Data bar length and color (conditional formatting).
+	Bar float64 `json:"bar,omitempty"`
+	Bc  string  `json:"bc,omitempty"`
 }
 
 // CellsChanged is emitted once per edit, undo or redo for each sheet
@@ -79,6 +82,8 @@ type DocState struct {
 	Circular string `json:"circular"`
 	// Sheets are the sheet names in order.
 	Sheets []string `json:"sheets"`
+	// Names are the defined names, for autocomplete and the name box.
+	Names []string `json:"names"`
 }
 
 type Emitter func(name string, data any)
@@ -134,7 +139,20 @@ func (s *Session) stateLocked() DocState {
 		RedoLabel: h.RedoLabel(),
 		Circular:  s.doc.Circular(),
 		Sheets:    s.sheetNamesLocked(),
+		Names:     s.definedNamesLocked(),
 	}
+}
+
+func (s *Session) definedNamesLocked() []string {
+	seen := map[string]bool{}
+	names := []string{}
+	for _, n := range s.doc.Workbook().Names {
+		if !seen[n.Name] {
+			seen[n.Name] = true
+			names = append(names, n.Name)
+		}
+	}
+	return names
 }
 
 func (s *Session) sheetNamesLocked() []string {
@@ -192,6 +210,14 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 	if !ch.Structure {
 		bySheet[ch.Sheet] = nil
 	}
+	if ch.Names {
+		// Formulas may now point elsewhere; tables may have moved.
+		for i := range wb.Sheets {
+			if _, ok := bySheet[i]; !ok {
+				bySheet[i] = nil
+			}
+		}
+	}
 	for _, c := range ch.Cells {
 		bySheet[ch.Sheet] = append(bySheet[ch.Sheet], pos{c.Row, c.Col})
 	}
@@ -217,12 +243,23 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 		diff := CellsChanged{Sheet: si, Version: s.doc.Version(), Cells: []ChangedCell{}}
 		diff.UsedRows, diff.UsedCols = sh.UsedRange()
 		cells := bySheet[si]
-		if len(cells) > maxDiffCells || ch.Structure || ch.Shift != nil && si == ch.Sheet {
+		look := newLook(s.doc, si)
+		// Conditional formats depend on other cells (top 10, averages):
+		// refetch the sheet. So does a layout change, which may add
+		// formats or tables.
+		layout := ch.LayoutChanged && si == ch.Sheet
+		if len(cells) > maxDiffCells || ch.Structure || ch.Shift != nil && si == ch.Sheet || look != nil && look.cf != nil || layout {
 			diff.Invalidate = true
 		} else {
 			for _, p := range cells {
-				v, n, x, st, fc := cellView(wb, sh, p.row, p.col, sh.Get(p.row, p.col))
-				diff.Cells = append(diff.Cells, ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc})
+				cell := sh.Get(p.row, p.col)
+				v, n, x, st, fc := cellView(wb, sh, p.row, p.col, cell)
+				cc := ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc}
+				if look != nil {
+					dto, _ := look.view(p.row, p.col, cell)
+					cc.St, cc.Bar, cc.Bc = dto.St, dto.Bar, dto.Bc
+				}
+				diff.Cells = append(diff.Cells, cc)
 			}
 		}
 		if selectAfter && si == ch.Sheet && ch.Bounds != nil {

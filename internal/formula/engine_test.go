@@ -150,16 +150,16 @@ func TestRebuildOnLoad(t *testing.T) {
 	wb := &model.Workbook{Sheets: []*model.Sheet{model.NewSheet("Sheet1")}}
 	sh := wb.Sheets[0]
 	sh.Set(0, 0, model.NumberCell(4))
-	sh.Set(1, 0, model.FormulaCell("A1*A1")) // uncompiled, as read from a file
-	unknown := model.NumberCell(42)          // cached value from the file
-	unknown.F = &model.Formula{Text: "SUM(Table1[Qty])"}
+	sh.Set(1, 0, model.FormulaCell("A1*A1"))           // uncompiled, as read from a file
+	unknown := model.NumberCell(42)                    // cached value from the file
+	unknown.F = &model.Formula{Text: "[1]Sheet1!A1+1"} // external workbook reference
 	sh.Set(2, 0, unknown)
 	e := New(wb)
 	e.Rebuild()
 	if got := sh.Get(1, 0).Display(); got != "16" {
 		t.Fatalf("A2 = %q", got)
 	}
-	if got := sh.Get(2, 0); got.Display() != "42" || got.F.Text != "SUM(Table1[Qty])" {
+	if got := sh.Get(2, 0); got.Display() != "42" || got.F.Text != "[1]Sheet1!A1+1" {
 		t.Fatalf("unsupported formula should keep its cached value: %+v", got)
 	}
 	if e.Formulas() != 2 {

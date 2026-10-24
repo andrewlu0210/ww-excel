@@ -122,17 +122,25 @@ func (d *Document) DeleteSheetCommand(index int) (command.Command, error) {
 	}
 	sh := d.wb.Sheets[index]
 	edits := d.rewriteFormulas(sh, func(n ast.Node) (ast.Node, bool) { return ast.RemoveSheet(n, sh.Name) })
+	var names nameState
 	return &command.Func{
 		Name: "刪除工作表",
 		DoFn: func(wb *model.Workbook) command.Effect {
+			names = d.saveNames()
+			// Names scoped to the sheet go with it.
+			wb.Names = slices.DeleteFunc(wb.Names, func(n *model.DefinedName) bool { return n.Scope == sh })
+			d.adjustNames(func(n ast.Node, _ string) (ast.Node, bool) { return ast.RemoveSheet(n, sh.Name) })
 			wb.Sheets = slices.Delete(wb.Sheets, index, index+1)
 			eff := structural()
+			eff.Names = true
 			eff.Others = applyEdits(wb, edits, false)
 			return eff
 		},
 		UndoFn: func(wb *model.Workbook) command.Effect {
 			wb.Sheets = slices.Insert(wb.Sheets, index, sh)
+			names.restore(wb)
 			eff := structural()
+			eff.Names = true
 			eff.Others = applyEdits(wb, edits, true)
 			return eff
 		},
@@ -153,17 +161,23 @@ func (d *Document) RenameSheetCommand(index int, name string) (command.Command, 
 		return nil, nil
 	}
 	edits := d.rewriteFormulas(nil, func(n ast.Node) (ast.Node, bool) { return ast.RenameSheet(n, old, name) })
+	var names nameState
 	return &command.Func{
 		Name: "重新命名工作表",
 		DoFn: func(wb *model.Workbook) command.Effect {
+			names = d.saveNames()
+			d.adjustNames(func(n ast.Node, _ string) (ast.Node, bool) { return ast.RenameSheet(n, old, name) })
 			sh.Name = name
 			eff := structural()
+			eff.Names = len(wb.Names) > 0
 			eff.Others = applyEdits(wb, edits, false)
 			return eff
 		},
 		UndoFn: func(wb *model.Workbook) command.Effect {
 			sh.Name = old
+			names.restore(wb)
 			eff := structural()
+			eff.Names = len(wb.Names) > 0
 			eff.Others = applyEdits(wb, edits, true)
 			return eff
 		},

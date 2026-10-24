@@ -75,6 +75,7 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 	}
 
 	var snap formulaSnapshot
+	var names nameState
 	var removed []model.CellAt
 	var layoutBefore model.Layout
 	shift := &command.Shift{Rows: rows, At: at, Count: count}
@@ -83,10 +84,17 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 		Name: name,
 		DoFn: func(wb *model.Workbook) command.Effect {
 			snap = d.snapshotFormulas()
+			names = d.saveNames()
 			layoutBefore = sh.Layout.Clone()
 			removed = sh.Shift(rows, at, count)
 			eff := command.Effect{Sheet: sheet, LayoutChanged: true, Shift: shift}
 			eff.Others = d.adjustFormulas(ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
+			adjustRuleFormulas(sh, func(n ast.Node) (ast.Node, bool) {
+				return ast.Adjust(n, sh.Name, ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
+			})
+			eff.Names = d.adjustNames(func(n ast.Node, sheet string) (ast.Node, bool) {
+				return ast.Adjust(n, sheet, ast.Shift{Sheet: sh.Name, Rows: rows, At: at, Count: count})
+			})
 			area := model.Range{R0: at, C0: 0, R1: at + max(count, 1) - 1, C1: model.MaxCols - 1}
 			if !rows {
 				area = model.Range{R0: 0, C0: at, R1: model.MaxRows - 1, C1: at + max(count, 1) - 1}
@@ -100,9 +108,10 @@ func (d *Document) ShiftCommand(sheet int, rows bool, at, count int) (command.Co
 				sh.Set(c.Row, c.Col, c.Cell)
 			}
 			snap.restore()
+			names.restore(wb)
 			sh.Layout = layoutBefore.Clone()
 			inverse := &command.Shift{Rows: rows, At: at, Count: -count}
-			eff := command.Effect{Sheet: sheet, LayoutChanged: true, Shift: inverse, Others: map[int][]command.CellRef{}}
+			eff := command.Effect{Sheet: sheet, LayoutChanged: true, Shift: inverse, Others: map[int][]command.CellRef{}, Names: len(wb.Names) > 0}
 			// Restored cells and formulas are edits for in-place saves.
 			for _, c := range removed {
 				eff.Cells = append(eff.Cells, command.CellRef{Row: c.Row, Col: c.Col})

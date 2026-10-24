@@ -51,7 +51,22 @@ export type MenuAction =
   | 'filter'
   | 'clearAll'
   | 'clearFormats'
-  | 'clearContents';
+  | 'clearContents'
+  // v0.6
+  | 'insertNote'
+  | 'deleteNote'
+  | 'defineName'
+  | 'nameManager'
+  | 'dataValidation'
+  | 'clearValidation'
+  | 'condFormat'
+  | 'condFormatManager'
+  | 'clearCondFormats'
+  | 'clearAllCondFormats'
+  | 'insertTable'
+  | 'tableTotals'
+  | 'renameTable'
+  | 'convertTable';
 
 // Menu actions that also apply while a cell is being edited; the rest
 // (clipboard, fill, ...) leave the key to the text field.
@@ -148,6 +163,8 @@ function menuShortcut(e: KeyLike): MenuAction | null {
       return e.shiftKey ? 'filter' : 'find';
     case 'h':
       return e.shiftKey ? 'replace' : null;
+    case 't':
+      return e.shiftKey ? null : 'insertTable';
     case '+':
     case '=':
       return e.shiftKey || key === '+' ? 'insertCells' : null;
@@ -223,13 +240,13 @@ export function idleAction(e: KeyLike): Action | null {
 export function editAction(e: KeyLike): Action | null {
   if (isComposing(e)) return null;
 
+  if (e.key === 'F4' || (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't')) {
+    return { type: 'toggleAbs' };
+  }
   const menu = menuShortcut(e);
   // Inside the editor ⌘A / ⌘Z act on the text; the controller decides.
   if (menu && EDIT_MENU.has(menu)) return { type: 'menu', action: menu };
   if (menu) return null;
-  if (e.key === 'F4' || (e.metaKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 't')) {
-    return { type: 'toggleAbs' };
-  }
 
   switch (e.key) {
     case 'Enter':

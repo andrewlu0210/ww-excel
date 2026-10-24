@@ -22,10 +22,12 @@
     type RangeDTO,
     type SortInfo,
     type SortKeyDTO,
+    type TableDTO,
+    type ValidationDTO,
     type SheetInfo,
     type StyleDTO,
   } from '../bridge/sheet';
-  import { callAt, canPoint, findRefs, refText, toggleAbsolute, wordAt } from '../formula/refs';
+  import { absoluteRef, callAt, canPoint, findRefs, quoteSheet, refText, toggleAbsolute, wordAt } from '../formula/refs';
   import { fillCopy, fillTarget, sameRange } from '../grid/fill';
   import { cellAddress, colName } from '../grid/layout';
   import { areaOf, expand, mergeAt, snap, stepStart } from '../grid/merges';
@@ -48,6 +50,7 @@
     selectRows,
     single,
     type CellPos,
+    type CrossEdit,
     type Range,
     type Selection,
   } from '../grid/selection';
@@ -77,6 +80,17 @@
     onappaction?: (action: MenuAction) => void;
     // A message for the user, e.g. why a paste was refused.
     onnotify?: (message: string) => void;
+    // v0.6: the sheet's name (for absolute references), the defined
+    // names (autocomplete), and going to another sheet from the name box.
+    sheetName?: string;
+    names?: string[];
+    ongoto?: (sheet: number, range: Range) => void;
+    // A formula being edited on another sheet (cross-sheet point mode),
+    // or one to resume on this sheet. Read once, at mount.
+    crossEdit?: CrossEdit | null;
+    // The cross-sheet edit ended: committed (retry null) or refused
+    // (retry is the text to edit again on the origin sheet).
+    oncrossdone?: (origin: number, pos: CellPos, retry: string | null) => void;
   }
 
   let {
@@ -89,6 +103,11 @@
     onselectionchange,
     onappaction,
     onnotify,
+    sheetName = '',
+    names = [],
+    ongoto,
+    crossEdit = null,
+    oncrossdone,
   }: Props = $props();
 
   // Fixed for the lifetime of the component: the grid is always full size.
@@ -115,7 +134,9 @@
   // Point mode: the reference being inserted by arrows or the mouse.
   let point = $state<{ start: number; end: number; anchor: CellPos; focus: CellPos } | null>(null);
 
-  // Function autocomplete and parameter hint.
+  // Function autocomplete and parameter hint. Defined names are offered
+  // too, marked with this category.
+  const NAME_CATEGORY = '名稱';
   let functions: FuncInfo[] = [];
   let funcByName = new Map<string, FuncInfo>();
   let suggestions = $state<FuncInfo[]>([]);
@@ -136,6 +157,43 @@
   function notify(message: string | null | undefined): void {
     if (message) onnotify?.(message);
   }
+
+  // ---- v0.6 state ----
+
+  // Editing a formula of a cell on another sheet: clicks here insert
+  // references with this sheet's name.
+  let remote = $state<{ sheet: number } | null>(null);
+
+  // Data validation of the active cell (dropdown button, input prompt).
+  let validation = $state<ValidationDTO | null>(null);
+  let dropdown = $state<{ values: string[]; index: number } | null>(null);
+  // The table containing the active cell (context menu items).
+  let activeTable = $state<TableDTO | null>(null);
+  // Note shown while hovering a cell, and the note being edited.
+  let hoverNote = $state<{ row: number; col: number; author: string; text: string } | null>(null);
+  let noteEdit = $state<{ row: number; col: number; text: string } | null>(null);
+  let noteInput = $state<HTMLTextAreaElement>();
+  let nameBox: HTMLInputElement;
+  let nameBoxText = $state('');
+  let nameBoxFocused = $state(false);
+
+  let notes = $derived(new Map((layout?.notes ?? []).map((n) => [n.row * 16384 + n.col, n])));
+
+  // Refresh what depends on the active cell when it moves.
+  let cellInfoToken = 0;
+  $effect(() => {
+    const { row, col } = selection.active;
+    void styleTick;
+    const token = ++cellInfoToken;
+    dropdown = null;
+    void Promise.all([sheetApi.validation(sheet, row, col), sheetApi.tableAt(sheet, row, col)])
+      .then(([v, t]) => {
+        if (token !== cellInfoToken) return;
+        validation = v;
+        activeTable = t;
+      })
+      .catch(() => {});
+  });
 
   $effect(() => {
     mode = !editing ? 'ready' : point ? 'point' : editing.mode;
@@ -410,7 +468,7 @@
     point = null;
     if (text !== undefined) setText(text, caret ?? text.length);
     else syncFrom(input());
-    grid?.scrollIntoView(pos);
+    if (!remote) grid?.scrollIntoView(pos);
     layoutEditor();
   }
 
@@ -459,13 +517,15 @@
 
   function commit(then: 'down' | 'up' | 'right' | 'left' | 'stay'): void {
     if (!editing) return;
+    if (remote) return commitRemote();
     copyRange = null;
     const { pos } = editing;
     const text = input().value;
     endEditing();
     const written = enqueue(async () => {
-      const err = await sheetApi.setCell(sheet, pos.row, pos.col, text);
-      if (err) restoreEdit(pos, text, err);
+      const res = await sheetApi.setCell(sheet, pos.row, pos.col, text);
+      if (res.error) restoreEdit(pos, text, res.error);
+      else notify(res.notice);
     });
     // Follow-ups run after the write, outside the queue (they enqueue
     // their own calls). A line break turns on wrapping: grow the row.
@@ -486,6 +546,29 @@
         advance('right', then === 'left');
         break;
     }
+  }
+
+  // Ends a cross-sheet edit: writes the cell on its own sheet, then the
+  // app goes back there.
+  function commitRemote(): void {
+    if (!editing || !remote) return;
+    const origin = remote.sheet;
+    const { pos } = editing;
+    const text = input().value;
+    endEditing();
+    remote = null;
+    void enqueue(async () => {
+      const res = await sheetApi.setCell(origin, pos.row, pos.col, text);
+      if (res.error) notify(res.error);
+      oncrossdone?.(origin, pos, res.error ? text : null);
+    });
+  }
+
+  // For the app: the formula being edited, to continue on another sheet.
+  export function formulaState(): CrossEdit | null {
+    if (!editing || !input().value.startsWith('=')) return null;
+    const el = input();
+    return { originSheet: remote?.sheet ?? sheet, pos: editing.pos, text: el.value, caret: el.selectionStart };
   }
 
   function commitFill(): void {
@@ -515,7 +598,7 @@
     const el = input();
     const start = point ? point.start : el.selectionStart;
     const end = point ? point.end : el.selectionEnd;
-    const ref = refText(anchor, focusPos);
+    const ref = (remote ? quoteSheet(sheetName) + '!' : '') + refText(anchor, focusPos);
     const text = el.value.slice(0, start) + ref + el.value.slice(end);
     point = { start, end: start + ref.length, anchor, focus: focusPos };
     setText(text, start + ref.length);
@@ -526,7 +609,7 @@
     if (!editing || !pointable()) return false;
     // In Edit mode (F2) arrows move the caret unless already pointing.
     if (!point && editing.mode === 'edit') return false;
-    const base = point ? point.focus : editing.pos;
+    const base = point ? point.focus : remote ? selection.active : editing.pos;
     const focusPos = clampPos({ row: base.row + a.dr, col: base.col + a.dc }, lim);
     const anchor = a.extend ? (point ? point.anchor : editing.pos) : focusPos;
     placePoint(anchor, focusPos);
@@ -550,6 +633,14 @@
         commitFill();
         return true;
       case 'cancel':
+        if (remote) {
+          const origin = remote.sheet;
+          const pos = editing!.pos;
+          endEditing();
+          remote = null;
+          oncrossdone?.(origin, pos, null);
+          return true;
+        }
         endEditing();
         return true;
       case 'newline': {
@@ -585,6 +676,26 @@
       }
       const a = editAction(e);
       if (a && performEdit(a)) e.preventDefault();
+      return;
+    }
+    if (onDropdownKey(e)) {
+      e.preventDefault();
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowDown' && validation?.type === 'list' && validation.dropdown) {
+      e.preventDefault();
+      void openDropdown();
+      return;
+    }
+    if (e.key === 'F5') {
+      // 到 (Go To): type an address or name in the name box.
+      e.preventDefault();
+      nameBox.focus();
+      return;
+    }
+    if (e.shiftKey && e.key === 'F2') {
+      e.preventDefault();
+      editNote();
       return;
     }
     const a = idleAction(e);
@@ -641,8 +752,11 @@
 
     const w = wordAt(text, caret);
     const prefix = w?.word.toUpperCase() ?? '';
-    const next = w ? functions.filter((f) => f.name.startsWith(prefix)).slice(0, 10) : [];
-    const exact = next.length === 1 && next[0].name === prefix;
+    const nameItems: FuncInfo[] = names
+      .filter((n) => n.toUpperCase().startsWith(prefix))
+      .map((n) => ({ name: n, sig: '', desc: '名稱', category: NAME_CATEGORY }));
+    const next = w ? [...nameItems, ...functions.filter((f) => f.name.startsWith(prefix))].slice(0, 10) : [];
+    const exact = next.length === 1 && next[0].name.toUpperCase() === prefix;
     suggestions = exact ? [] : next;
     suggestIndex = 0;
 
@@ -677,9 +791,11 @@
     const w = wordAt(el.value, el.selectionStart);
     const f = suggestions[i];
     if (!w || !f) return;
-    const text = el.value.slice(0, w.start) + f.name + '(' + el.value.slice(el.selectionStart);
+    // Functions get an opening parenthesis; defined names do not.
+    const insert = f.category === NAME_CATEGORY ? f.name : f.name + '(';
+    const text = el.value.slice(0, w.start) + insert + el.value.slice(el.selectionStart);
     point = null;
-    setText(text, w.start + f.name.length + 1);
+    setText(text, w.start + insert.length);
   }
 
   // Splits "number1, [number2], ..." so the current argument can be bold.
@@ -713,6 +829,11 @@
   // right to fit the text, then wraps and grows downward, like Excel.
   function layoutEditor(): void {
     if (!grid || !editor) return;
+    if (remote) {
+      // The edited cell is on another sheet: only the formula bar shows.
+      editor.style.left = '-10000px';
+      return;
+    }
     const pos = editing?.pos ?? selection.active;
     const rc = grid.areaRect(areaOf(merges, pos));
     const vp = grid.viewport();
@@ -854,6 +975,17 @@
     });
     focus();
     refreshFormula();
+    const ce = untrack(() => crossEdit);
+    if (ce) {
+      if (ce.originSheet !== sheet) {
+        remote = { sheet: ce.originSheet };
+        activeInput = 'bar';
+        startEditing('edit', ce.pos, ce.text, ce.caret);
+        bar.focus();
+      } else {
+        startEditing('edit', ce.pos, ce.text, ce.caret);
+      }
+    }
     return () => offs.forEach((off) => off());
   });
 
@@ -932,6 +1064,42 @@
       case 'filter':
         if (editing) commit('stay');
         notify(await serial(() => sheetApi.toggleFilter(sheet, toDTO(current(selection)))));
+        return true;
+      case 'insertNote':
+        editNote();
+        return true;
+      case 'deleteNote': {
+        const { row, col } = selection.active;
+        notify(await serial(() => sheetApi.setNote(sheet, row, col, '')));
+        return true;
+      }
+      case 'tableTotals':
+        await tableAction('totals');
+        return true;
+      case 'convertTable':
+        await tableAction('convert');
+        return true;
+      case 'clearValidation':
+        if (editing) commit('stay');
+        notify(await serial(() => sheetApi.setValidation(sheet, selection.ranges.map(toDTO), null)));
+        return true;
+      case 'clearCondFormats':
+        if (editing) commit('stay');
+        notify(await serial(() => sheetApi.clearCondFormats(sheet, selection.ranges.map(toDTO))));
+        return true;
+      case 'clearAllCondFormats':
+        if (editing) commit('stay');
+        notify(await serial(() => sheetApi.clearCondFormats(sheet, [])));
+        return true;
+      case 'defineName':
+      case 'nameManager':
+      case 'dataValidation':
+      case 'condFormat':
+      case 'condFormatManager':
+      case 'insertTable':
+      case 'renameTable':
+        if (editing) commit('stay');
+        onappaction?.(action);
         return true;
       case 'clearAll':
       case 'clearFormats':
@@ -1191,8 +1359,25 @@
         { label: '取消隱藏', action: rows ? 'unhideRows' : 'unhideCols' },
       ];
     }
+    const hasNote = notes.has(selection.active.row * 16384 + selection.active.col);
+    const noteItems: MenuItem[] = hasNote
+      ? [
+          { label: '編輯註解', action: 'insertNote' },
+          { label: '刪除註解', action: 'deleteNote' },
+        ]
+      : [{ label: '插入註解', action: 'insertNote', key: '⇧F2' }];
+    const tableItems: MenuItem[] = activeTable
+      ? [
+          null,
+          { label: activeTable.totals ? '移除合計列' : '加入合計列', action: 'tableTotals' },
+          { label: '重新命名表格…', action: 'renameTable' },
+          { label: '轉換為範圍', action: 'convertTable' },
+        ]
+      : [];
     return [
       ...clip,
+      ...noteItems,
+      null,
       { label: '插入…', action: 'insertCells', key: '⇧⌘=' },
       { label: '刪除…', action: 'deleteCells', key: '⌘-' },
       { label: '清除內容', action: 'clearContents' },
@@ -1202,6 +1387,7 @@
       { label: '篩選', action: 'filter', key: '⇧⌘F' },
       null,
       { label: '儲存格格式…', action: 'formatCells', key: '⌘1' },
+      ...tableItems,
     ];
   });
 
@@ -1218,6 +1404,107 @@
   // or the page handles beforecopy/beforecut.
   function onBeforeClipboard(e: Event): void {
     if (!editing) e.preventDefault();
+  }
+
+  // ---- Names, validation, notes, tables (v0.6) ----
+
+  // Name box: go to an address or name; an unknown valid name defines
+  // a name for the selection, as in Excel.
+  export async function goToName(text: string): Promise<void> {
+    const t = text.trim();
+    if (!t) return focus();
+    const target = await documentApi.resolve(sheet, t);
+    if (target.ok) {
+      if (target.sheet !== sheet) ongoto?.(target.sheet, target.range);
+      else setSelection(withMerges(fromRange(target.range)));
+      return focus();
+    }
+    const r = current(selection);
+    const err = await documentApi.setName('', -1, {
+      name: t,
+      refersTo: '=' + absoluteRef(sheetName, r.r0, r.c0, r.r1, r.c1),
+      scope: -1,
+      comment: '',
+    });
+    notify(err);
+    focus();
+  }
+
+  async function openDropdown(): Promise<void> {
+    const { row, col } = selection.active;
+    const values = await sheetApi.listValues(sheet, row, col);
+    if (values.length > 0) dropdown = { values, index: 0 };
+  }
+
+  function pickDropdown(value: string): void {
+    const pos = selection.active;
+    dropdown = null;
+    void enqueue(async () => {
+      const res = await sheetApi.setCell(sheet, pos.row, pos.col, value);
+      notify(res.error ?? res.notice);
+    });
+    focus();
+  }
+
+  function onDropdownKey(e: KeyboardEvent): boolean {
+    if (!dropdown) return false;
+    const n = dropdown.values.length;
+    switch (e.key) {
+      case 'ArrowDown':
+        dropdown.index = (dropdown.index + 1) % n;
+        return true;
+      case 'ArrowUp':
+        dropdown.index = (dropdown.index - 1 + n) % n;
+        return true;
+      case 'Enter':
+        pickDropdown(dropdown.values[dropdown.index]);
+        return true;
+      case 'Escape':
+        dropdown = null;
+        return true;
+    }
+    return false;
+  }
+
+  export function editNote(): void {
+    if (editing) commit('stay');
+    const { row, col } = selection.active;
+    noteEdit = { row, col, text: notes.get(row * 16384 + col)?.text ?? '' };
+    hoverNote = null;
+    queueMicrotask(() => noteInput?.focus());
+  }
+
+  async function saveNote(text: string | null): Promise<void> {
+    const n = noteEdit;
+    noteEdit = null;
+    focus();
+    if (!n || text === null) return;
+    notify(await serial(() => sheetApi.setNote(sheet, n.row, n.col, text)));
+  }
+
+  function onHover(pos: CellPos | null): void {
+    const n = pos ? notes.get(pos.row * 16384 + pos.col) : undefined;
+    hoverNote = n && !noteEdit ? n : null;
+  }
+
+  // Where a popup next to a cell goes (sheet-relative coordinates).
+  function besideCell(pos: CellPos): { x: number; y: number; bottom: number } {
+    const rc = grid?.areaRect(areaOf(merges, pos)) ?? { x: 0, y: 0, w: 0, h: 0 };
+    const top = (grid ? 32 : 0) + rc.y; // below the formula bar
+    return { x: rc.x + rc.w + 4, y: top, bottom: top + rc.h };
+  }
+
+  async function tableAction(action: 'totals' | 'convert' | 'rename'): Promise<void> {
+    const t = activeTable;
+    if (!t) return;
+    if (action === 'totals') notify(await serial(() => sheetApi.toggleTableTotals(sheet, t.name)));
+    else if (action === 'convert') notify(await serial(() => sheetApi.convertTable(sheet, t.name)));
+    else onappaction?.('renameTable');
+    focus();
+  }
+
+  export function getActiveTable(): TableDTO | null {
+    return activeTable;
   }
 
   // ---- Formatting ----
@@ -1422,7 +1709,34 @@
 
 <div class="sheet" bind:this={root}>
   <header class="formula-bar">
-    <div class="name-box">{address}</div>
+    <input
+      bind:this={nameBox}
+      class="name-box"
+      aria-label="名稱方塊"
+      list="defined-names"
+      spellcheck="false"
+      value={nameBoxFocused ? nameBoxText : address}
+      oninput={(e) => (nameBoxText = e.currentTarget.value)}
+      onfocus={(e) => {
+        nameBoxFocused = true;
+        nameBoxText = address;
+        if (editing) commit('stay');
+        e.currentTarget.select();
+      }}
+      onblur={() => (nameBoxFocused = false)}
+      onkeydown={(e) => {
+        if (e.key === 'Enter' && !e.isComposing) {
+          e.preventDefault();
+          void goToName(nameBoxText);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          focus();
+        }
+      }}
+    />
+    <datalist id="defined-names">
+      {#each names as n (n)}<option value={n}></option>{/each}
+    </datalist>
     <div class="fx">fx</div>
     <textarea
       bind:this={bar}
@@ -1455,6 +1769,7 @@
     {fillPreview}
     onfilterbutton={(e) => void onFilterButton(e)}
     oncontext={onContext}
+    onhover={onHover}
   >
     <textarea
       bind:this={editor}
@@ -1498,7 +1813,7 @@
                 contextMenu = null;
                 if (a === 'formatCells') onappaction?.(a);
                 else void runMenu(a);
-                focus();
+                if (a !== 'insertNote') focus();
               }}
             >
               <span>{item.label}</span>
@@ -1527,11 +1842,82 @@
     />
   {/if}
 
+  {#if validation?.type === 'list' && validation.dropdown && !editing && isSingleCell(selection)}
+    {@const at = besideCell(selection.active)}
+    <button
+      class="dropdown-button"
+      style:left="{at.x - 2}px"
+      style:top="{at.bottom - 18}px"
+      aria-label="選擇清單中的值"
+      onpointerdown={(e) => {
+        e.preventDefault();
+        if (dropdown) dropdown = null;
+        else void openDropdown();
+      }}>▾</button
+    >
+  {/if}
+  {#if dropdown}
+    {@const at = besideCell(selection.active)}
+    <ul class="dropdown-list" role="listbox" aria-label="清單" style:left="{at.x - 120}px" style:top="{at.bottom + 1}px">
+      {#each dropdown.values as v, i (i)}
+        <li
+          role="option"
+          aria-selected={i === dropdown.index}
+          class:selected={i === dropdown.index}
+          onpointerdown={(e) => {
+            e.preventDefault();
+            pickDropdown(v);
+          }}
+        >
+          {v || '（空白）'}
+        </li>
+      {/each}
+    </ul>
+  {/if}
+  {#if (validation?.prompt || validation?.promptTitle) && !editing && !dropdown && isSingleCell(selection)}
+    {@const at = besideCell(selection.active)}
+    <div class="cell-tip prompt" style:left="{at.x + 14}px" style:top="{at.bottom + 4}px">
+      {#if validation.promptTitle}<strong>{validation.promptTitle}</strong>{/if}
+      <span>{validation.prompt}</span>
+    </div>
+  {/if}
+  {#if hoverNote && !noteEdit}
+    {@const at = besideCell({ row: hoverNote.row, col: hoverNote.col })}
+    <div class="cell-tip note" style:left="{at.x + 6}px" style:top="{at.y}px">
+      {#if hoverNote.author}<strong>{hoverNote.author}：</strong>{/if}
+      <span>{hoverNote.text}</span>
+    </div>
+  {/if}
+  {#if noteEdit}
+    {@const at = besideCell({ row: noteEdit.row, col: noteEdit.col })}
+    <div class="cell-tip note editor" style:left="{at.x + 6}px" style:top="{at.y}px">
+      <textarea
+        bind:this={noteInput}
+        bind:value={noteEdit.text}
+        aria-label="註解"
+        rows="4"
+        onkeydown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            void saveNote(null);
+          } else if (e.key === 'Enter' && e.metaKey) {
+            e.preventDefault();
+            void saveNote(noteEdit?.text ?? '');
+          }
+        }}
+      ></textarea>
+      <div class="note-actions">
+        <button onclick={() => void saveNote(null)}>取消</button>
+        <button class="primary" onclick={() => void saveNote(noteEdit?.text ?? '')}>儲存</button>
+      </div>
+    </div>
+  {/if}
+
   {#if editing && (editError || suggestions.length > 0 || hint)}
     <div class="popups" style:left="{popupPos.x}px" style:top="{popupPos.y}px">
       {#if editError}
         <div class="popup error" role="alert">
-          <strong>公式有問題</strong>
+          <strong>{editText.startsWith('=') ? '公式有問題' : '輸入的值無效'}</strong>
           <span>{editError}</span>
         </div>
       {/if}
@@ -1693,6 +2079,101 @@
   .fname {
     font-weight: 600;
     color: var(--accent);
+  }
+  .name-box {
+    font: inherit;
+    color: var(--chrome-text);
+    background: var(--grid-bg);
+    outline: none;
+  }
+  .name-box:focus {
+    border-color: var(--accent);
+  }
+  .dropdown-button {
+    position: absolute;
+    z-index: 3;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--chrome-border);
+    border-radius: 2px;
+    background: var(--header-bg);
+    color: var(--chrome-text);
+    font-size: 11px;
+    line-height: 16px;
+  }
+  .dropdown-list {
+    position: absolute;
+    z-index: 15;
+    min-width: 136px;
+    max-height: 220px;
+    margin: 0;
+    padding: 2px 0;
+    overflow: auto;
+    list-style: none;
+    background: var(--popup-bg);
+    border: 1px solid var(--popup-border);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+    font: 13px var(--ui-font);
+  }
+  .dropdown-list li {
+    padding: 2px 10px;
+    cursor: default;
+  }
+  .dropdown-list li.selected {
+    background: var(--popup-active);
+  }
+  .cell-tip {
+    position: absolute;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 240px;
+    padding: 6px 8px;
+    font: 12px var(--ui-font);
+    white-space: pre-wrap;
+    color: #1f1f1f;
+    background: #fff9c4;
+    border: 1px solid #c9b458;
+    box-shadow: 0 3px 10px rgb(0 0 0 / 0.18);
+    pointer-events: none;
+  }
+  .cell-tip.prompt {
+    background: #ffffe1;
+  }
+  .cell-tip.editor {
+    pointer-events: auto;
+    width: 220px;
+  }
+  .cell-tip textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  .note-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .note-actions button {
+    font: inherit;
+    padding: 1px 10px;
+    border: 1px solid #c9b458;
+    border-radius: 4px;
+    background: #fffde7;
+  }
+  .note-actions .primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
   }
   .menu-backdrop {
     position: fixed;

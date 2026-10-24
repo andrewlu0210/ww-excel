@@ -41,6 +41,9 @@
     // A filter button was clicked: its column and where to open the menu.
     onfilterbutton?: (e: { col: number; x: number; y: number }) => void;
     oncontext?: (e: ContextRequest) => void;
+    // The cell under the idle pointer (null outside cells), with its
+    // rectangle in host coordinates.
+    onhover?: (pos: CellPos | null) => void;
     children?: Snippet;
   }
 
@@ -58,6 +61,7 @@
     fillPreview = null,
     onfilterbutton,
     oncontext,
+    onhover,
     children,
   }: Props = $props();
 
@@ -179,13 +183,16 @@
   }
 
   function onScroll(): void {
-    if (benchRunning) return;
+    if (benchRunning || destroyed || !scroller) return;
     sx = scrollX.toContent(scroller.scrollLeft);
     sy = scrollY.toContent(scroller.scrollTop);
     schedule();
   }
 
   function setScroll(x: number, y: number): void {
+    // Calls that arrive after unmount (pending edits, selections) do
+    // nothing.
+    if (destroyed || !scroller) return;
     sx = clamp(x, cols.total - (viewW() - metrics.headerW));
     sy = clamp(y, rows.total - (viewH() - HEADER_H));
     scroller.scrollLeft = scrollX.toScroll(sx);
@@ -209,6 +216,7 @@
       freeze: { rows: l.freezeRows ?? 0, cols: l.freezeCols ?? 0 },
       filter: l.filter ? { r0: l.filter.r0, c0: l.filter.c0, r1: l.filter.r1, c1: l.filter.c1 } : null,
       filtered: new Set(l.filteredCols ?? []),
+      notes: new Set((l.notes ?? []).map((n) => n.row * 16384 + n.col)),
     };
     if (gridLayer) gridLayer.look = look;
     if (selLayer) {
@@ -356,9 +364,16 @@
     oncontext?.({ area: areaAt(p.x, p.y), pos: posAt(p.x, p.y), x: e.clientX, y: e.clientY });
   }
 
+  let hovered = -1;
   function onPointerMove(e: PointerEvent): void {
     const p = local(e);
     if (!drag) {
+      const over = areaAt(p.x, p.y) === 'cell' ? posAt(p.x, p.y) : null;
+      const key = over ? over.row * 16384 + over.col : -1;
+      if (key !== hovered) {
+        hovered = key;
+        onhover?.(over);
+      }
       const border = borderAt(p.x, p.y);
       scroller.style.cursor = border
         ? border.rows
@@ -482,6 +497,7 @@
 
   // Scrolls the minimum needed to show pos.
   export function scrollIntoView(pos: CellPos): void {
+    if (destroyed || !scroller) return;
     const contentW = viewW() - metrics.headerW;
     const contentH = viewH() - HEADER_H;
     // Frozen cells are always visible; the others must clear the frozen
@@ -610,6 +626,7 @@
   }
 
   export function scrollToOrigin(): void {
+    if (destroyed || !scroller) return;
     scroller.scrollTo(0, 0);
   }
 
@@ -643,6 +660,10 @@
     onpointercancel={onPointerUp}
     ondblclick={onDblClick}
     oncontextmenu={onContextMenu}
+    onpointerleave={() => {
+      hovered = -1;
+      onhover?.(null);
+    }}
   >
     <div style:width="{spacerW}px" style:height="{spacerH}px"></div>
   </div>

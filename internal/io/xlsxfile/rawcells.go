@@ -158,3 +158,32 @@ func attr(el xml.StartElement, name string) string {
 	}
 	return ""
 }
+
+// rawTableTotals reads which tables have a totals row; excelize's
+// GetTables does not report it.
+func rawTableTotals(file string) map[string]bool {
+	out := map[string]bool{}
+	z, err := zip.OpenReader(file)
+	if err != nil {
+		return out
+	}
+	defer z.Close()
+	for _, f := range z.File {
+		if !strings.HasPrefix(f.Name, "xl/tables/") || !strings.HasSuffix(f.Name, ".xml") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		var t struct {
+			Name   string `xml:"name,attr"`
+			Totals int    `xml:"totalsRowCount,attr"`
+		}
+		if xml.NewDecoder(rc).Decode(&t) == nil && t.Totals > 0 {
+			out[strings.ToLower(t.Name)] = true
+		}
+		rc.Close()
+	}
+	return out
+}

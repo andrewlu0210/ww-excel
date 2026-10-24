@@ -160,6 +160,40 @@ func mapRefs(n Node, fn func(Ref) Node) Node {
 	return rewriteTree(n, fn, nil)
 }
 
+// MapTableRefs replaces structured references; changed reports whether
+// fn returned anything different.
+func MapTableRefs(n Node, fn func(TableRef) Node) (Node, bool) {
+	changed := false
+	var rewrite func(Node) Node
+	rewrite = func(n Node) Node {
+		switch x := n.(type) {
+		case TableRef:
+			out := fn(x)
+			if out != Node(x) {
+				changed = true
+			}
+			return out
+		case Paren:
+			return Paren{X: rewrite(x.X)}
+		case Unary:
+			return Unary{Op: x.Op, X: rewrite(x.X)}
+		case Percent:
+			return Percent{X: rewrite(x.X)}
+		case Binary:
+			return Binary{Op: x.Op, L: rewrite(x.L), R: rewrite(x.R)}
+		case Call:
+			args := make([]Node, len(x.Args))
+			for i, a := range x.Args {
+				args[i] = rewrite(a)
+			}
+			return Call{Name: x.Name, Args: args}
+		}
+		return n
+	}
+	out := rewrite(n)
+	return out, changed
+}
+
 func mapCalls(n Node, fn func(Call) Call) Node {
 	return rewriteTree(n, nil, fn)
 }

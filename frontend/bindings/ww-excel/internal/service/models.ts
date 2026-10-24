@@ -39,6 +39,22 @@ export interface BorderLineDTO {
     "color"?: string;
 }
 
+export interface CFRuleDTO {
+    "ranges": RangeDTO[] | null;
+    "type": string;
+    "op": string;
+    "value1": string;
+    "value2": string;
+    "percent": boolean;
+    "below": boolean;
+    "color": string;
+    "fill": string;
+    "bold": boolean;
+    "italic": boolean;
+    "colors": string[] | null;
+    "stopIfTrue": boolean;
+}
+
 /**
  * CellDTO is a single non-empty cell inside a block. R and C are offsets
  * within the block; short JSON keys keep the payload small.
@@ -59,6 +75,12 @@ export interface CellDTO {
      */
     "st"?: number;
     "fc"?: string;
+
+    /**
+     * Data bar from conditional formatting: length 0..1 and color.
+     */
+    "bar"?: number;
+    "bc"?: string;
 }
 
 export interface CellPos {
@@ -110,6 +132,12 @@ export interface ChangedCell {
      */
     "st"?: number;
     "fc"?: string;
+
+    /**
+     * Data bar length and color (conditional formatting).
+     */
+    "bar"?: number;
+    "bc"?: string;
 }
 
 /**
@@ -138,6 +166,11 @@ export interface DocState {
      * Sheets are the sheet names in order.
      */
     "sheets": string[] | null;
+
+    /**
+     * Names are the defined names, for autocomplete and the name box.
+     */
+    "names": string[] | null;
 }
 
 export interface FilterValueDTO {
@@ -239,6 +272,12 @@ export interface LayoutDTO {
     "filteredCols": number[] | null;
 
     /**
+     * Notes (red triangles) and tables.
+     */
+    "notes": NoteDTO[] | null;
+    "tables": TableDTO[] | null;
+
+    /**
      * Styles the caller does not know yet (IDs >= the known count).
      */
     "styles": StyleDTO[] | null;
@@ -248,6 +287,24 @@ export interface MemStats {
     "heapAllocMB": number;
     "sysMB": number;
     "numGC": number;
+}
+
+export interface NameDTO {
+    "name": string;
+    "refersTo": string;
+
+    /**
+     * Scope is the sheet index, or -1 for the whole workbook.
+     */
+    "scope": number;
+    "comment": string;
+}
+
+export interface NoteDTO {
+    "row": number;
+    "col": number;
+    "author": string;
+    "text": string;
 }
 
 /**
@@ -267,6 +324,14 @@ export interface RangeDTO {
     "c0": number;
     "r1": number;
     "c1": number;
+}
+
+/**
+ * SetCellResult reports a notice for the user about an accepted input,
+ * e.g. a data validation warning.
+ */
+export interface SetCellResult {
+    "notice": string;
 }
 
 export interface SheetInfo {
@@ -316,6 +381,24 @@ export interface StyleRefDTO {
     "s": number;
 }
 
+export interface TableDTO {
+    "name": string;
+    "range": RangeDTO;
+    "totals": boolean;
+    "style": string;
+    "bands": boolean;
+}
+
+/**
+ * TargetDTO is where name-box text points; OK is false when it is
+ * neither an address nor a name of a range.
+ */
+export interface TargetDTO {
+    "ok": boolean;
+    "sheet": number;
+    "range": RangeDTO;
+}
+
 /**
  * TextSample is a cell's display text and style, for measuring when
  * auto-fitting columns and rows.
@@ -325,4 +408,18 @@ export interface TextSample {
     "col": number;
     "v": string;
     "st": number;
+}
+
+export interface ValidationDTO {
+    "type": string;
+    "operator": string;
+    "formula1": string;
+    "formula2": string;
+    "allowBlank": boolean;
+    "dropdown": boolean;
+    "errorStyle": string;
+    "errorTitle": string;
+    "error": string;
+    "promptTitle": string;
+    "prompt": string;
 }

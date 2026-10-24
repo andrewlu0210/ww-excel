@@ -31,6 +31,8 @@ export interface SheetDriver {
   pasteSpecial(mode: PasteMode, transpose: boolean, skipBlanks: boolean): Promise<void>;
   getCopyRange(): Range | null;
   dragFillHandle(to: CellPos): void;
+  // v0.6
+  goToName(text: string): Promise<void>;
 }
 
 interface Check {
@@ -280,6 +282,7 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
 
   await formatTests(sheet, { key, type, goTo, step, expect, expectCell });
   await productivityTests(sheet, { key, type, goTo, step, expect, expectCell });
+  await dataTests(sheet, { key, type, goTo, step, expect, expectCell });
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
@@ -652,4 +655,123 @@ async function productivityTests(sheet: SheetDriver, h: Helpers): Promise<void> 
   await select(39, 0, 44, 0);
   await key('c', { metaKey: true });
   await select(39, 2);
+}
+
+// v0.6: names, notes, data validation, conditional formats, tables.
+// Runs on sheet 0 of the reopened v0.5 file, from row 60.
+async function dataTests(sheet: SheetDriver, h: Helpers): Promise<void> {
+  const { key, type, step, expect, expectCell } = h;
+  const set = async (row: number, col: number, text: string) => {
+    await sheetApi.setCell(0, row, col, text);
+    await step();
+  };
+  const select = async (r0: number, c0: number, r1 = r0, c1 = c0) => {
+    sheet.setSelectionForTest(area(r0, c0, r1, c1));
+    await step();
+  };
+  const cellAt = async (row: number, col: number) => {
+    const res = await sheetApi.getBlocks(0, [{ row: Math.floor(row / 64), col: Math.floor(col / 32) }], 0);
+    const styles = new Map((res.styles ?? []).map((s) => [s.id, s]));
+    const c = res.blocks?.[0]?.cells?.find((x) => x.r === row % 64 && x.c === col % 32);
+    return { v: c?.v ?? '', style: styles.get(c?.st ?? 0), bar: c?.bar ?? null };
+  };
+
+  // 43. A name defined from the name box, used through autocomplete.
+  for (let r = 0; r < 3; r++) await set(60 + r, 0, String(r + 1));
+  await select(60, 0, 62, 0);
+  await sheet.goToName('數量');
+  await step();
+  const names = await documentApi.names();
+  expect('名稱方塊定義名稱', names.some((n) => n.name === '數量' && n.refersTo.endsWith('!$A$61:$A$63')), JSON.stringify(names));
+  await select(63, 0);
+  await type('=SUM(數');
+  expect('自動完成列出名稱', sheet.getAssist().suggestions.includes('數量'), JSON.stringify(sheet.getAssist().suggestions));
+  await key('Tab');
+  await type(')');
+  await key('Enter');
+  await expectCell('使用名稱的公式', 63, 0, '=SUM(數量)');
+  expect('名稱公式的結果', (await cellAt(63, 0)).v === '6', JSON.stringify(await cellAt(63, 0)));
+  await sheet.goToName('數量');
+  await step();
+  expect('名稱方塊跳到名稱的範圍', JSON.stringify(sheet.getSelection().ranges) === JSON.stringify([{ r0: 60, c0: 0, r1: 62, c1: 0 }]), JSON.stringify(sheet.getSelection().ranges));
+  await sheet.goToName('C5');
+  await step();
+  expect('名稱方塊跳到位址', sheet.getSelection().active.row === 4 && sheet.getSelection().active.col === 2, JSON.stringify(sheet.getSelection().active));
+
+  // 44. Notes.
+  await sheetApi.setNote(0, 60, 1, '記得核對');
+  await step();
+  let layout = await sheetApi.layout(0, 0);
+  expect('插入註解', (layout.notes ?? []).some((n) => n.row === 60 && n.col === 1 && n.text === '記得核對'), JSON.stringify(layout.notes));
+
+  // 45. Data validation: a list refuses other values.
+  await sheetApi.setValidation(0, [{ r0: 60, c0: 3, r1: 65, c1: 3 }], {
+    type: 'list', operator: '', formula1: '是,否', formula2: '', allowBlank: true, dropdown: true,
+    errorStyle: 'stop', errorTitle: '', error: '請選擇是或否', promptTitle: '', prompt: '請選擇',
+  });
+  await step();
+  expect('清單選項', JSON.stringify(await sheetApi.listValues(0, 61, 3)) === '["是","否"]', JSON.stringify(await sheetApi.listValues(0, 61, 3)));
+  await select(61, 3);
+  await type('也許');
+  await key('Enter');
+  expect('資料驗證拒絕清單外的值', sheet.getEditing() !== null && sheet.getAssist().error === '請選擇是或否', JSON.stringify(sheet.getAssist()));
+  await key('Escape');
+  await type('是');
+  await key('Enter');
+  await expectCell('資料驗證接受清單內的值', 61, 3, '是');
+
+  // 46. Conditional formatting and data bars.
+  await sheetApi.addCondFormat(0, [{ r0: 60, c0: 0, r1: 62, c1: 0 }], {
+    ranges: [], type: 'cell', op: 'greaterThan', value1: '1', value2: '', percent: false, below: false,
+    color: '9C0006', fill: 'FFC7CE', bold: false, italic: false, colors: [], stopIfTrue: false,
+  });
+  await sheetApi.addCondFormat(0, [{ r0: 60, c0: 4, r1: 62, c1: 4 }], {
+    ranges: [], type: 'data_bar', op: '', value1: '', value2: '', percent: false, below: false,
+    color: '', fill: '', bold: false, italic: false, colors: ['638EC6'], stopIfTrue: false,
+  });
+  for (let r = 0; r < 3; r++) await set(60 + r, 4, String((r + 1) * 10));
+  const hit = await cellAt(61, 0);
+  const miss = await cellAt(60, 0);
+  expect('條件式格式套用', hit.style?.fill === 'FFC7CE' && miss.style?.fill !== 'FFC7CE', JSON.stringify({ hit, miss }));
+  expect('資料橫條', (await cellAt(62, 4)).bar === 1 && ((await cellAt(60, 4)).bar ?? 0) < 0.5, JSON.stringify(await cellAt(60, 4)));
+  await set(60, 0, '5');
+  expect('值改變後條件式格式更新', (await cellAt(60, 0)).style?.fill === 'FFC7CE', JSON.stringify(await cellAt(60, 0)));
+
+  // 47. Tables with structured references and auto-expansion.
+  const rows = [['品項', '單價'], ['蘋果', '10'], ['香蕉', '20']];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) await set(60 + r, 7 + c, rows[r][c]);
+  const created = await sheetApi.createTable(0, { r0: 60, c0: 7, r1: 62, c1: 8 }, true, 'TableStyleMedium2');
+  await step();
+  expect('建立表格', created.value === '表格1', JSON.stringify(created));
+  await select(61, 9);
+  await type('=[@單價]*2');
+  await key('Enter');
+  expect('表格往右擴充並計算 [@欄]', (await cellAt(61, 9)).v === '20' && (await sheetApi.tableAt(0, 61, 9))?.range.c1 === 9, JSON.stringify(await cellAt(61, 9)));
+  await select(63, 7);
+  await type('鳳梨');
+  await key('Enter');
+  expect('表格往下擴充', (await sheetApi.tableAt(0, 63, 7))?.range.r1 === 63, JSON.stringify(await sheetApi.tableAt(0, 63, 7)));
+  await set(64, 7, '=SUM(表格1[單價])');
+  expect('結構化參照加總', (await cellAt(64, 7)).v === '30', JSON.stringify(await cellAt(64, 7)));
+  expect('表格標題列樣式', (await cellAt(60, 7)).style?.fill === '4472C4' && !!(await cellAt(60, 7)).style?.font.bold, JSON.stringify(await cellAt(60, 7)));
+
+  // 48. xlsx round trip of everything above.
+  const path = await benchApi.saveCopy('selftest-v06.xlsx');
+  await documentApi.openPath(path);
+  await step();
+  await step();
+  layout = await sheetApi.layout(0, 0);
+  const back = await documentApi.names();
+  expect('xlsx 存讀：名稱', back.some((n) => n.name === '數量'), JSON.stringify(back));
+  expect('xlsx 存讀：註解', (layout.notes ?? []).some((n) => n.row === 60 && n.text === '記得核對'), JSON.stringify(layout.notes));
+  expect('xlsx 存讀：資料驗證', JSON.stringify(await sheetApi.listValues(0, 61, 3)) === '["是","否"]', '');
+  expect('xlsx 存讀：條件式格式', (await cellAt(61, 0)).style?.fill === 'FFC7CE', JSON.stringify(await cellAt(61, 0)));
+  expect('xlsx 存讀：表格與結構化參照', (layout.tables ?? []).some((t) => t.name === '表格1') && (await cellAt(64, 7)).v === '30', JSON.stringify(layout.tables));
+
+  // A picture of this area (table, formats, data bars, notes).
+  await select(78, 9);
+  await select(61, 3);
+  await new Promise((r) => setTimeout(r, 300));
+  const grid = sheet.getGrid() as unknown as { snapshot(): string } | undefined;
+  if (grid) await benchApi.snapshot('selftest-data', grid.snapshot());
 }

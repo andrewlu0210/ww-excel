@@ -152,3 +152,11 @@ function jumpRange(sel: Selection, idx: number, step: number): Selection {
   const active = step > 0 ? { row: next.r0, col: next.c0 } : { row: next.r1, col: next.c1 };
   return { ...sel, active };
 }
+
+// A formula edit carried across sheets (cross-sheet point mode).
+export interface CrossEdit {
+  originSheet: number;
+  pos: CellPos;
+  text: string;
+  caret: number;
+}

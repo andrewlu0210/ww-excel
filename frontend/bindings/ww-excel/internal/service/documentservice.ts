@@ -24,6 +24,10 @@ export function ConfirmClose(): $CancellablePromise<boolean> {
     return $Call.ByID(47952273);
 }
 
+export function DeleteName(name: string, scope: number): $CancellablePromise<void> {
+    return $Call.ByID(1024917197, name, scope);
+}
+
 /**
  * DeleteSheet removes a sheet, asking first when it has data.
  */
@@ -33,6 +37,13 @@ export function DeleteSheet(index: number): $CancellablePromise<boolean> {
 
 export function MoveSheet($from: number, to: number): $CancellablePromise<void> {
     return $Call.ByID(304792907, $from, to);
+}
+
+/**
+ * Names lists the defined names.
+ */
+export function Names(): $CancellablePromise<$models.NameDTO[] | null> {
+    return $Call.ByID(1663231075);
 }
 
 /**
@@ -82,6 +93,13 @@ export function RequestClose(): $CancellablePromise<void> {
 }
 
 /**
+ * Resolve interprets text typed in the name box on sheet.
+ */
+export function Resolve(sheet: number, text: string): $CancellablePromise<$models.TargetDTO> {
+    return $Call.ByID(3266494311, sheet, text);
+}
+
+/**
  * Save writes to the current path, asking for one if untitled.
  */
 export function Save(): $CancellablePromise<boolean> {
@@ -90,6 +108,14 @@ export function Save(): $CancellablePromise<boolean> {
 
 export function SaveAs(): $CancellablePromise<boolean> {
     return $Call.ByID(4200900572);
+}
+
+/**
+ * SetName adds a name, or changes the one called oldName in oldScope
+ * (oldName == "" adds).
+ */
+export function SetName(oldName: string, oldScope: number, n: $models.NameDTO): $CancellablePromise<void> {
+    return $Call.ByID(2261626332, oldName, oldScope, n);
 }
 
 export function State(): $CancellablePromise<$models.DocState> {

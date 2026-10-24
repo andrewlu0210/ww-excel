@@ -231,6 +231,9 @@ type LayoutDTO struct {
 	// columns with criteria (their buttons show a funnel).
 	Filter       *RangeDTO `json:"filter"`
 	FilteredCols []int     `json:"filteredCols"`
+	// Notes (red triangles) and tables.
+	Notes  []NoteDTO  `json:"notes"`
+	Tables []TableDTO `json:"tables"`
 	// Styles the caller does not know yet (IDs >= the known count).
 	Styles []StyleDTO `json:"styles"`
 }
@@ -241,6 +244,17 @@ func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 		Rows: []SizeDTO{}, Cols: []SizeDTO{}, RowStyles: []StyleRefDTO{}, ColStyles: []StyleRefDTO{}, Merges: []RangeDTO{},
 		Styles:     stylesSince(wb, knownStyles),
 		FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols, FilteredCols: []int{},
+		Notes: []NoteDTO{}, Tables: []TableDTO{},
+	}
+	for pos, n := range l.Notes {
+		out.Notes = append(out.Notes, NoteDTO{Row: pos[0], Col: pos[1], Author: n.Author, Text: n.Text})
+	}
+	sort.Slice(out.Notes, func(i, j int) bool {
+		a, b := out.Notes[i], out.Notes[j]
+		return a.Row < b.Row || a.Row == b.Row && a.Col < b.Col
+	})
+	for _, t := range l.Tables {
+		out.Tables = append(out.Tables, tableDTO(t))
 	}
 	if f := l.Filter; f != nil {
 		out.Filter = &RangeDTO{R0: f.Range.R0, C0: f.Range.C0, R1: f.Range.R1, C1: f.Range.C1}

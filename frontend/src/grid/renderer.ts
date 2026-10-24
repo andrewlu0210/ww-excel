@@ -38,6 +38,8 @@ export interface SheetLook {
   // AutoFilter range (buttons on its first row) and filtered columns.
   filter: Range | null;
   filtered: Set<number>;
+  // Cells with notes, as row * 16384 + col.
+  notes: Set<number>;
 }
 
 export interface Freeze {
@@ -52,6 +54,7 @@ export const emptyLook = (): SheetLook => ({
   freeze: { rows: 0, cols: 0 },
   filter: null,
   filtered: new Set(),
+  notes: new Set(),
 });
 
 // A pane of the content area: a clip rectangle (viewport coordinates)
@@ -340,7 +343,30 @@ export class GridRenderer extends Layer {
     this.drawBorders(cv, xs, ys, covered, merges, sx, sy);
     this.drawTexts(cv, xs, ys, covered, merges, sx, sy);
     this.drawFilterButtons(vr, sx, sy);
+    this.drawNoteMarks(vr, xs.slice(vr.c0 - first), ys);
     ctx.restore();
+  }
+
+  // Notes show as a red triangle in the cell's top-right corner.
+  private drawNoteMarks(vr: VisibleRange, xs: number[], ys: number[]): void {
+    const notes = this.look.notes;
+    if (notes.size === 0) return;
+    const ctx = this.ctx;
+    ctx.fillStyle = '#d6403a';
+    for (const key of notes) {
+      const r = Math.floor(key / 16384);
+      const c = key % 16384;
+      if (r < vr.r0 || r > vr.r1 || c < vr.c0 || c > vr.c1) continue;
+      const right = xs[c - vr.c0 + 1] - 1;
+      const top = ys[r - vr.r0];
+      if (right - xs[c - vr.c0] < 2 || ys[r - vr.r0 + 1] === top) continue;
+      ctx.beginPath();
+      ctx.moveTo(right - 6, top);
+      ctx.lineTo(right, top);
+      ctx.lineTo(right, top + 6);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
 
   private drawFilterButtons(vr: VisibleRange, sx: number, sy: number): void {
@@ -422,12 +448,23 @@ export class GridRenderer extends Layer {
       if (bottom === top) continue;
       for (let c = vr.c0; c <= vr.c1; c++) {
         if (covered.has(r * 16384 + c)) continue;
-        const st = styleStore.get(this.styleAt(r, c));
-        if (!st?.fill) continue;
         const left = xs[c - vr.c0];
         const right = xs[c - vr.c0 + 1];
-        ctx.fillStyle = st.fill;
-        ctx.fillRect(left, top, right - left, bottom - top);
+        const st = styleStore.get(this.styleAt(r, c));
+        if (st?.fill) {
+          ctx.fillStyle = st.fill;
+          ctx.fillRect(left, top, right - left, bottom - top);
+        }
+        const bar = this.cache.cell(r, c)?.bar;
+        if (bar && right > left) {
+          // Data bar: a gradient from the bar color to transparent.
+          const w = Math.max(0, (right - left - 4) * bar.len);
+          const g = ctx.createLinearGradient(left + 2, 0, left + 2 + Math.max(w, 1), 0);
+          g.addColorStop(0, bar.color);
+          g.addColorStop(1, bar.color + '33');
+          ctx.fillStyle = g;
+          ctx.fillRect(left + 2, top + 2, w, bottom - top - 5);
+        }
       }
     }
     for (const m of merges) {

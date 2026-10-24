@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest } from './bench/selfTest';
   import {
@@ -13,8 +13,14 @@
     type RangeDTO,
     type SheetInfo,
     type StyleDTO,
+    type ValidationDTO,
   } from './bridge/sheet';
+  import CondFormatDialog from './components/CondFormatDialog.svelte';
   import FindPanel from './components/FindPanel.svelte';
+  import NameManager from './components/NameManager.svelte';
+  import TableDialog from './components/TableDialog.svelte';
+  import ValidationDialog from './components/ValidationDialog.svelte';
+  import { absoluteRef } from './formula/refs';
   import NumberFormatDialog from './components/NumberFormatDialog.svelte';
   import PasteSpecialDialog from './components/PasteSpecialDialog.svelte';
   import ShiftDialog from './components/ShiftDialog.svelte';
@@ -23,7 +29,7 @@
   import SheetTabs from './components/SheetTabs.svelte';
   import StatusBar from './components/StatusBar.svelte';
   import Toolbar from './components/Toolbar.svelte';
-  import { single, type Selection } from './grid/selection';
+  import { current, fromRange, single, type CrossEdit, type Range, type Selection } from './grid/selection';
   import type { MenuAction, SheetMode } from './input/keymap';
   import { styleStore } from './stores/styles';
 
@@ -49,6 +55,16 @@
   let sortDialog = $state<{ range: RangeDTO; header: boolean } | null>(null);
   let pasteDialog = $state(false);
   let shiftDialog = $state<{ insert: boolean } | null>(null);
+  // v0.6 dialogs.
+  let names = $state<string[]>([]);
+  // A formula being edited while visiting other sheets.
+  let crossEdit = $state<CrossEdit | null>(null);
+  let nameDialog = $state<{ startNew: boolean; ref: string } | null>(null);
+  let validationDialog = $state<{ current: ValidationDTO | null } | null>(null);
+  let cfDialog = $state<{ manage: boolean } | null>(null);
+  let tableDialog = $state<
+    { range: RangeDTO; header: boolean; styles: string[] } | { renaming: string } | null
+  >(null);
   // A short message, e.g. why a merge was refused.
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -116,13 +132,69 @@
       case 'sort':
         void openSort();
         break;
+      case 'defineName':
+      case 'nameManager': {
+        const r = sheetView ? current(sheetView.getSelection()) : { r0: 0, c0: 0, r1: 0, c1: 0 };
+        nameDialog = { startNew: action === 'defineName', ref: absoluteRef(sheets[active], r.r0, r.c0, r.r1, r.c1) };
+        break;
+      }
+      case 'dataValidation':
+        void openValidation();
+        break;
+      case 'condFormat':
+      case 'condFormatManager':
+        cfDialog = { manage: action === 'condFormatManager' };
+        break;
+      case 'insertTable':
+        void openTable();
+        break;
+      case 'renameTable': {
+        const t = sheetView?.getActiveTable();
+        if (t) tableDialog = { renaming: t.name };
+        break;
+      }
     }
+  }
+
+  function selectedRanges(): RangeDTO[] {
+    return (sheetView?.getSelection().ranges ?? []).map((r) => ({ r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 }));
+  }
+
+  async function openValidation(): Promise<void> {
+    const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
+    validationDialog = { current: await sheetApi.validation(active, pos.row, pos.col) };
+  }
+
+  async function openTable(): Promise<void> {
+    const sel = sheetView?.getSelection();
+    if (!sel) return;
+    const r = current(sel);
+    const info = await sheetApi.tableRange(active, { r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 });
+    if (!info.ok) return notify('請選取資料範圍中的儲存格再建立表格。');
+    tableDialog = { range: info.range, header: info.header, styles: await sheetApi.tableStyles() };
+  }
+
+  // The name box went to another sheet.
+  async function goToSheet(index: number, range: Range): Promise<void> {
+    selections.set(sheets[index], fromRange(range));
+    await showSheet(index);
   }
 
   async function openSort(): Promise<void> {
     const res = await sheetView?.sortInfo();
     if (!res?.ok) return notify('請選取資料範圍中的儲存格再排序。');
     sortDialog = { range: res.range, header: res.header };
+  }
+
+  // The new sheet view has taken the cross-sheet edit at mount.
+  async function handOff(): Promise<void> {
+    await tick();
+    crossEdit = null;
+  }
+
+  function closeTable(): void {
+    tableDialog = null;
+    sheetView?.focus();
   }
 
   function closeDialogs(): void {
@@ -220,10 +292,14 @@
   onMount(() => {
     const offs = [
       documentApi.onMenu((action) => {
-        if (action === 'insertSheet' || action === 'formatCells' || action === 'sort') onAppAction(action);
+        if (['insertSheet', 'formatCells', 'sort', 'defineName', 'nameManager', 'dataValidation', 'condFormat', 'condFormatManager', 'insertTable'].includes(action))
+          onAppAction(action);
         else void sheetView?.runMenu(action);
       }),
-      documentApi.onState((st) => (circular = st.circular)),
+      documentApi.onState((st) => {
+        circular = st.circular;
+        names = st.names ?? [];
+      }),
       documentApi.onSheetsChanged(onStructure),
       documentApi.onReset((st) => void onReset(st)),
     ];
@@ -232,6 +308,7 @@
       const st = await documentApi.state();
       sheets = st.sheets ?? [];
       circular = st.circular;
+      names = st.names ?? [];
       await showSheet(SHEET);
 
       if (await benchApi.benchMode()) {
@@ -290,6 +367,15 @@
         onselectionchange={(sel) => selections.set(sheets[active], sel)}
         onappaction={onAppAction}
         onnotify={notify}
+        sheetName={sheets[active]}
+        {names}
+        ongoto={(i, r) => void goToSheet(i, r)}
+        {crossEdit}
+        oncrossdone={(origin, pos, retry) => {
+          crossEdit = retry ? { originSheet: origin, pos, text: retry, caret: retry.length } : null;
+          selections.set(sheets[origin], single(pos));
+          void showSheet(origin).then(handOff);
+        }}
       />
     {/key}
     <StatusBar {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench}>
@@ -297,7 +383,12 @@
         <SheetTabs
           {sheets}
           {active}
-          onselect={(i) => i !== active && void showSheet(i)}
+          onselect={(i) => {
+            if (i === active) return;
+            // Editing a formula: keep editing it on the other sheet.
+            crossEdit = sheetView?.formulaState() ?? null;
+            void showSheet(i).then(handOff);
+          }}
           onadd={() => void addSheet()}
           onrename={(i, name) => documentApi.renameSheet(i, name)}
           ondelete={(i) => void documentApi.deleteSheet(i)}
@@ -375,6 +466,77 @@
       }}
       onclose={closeDialogs}
     />
+  {/if}
+
+  {#if nameDialog}
+    <NameManager
+      {sheets}
+      selectionRef={nameDialog.ref}
+      startNew={nameDialog.startNew}
+      onclose={() => {
+        nameDialog = null;
+        sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if validationDialog}
+    <ValidationDialog
+      current={validationDialog.current}
+      onapply={async (v) => {
+        const err = await sheetApi.setValidation(active, selectedRanges(), v);
+        if (!err) {
+          validationDialog = null;
+          sheetView?.focus();
+        }
+        return err;
+      }}
+      onclose={() => {
+        validationDialog = null;
+        sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if cfDialog}
+    <CondFormatDialog
+      manage={cfDialog.manage}
+      rules={() => sheetApi.condFormats(active)}
+      onadd={(rule) => sheetApi.addCondFormat(active, selectedRanges(), rule)}
+      ondelete={(i) => sheetApi.deleteCondFormat(active, i)}
+      onclose={() => {
+        cfDialog = null;
+        sheetView?.focus();
+      }}
+    />
+  {/if}
+
+  {#if tableDialog}
+    {#if 'renaming' in tableDialog}
+      <TableDialog
+        renaming={tableDialog.renaming}
+        onrename={async (name) => {
+          const old = tableDialog && 'renaming' in tableDialog ? tableDialog.renaming : '';
+          const err = await sheetApi.renameTable(active, old, name);
+          if (!err) closeTable();
+          return err;
+        }}
+        onclose={closeTable}
+      />
+    {:else}
+      <TableDialog
+        range={tableDialog.range}
+        header={tableDialog.header}
+        styles={tableDialog.styles}
+        oncreate={async (header, style) => {
+          const rg = tableDialog && 'range' in tableDialog ? tableDialog.range : { r0: 0, c0: 0, r1: 0, c1: 0 };
+          const res = await sheetApi.createTable(active, rg, header, style);
+          if (!res.error) closeTable();
+          return res.error;
+        }}
+        onclose={closeTable}
+      />
+    {/if}
   {/if}
 
   {#if report}

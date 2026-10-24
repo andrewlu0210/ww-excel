@@ -33,6 +33,9 @@ const (
 	RBrace
 	Comma
 	Semicolon
+	// Structured reference: Text is the table name ("" inside a table),
+	// Spec the text inside the outer brackets.
+	StructRef
 )
 
 type Token struct {
@@ -42,6 +45,7 @@ type Token struct {
 	End  int
 	Num  float64
 	Area ast.Area
+	Spec string
 }
 
 type Error_ struct {
@@ -115,6 +119,8 @@ func next(src string, i int) (Token, error) {
 		return single(Op)
 	case '"':
 		return lexString(src, i)
+	case '[':
+		return lexStruct(src, i, "", i)
 	case '\'':
 		return lexQuotedSheet(src, i)
 	case '#':
@@ -281,6 +287,8 @@ func lexWord(src string, i int) (Token, error) {
 	switch {
 	case nextByte == '!':
 		return Token{Kind: Sheet, Text: word, Pos: i, End: j + 1}, nil
+	case nextByte == '[' && !strings.Contains(word, "$"):
+		return lexStruct(src, j, word, i)
 	case k < len(src) && src[k] == '(' && !strings.Contains(word, "$"):
 		return Token{Kind: Func, Text: strings.ToUpper(word), Pos: i, End: j}, nil
 	}
@@ -338,4 +346,25 @@ func parseCol(word string) (int, bool, bool) {
 	abs := strings.HasPrefix(word, "$")
 	col, ok := ast.ColIndex(strings.TrimPrefix(word, "$"))
 	return col, abs, ok
+}
+
+// lexStruct scans a bracketed structured reference starting at the "["
+// at open; start is where the token (with its table name) begins.
+// Inside, an apostrophe escapes the next character.
+func lexStruct(src string, open int, table string, start int) (Token, error) {
+	depth := 0
+	for k := open; k < len(src); k++ {
+		switch src[k] {
+		case '\'':
+			k++
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return Token{Kind: StructRef, Text: table, Spec: src[open+1 : k], Pos: start, End: k + 1}, nil
+			}
+		}
+	}
+	return Token{}, &Error_{Pos: open, Msg: "缺少「]」"}
 }

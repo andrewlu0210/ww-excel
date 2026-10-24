@@ -17,6 +17,14 @@ func regVolatile(cat, name string, min, max int, sig, desc string, fn eval.Fn) {
 	eval.Register(eval.Def{Name: name, Min: min, Max: max, Sig: sig, Desc: desc, Category: cat, Fn: fn, Volatile: true})
 }
 
+// alias registers name as another name for an existing function (the
+// pre-2010 names such as STDEV for STDEV.S).
+func alias(name, target string) {
+	d := *eval.Lookup(target)
+	d.Name = name
+	eval.Register(d)
+}
+
 // unary registers a one-number function such as ABS.
 func unary(cat, name, desc string, f func(float64) eval.Value) {
 	reg(cat, name, 1, 1, "number", desc, func(a *eval.Args) eval.Value {
@@ -37,7 +45,9 @@ var (
 )
 
 const (
-	catMath   = "數學與統計"
+	catMath   = "數學與三角函數"
+	catStat   = "統計"
+	catFin    = "財務"
 	catLogic  = "邏輯"
 	catLookup = "查閱與參照"
 	catText   = "文字"

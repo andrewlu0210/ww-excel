@@ -24,6 +24,8 @@ type Effect struct {
 	// Other cells changed on other sheets (e.g. formulas rewritten when
 	// a sheet is renamed), keyed by sheet index after the change.
 	Others map[int][]CellRef
+	// Names: defined names changed; every formula resolves them again.
+	Names bool
 	// Shift is set when rows or columns of Sheet were inserted or
 	// deleted: every position moved, so caches and indexes rebuild.
 	Shift *Shift
@@ -199,6 +201,7 @@ func mergeEffects(effs []Effect) Effect {
 			out.Others[s] = append(out.Others[s], cells...)
 		}
 		out.Structure = out.Structure || e.Structure
+		out.Names = out.Names || e.Names
 	}
 	return out
 }

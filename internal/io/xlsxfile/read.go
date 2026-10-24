@@ -31,6 +31,9 @@ func Read(path string) (*model.Workbook, *excelize.File, error) {
 		return nil, nil, err
 	}
 	wb, err := load(f, raw)
+	if err == nil {
+		readTables(f, wb, rawTableTotals(path))
+	}
 	if err != nil {
 		f.Close()
 		return nil, nil, err
@@ -62,6 +65,20 @@ func load(f *excelize.File, raw map[string]map[[2]int]rawCell) (*model.Workbook,
 	}
 	if len(r.wb.Sheets) == 0 {
 		return nil, fmt.Errorf("活頁簿沒有工作表")
+	}
+	for _, dn := range f.GetDefinedName() {
+		if strings.HasPrefix(dn.Name, "_xlnm.") || !model.ValidName(dn.Name) {
+			continue
+		}
+		n := &model.DefinedName{Name: dn.Name, Formula: strings.TrimPrefix(dn.RefersTo, "="), Comment: dn.Comment}
+		if dn.Scope != "" && dn.Scope != "Workbook" {
+			i := r.wb.SheetIndex(dn.Scope)
+			if i < 0 {
+				continue
+			}
+			n.Scope = r.wb.Sheets[i]
+		}
+		r.wb.Names = append(r.wb.Names, n)
 	}
 	return r.wb, nil
 }
@@ -177,6 +194,20 @@ func (r *reader) sheet(name string) (*model.Sheet, error) {
 	}
 	l.SortMerges()
 
+	if comments, err := r.f.GetComments(name); err == nil {
+		for _, c := range comments {
+			col, row, err := excelize.CellNameToCoordinates(c.Cell)
+			if err != nil {
+				continue
+			}
+			if l.Notes == nil {
+				l.Notes = map[[2]int]model.Note{}
+			}
+			l.Notes[[2]int{row - 1, col - 1}] = model.Note{Author: c.Author, Text: noteText(c)}
+		}
+	}
+	l.Validations = readValidations(r.f, name)
+	l.CondFormats = readCondFormats(r.f, name)
 	if panes, err := r.f.GetPanes(name); err == nil && panes.Freeze {
 		l.FreezeRows, l.FreezeCols = max(panes.YSplit, 0), max(panes.XSplit, 0)
 	}
@@ -266,4 +297,40 @@ func value(typ excelize.CellType, raw string) model.Cell {
 		return model.Cell{}
 	}
 	return model.StringCell(raw)
+}
+
+// noteText joins a comment's text, dropping the "Author:" line Excel
+// puts in front of a note.
+func noteText(c excelize.Comment) string {
+	var b strings.Builder
+	b.WriteString(c.Text)
+	for _, run := range c.Paragraph {
+		b.WriteString(run.Text)
+	}
+	text := b.String()
+	if c.Author != "" {
+		text = strings.TrimPrefix(text, c.Author+":\n")
+		text = strings.TrimPrefix(text, c.Author+":\r\n")
+	}
+	return text
+}
+
+func readTables(f *excelize.File, wb *model.Workbook, totals map[string]bool) {
+	for _, sh := range wb.Sheets {
+		tables, err := f.GetTables(sh.Name)
+		if err != nil {
+			continue
+		}
+		for _, t := range tables {
+			rs := parseSqref(t.Range)
+			if len(rs) != 1 {
+				continue
+			}
+			mt := model.Table{Name: t.Name, Range: rs[0], Style: t.StyleName, TotalsRow: totals[strings.ToLower(t.Name)]}
+			if t.ShowRowStripes != nil && !*t.ShowRowStripes {
+				mt.NoBands = true
+			}
+			sh.Layout.Tables = append(sh.Layout.Tables, mt)
+		}
+	}
 }

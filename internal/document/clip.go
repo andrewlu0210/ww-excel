@@ -256,6 +256,7 @@ func (d *Document) moveCommand(clip *Clip, sheet int, area model.Range, cells []
 	dst := d.wb.Sheets[sheet]
 	dr, dc := area.R0-clip.Src.R0, area.C0-clip.Src.C0
 	var snap formulaSnapshot
+	var names nameState
 	type saved struct {
 		sh       *model.Sheet
 		row, col int
@@ -270,6 +271,7 @@ func (d *Document) moveCommand(clip *Clip, sheet int, area model.Range, cells []
 		Name: "移動",
 		DoFn: func(wb *model.Workbook) command.Effect {
 			snap = d.snapshotFormulas()
+			names = d.saveNames()
 			before = before[:0]
 			eff := command.Effect{Sheet: sheet, Bounds: &area, Others: map[int][]command.CellRef{}}
 			mark := func(sh *model.Sheet, si, row, col int) {
@@ -297,6 +299,9 @@ func (d *Document) moveCommand(clip *Clip, sheet int, area model.Range, cells []
 				moveMerges(clip, dst, area)
 				eff.LayoutChanged = true
 			}
+			eff.Names = d.adjustNames(func(n ast.Node, sheet string) (ast.Node, bool) {
+				return ast.Move(n, sheet, clip.Sheet.Name, clip.Src, dst.Name, dr, dc)
+			})
 			for si, refs := range d.moveFormulas(clip.Sheet.Name, clip.Src, dst.Name, dr, dc) {
 				if si == sheet {
 					eff.Cells = append(eff.Cells, refs...)
@@ -318,6 +323,8 @@ func (d *Document) moveCommand(clip *Clip, sheet int, area model.Range, cells []
 				}
 			}
 			snap.restore()
+			names.restore(wb)
+			eff.Names = len(wb.Names) > 0
 			for _, f := range snap {
 				if si := d.wb.SheetIndex(f.sheet.Name); si >= 0 {
 					eff.Others[si] = append(eff.Others[si], command.CellRef{Row: f.row, Col: f.col})

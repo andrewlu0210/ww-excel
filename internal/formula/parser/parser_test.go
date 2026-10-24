@@ -119,3 +119,15 @@ func TestFilePrefixesDropped(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestStructuredRefs(t *testing.T) {
+	for _, src := range []string{"SUM(表格1[銷售])", "[@單價]*[@數量]", "表格1[[#Headers],[A]:[B]]", "COUNTA(Table1[#All])"} {
+		n, err := Parse(src)
+		if err != nil {
+			t.Fatalf("%s: %v", src, err)
+		}
+		if got := ast.Format(n); got != src {
+			t.Fatalf("format %q = %q", src, got)
+		}
+	}
+}

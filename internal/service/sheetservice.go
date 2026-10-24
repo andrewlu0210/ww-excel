@@ -22,6 +22,9 @@ type CellDTO struct {
 	// St is the style ID; Fc a color from the number format ([Red]).
 	St uint32 `json:"st,omitempty"`
 	Fc string `json:"fc,omitempty"`
+	// Data bar from conditional formatting: length 0..1 and color.
+	Bar float64 `json:"bar,omitempty"`
+	Bc  string  `json:"bc,omitempty"`
 }
 
 type BlockRef struct {
@@ -125,24 +128,65 @@ func (s *SheetService) GetBlocks(ctx context.Context, sheet int, refs []BlockRef
 	s.at(ctx).read(func(d *document.Document) {
 		wb := d.Workbook()
 		res.Version = d.Version()
-		res.Styles = stylesSince(wb, knownStyles)
 		sh := sheetAt(d, sheet)
+		look := newLook(d, sheet)
 		for _, ref := range refs {
 			dto := BlockDTO{Row: ref.Row, Col: ref.Col, Cells: []CellDTO{}}
 			if sh != nil {
-				if b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)}); b != nil {
-					dto.Cells = make([]CellDTO, 0, b.Count())
-					r0, c0 := ref.Row*model.BlockRows, ref.Col*model.BlockCols
-					b.Each(func(r, c int, cell model.Cell) {
-						v, n, x, st, fc := cellView(wb, sh, r0+r, c0+c, cell)
-						dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc})
-					})
+				r0, c0 := ref.Row*model.BlockRows, ref.Col*model.BlockCols
+				b := sh.Block(model.BlockKey{Row: int32(ref.Row), Col: int32(ref.Col)})
+				if look == nil {
+					if b != nil {
+						dto.Cells = make([]CellDTO, 0, b.Count())
+						b.Each(func(r, c int, cell model.Cell) {
+							v, n, x, st, fc := cellView(wb, sh, r0+r, c0+c, cell)
+							dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc})
+						})
+					}
+				} else {
+					dto.Cells = lookBlock(look, sh, b, r0, c0)
 				}
 			}
 			res.Blocks = append(res.Blocks, dto)
 		}
+		// Styles go last: the look may have created some.
+		res.Styles = stylesSince(wb, knownStyles)
 	})
 	return res
+}
+
+// lookBlock renders a block with table styles and conditional formats,
+// including blank cells inside their ranges.
+func lookBlock(look *sheetLook, sh *model.Sheet, b *model.Block, r0, c0 int) []CellDTO {
+	block := model.Range{R0: r0, C0: c0, R1: r0 + model.BlockRows - 1, C1: c0 + model.BlockCols - 1}
+	seen := map[[2]int]bool{}
+	out := []CellDTO{}
+	add := func(r, c int, cell model.Cell) {
+		if seen[[2]int{r, c}] {
+			return
+		}
+		seen[[2]int{r, c}] = true
+		if dto, show := look.view(r0+r, c0+c, cell); show {
+			dto.R, dto.C = r, c
+			out = append(out, dto)
+		}
+	}
+	if b != nil {
+		b.Each(add)
+	}
+	for _, a := range look.areas() {
+		if !a.Overlaps(block) {
+			continue
+		}
+		for row := max(a.R0, block.R0); row <= min(a.R1, block.R1); row++ {
+			for col := max(a.C0, block.C0); col <= min(a.C1, block.C1); col++ {
+				if b == nil || !b.Cell(row-r0, col-c0).HasContent() {
+					add(row-r0, col-c0, sh.Get(row, col))
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Layout returns a sheet's sizes, row/column styles and merges.
@@ -170,11 +214,19 @@ func (s *SheetService) EditText(ctx context.Context, sheet, row, col int) string
 	return text
 }
 
+// SetCellResult reports a notice for the user about an accepted input,
+// e.g. a data validation warning.
+type SetCellResult struct {
+	Notice string `json:"notice"`
+}
+
 // SetCell commits typed text into one cell. A formula that cannot be
-// entered (syntax error, wrong argument count) returns an error whose
-// message is shown to the user; nothing changes.
-func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text string) error {
+// entered (syntax error, wrong argument count) or a value refused by
+// data validation returns an error whose message is shown to the user;
+// nothing changes. Typing right below or next to a table extends it.
+func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text string) (SetCellResult, error) {
 	var err error
+	var res SetCellResult
 	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
 		if sheetAt(d, sheet) == nil || !validCell(row, col) {
 			return document.Change{}, false
@@ -183,9 +235,28 @@ func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text st
 		if in, err = d.InputCell(sheet, text); err != nil {
 			return document.Change{}, false
 		}
-		return d.Exec(command.SetCell(d.Workbook(), sheet, row, col, in.Cell, in.NumFmt, in.Wrap))
+		if in.Cell.F == nil {
+			if verr := d.Validate(sheet, row, col, in.Cell, shownText(d.Workbook())); verr != nil {
+				if verr.Stop {
+					err = verr
+					return document.Change{}, false
+				}
+				res.Notice = verr.Message
+			}
+		}
+		cmd := command.SetCell(d.Workbook(), sheet, row, col, in.Cell, in.NumFmt, in.Wrap)
+		if cmd == nil {
+			return document.Change{}, false
+		}
+		if in.Cell.HasContent() {
+			if grow := d.ExpandTableCommand(sheet, row, col); grow != nil {
+				// The table grows first so structured references resolve.
+				cmd = &command.Batch{Name: "輸入", Cmds: []command.Command{grow, cmd}}
+			}
+		}
+		return d.Exec(cmd)
 	})
-	return err
+	return res, err
 }
 
 // Fill writes text into every cell of the ranges (⌘Enter). A formula is

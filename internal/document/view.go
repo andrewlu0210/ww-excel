@@ -223,3 +223,36 @@ func (d *Document) applyFilter(sh *model.Sheet, l *model.Layout, display Display
 		}
 	}
 }
+
+// NoteCommand sets the note of a cell; empty text deletes it.
+func (d *Document) NoteCommand(sheet, row, col int, text, author string) (command.Command, error) {
+	if sheet < 0 || sheet >= len(d.wb.Sheets) || row < 0 || row >= model.MaxRows || col < 0 || col >= model.MaxCols {
+		return nil, errors.New("無效的儲存格")
+	}
+	pos := [2]int{row, col}
+	old, had := d.wb.Sheets[sheet].Layout.Notes[pos]
+	name := "插入註解"
+	switch {
+	case text == "" && !had:
+		return nil, nil
+	case text == "":
+		name = "刪除註解"
+	case had:
+		if old.Text == text {
+			return nil, nil
+		}
+		name = "編輯註解"
+		author = old.Author
+	}
+	area := model.Range{R0: row, C0: col, R1: row, C1: col}
+	return d.layoutCommand(sheet, name, &area, func(l *model.Layout) {
+		if l.Notes == nil {
+			l.Notes = map[[2]int]model.Note{}
+		}
+		if text == "" {
+			delete(l.Notes, pos)
+		} else {
+			l.Notes[pos] = model.Note{Author: author, Text: text}
+		}
+	})
+}

@@ -35,7 +35,7 @@ describe('BlockCache', () => {
     expect(calls).toHaveLength(1);
 
     await flush();
-    expect(cache.cell(5 * 64 + 1, 2)).toEqual({ text: '5:0', numeric: true, center: false, style: 0, color: null });
+    expect(cache.cell(5 * 64 + 1, 2)).toEqual({ text: '5:0', numeric: true, center: false, style: 0, color: null, bar: null });
     expect(cache.cell(5 * 64, 0)).toBeUndefined();
   });
 
@@ -74,7 +74,7 @@ describe('BlockCache', () => {
         { row: 5000, col: 0, v: 'not cached' },
       ],
     });
-    expect(cache.cell(0, 0)).toEqual({ text: '台北', numeric: false, center: false, style: 0, color: null });
+    expect(cache.cell(0, 0)).toEqual({ text: '台北', numeric: false, center: false, style: 0, color: null, bar: null });
     expect(cache.cell(1, 2)).toBeUndefined();
   });
 

@@ -6,10 +6,29 @@ export interface CellView {
   center: boolean; // logicals and errors are centered by default
   style: number; // style ID (0 = default)
   color: string | null; // number-format color such as [Red], "#RRGGBB"
+  // Conditional-format data bar: length 0..1 and "#RRGGBB", or null.
+  bar: { len: number; color: string } | null;
 }
 
-function view(v: string, n: boolean | undefined, x: boolean | undefined, st: number | undefined, fc: string | undefined): CellView {
-  return { text: v, numeric: n === true, center: x === true, style: st ?? 0, color: fc ? `#${fc}` : null };
+interface CellFields {
+  v: string;
+  n?: boolean;
+  x?: boolean;
+  st?: number;
+  fc?: string;
+  bar?: number;
+  bc?: string;
+}
+
+function view(c: CellFields): CellView {
+  return {
+    text: c.v,
+    numeric: c.n === true,
+    center: c.x === true,
+    style: c.st ?? 0,
+    color: c.fc ? `#${c.fc}` : null,
+    bar: c.bc ? { len: c.bar ?? 0, color: `#${c.bc}` } : null,
+  };
 }
 
 export interface BlockRange {
@@ -140,7 +159,7 @@ export class BlockCache {
         if (!block) continue;
         const i = (c.row % this.blockRows) * this.blockCols + (c.col % this.blockCols);
         // Keep empty-but-styled cells: their style still renders.
-        block.cells[i] = c.v === '' && !c.st ? undefined : view(c.v, c.n, c.x, c.st, c.fc);
+        block.cells[i] = c.v === '' && !c.st ? undefined : view(c);
       }
     }
     this.onUpdate();
@@ -149,7 +168,7 @@ export class BlockCache {
   private store(dto: BlockDTO): void {
     const cells: (CellView | undefined)[] = new Array(this.blockRows * this.blockCols);
     for (const c of dto.cells ?? []) {
-      cells[c.r * this.blockCols + c.c] = view(c.v, c.n, c.x, c.st, c.fc);
+      cells[c.r * this.blockCols + c.c] = view(c);
     }
     this.blocks.set(this.key(dto.row, dto.col), { cells });
   }

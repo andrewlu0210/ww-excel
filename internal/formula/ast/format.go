@@ -72,6 +72,11 @@ func write(b *strings.Builder, n Node) {
 		b.WriteByte('}')
 	case Name:
 		b.WriteString(x.Name)
+	case TableRef:
+		b.WriteString(x.Table)
+		b.WriteByte('[')
+		b.WriteString(x.Spec)
+		b.WriteByte(']')
 	case Ref:
 		if x.Sheet != "" {
 			b.WriteString(QuoteSheet(x.Sheet))

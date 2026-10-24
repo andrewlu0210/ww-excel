@@ -24,6 +24,15 @@ type fileDoc struct {
 	Version int           `json:"version"`
 	Styles  []model.Style `json:"styles,omitempty"`
 	Sheets  []fileSheet   `json:"sheets"`
+	Names   []fileName    `json:"names,omitempty"`
+}
+
+// fileName is a defined name; Scope is a sheet name or "".
+type fileName struct {
+	Name    string `json:"name"`
+	Scope   string `json:"scope,omitempty"`
+	Formula string `json:"formula"`
+	Comment string `json:"comment,omitempty"`
 }
 
 type fileSheet struct {
@@ -54,6 +63,18 @@ type fileLayout struct {
 	FreezeRows int            `json:"freezeRows,omitempty"`
 	FreezeCols int            `json:"freezeCols,omitempty"`
 	Filter     *fileFilter    `json:"filter,omitempty"`
+	Notes      []fileNote     `json:"notes,omitempty"`
+	// Rules are stored as the model structs.
+	Validations []model.Validation `json:"validations,omitempty"`
+	CondFormats []model.CFRule     `json:"condFormats,omitempty"`
+	Tables      []model.Table      `json:"tables,omitempty"`
+}
+
+type fileNote struct {
+	R      int    `json:"r"`
+	C      int    `json:"c"`
+	Author string `json:"author,omitempty"`
+	Text   string `json:"text"`
 }
 
 type fileFilter struct {
@@ -98,6 +119,13 @@ func Write(w io.Writer, wb *model.Workbook) error {
 			fs.Cells = append(fs.Cells, fc)
 		})
 		doc.Sheets = append(doc.Sheets, fs)
+	}
+	for _, n := range wb.Names {
+		fn := fileName{Name: n.Name, Formula: n.Formula, Comment: n.Comment}
+		if n.Scope != nil {
+			fn.Scope = n.Scope.Name
+		}
+		doc.Names = append(doc.Names, fn)
 	}
 
 	zw := gzip.NewWriter(w)
@@ -169,6 +197,17 @@ func Read(r io.Reader) (*model.Workbook, error) {
 		}
 		wb.Sheets = append(wb.Sheets, sh)
 	}
+	for _, fn := range doc.Names {
+		n := &model.DefinedName{Name: fn.Name, Formula: fn.Formula, Comment: fn.Comment}
+		if fn.Scope != "" {
+			i := wb.SheetIndex(fn.Scope)
+			if i < 0 {
+				continue
+			}
+			n.Scope = wb.Sheets[i]
+		}
+		wb.Names = append(wb.Names, n)
+	}
 	return wb, nil
 }
 
@@ -192,6 +231,14 @@ func writeLayout(l model.Layout) *fileLayout {
 	for _, m := range l.Merges {
 		fl.Merges = append(fl.Merges, [4]int{m.R0, m.C0, m.R1, m.C1})
 	}
+	fl.Validations, fl.CondFormats, fl.Tables = l.Validations, l.CondFormats, l.Tables
+	for pos, n := range l.Notes {
+		fl.Notes = append(fl.Notes, fileNote{R: pos[0], C: pos[1], Author: n.Author, Text: n.Text})
+	}
+	sort.Slice(fl.Notes, func(i, j int) bool {
+		a, b := fl.Notes[i], fl.Notes[j]
+		return a.R < b.R || a.R == b.R && a.C < b.C
+	})
 	// Map iteration order is random; sort for stable files.
 	sortSizes(fl.Rows)
 	sortSizes(fl.Cols)
@@ -224,6 +271,15 @@ func readLayout(fl *fileLayout) model.Layout {
 		l.Merges = append(l.Merges, model.Range{R0: m[0], C0: m[1], R1: m[2], C1: m[3]})
 	}
 	l.FreezeRows, l.FreezeCols = max(fl.FreezeRows, 0), max(fl.FreezeCols, 0)
+	l.Validations, l.CondFormats, l.Tables = fl.Validations, fl.CondFormats, fl.Tables
+	for _, n := range fl.Notes {
+		if n.R >= 0 && n.R < model.MaxRows && n.C >= 0 && n.C < model.MaxCols {
+			if l.Notes == nil {
+				l.Notes = map[[2]int]model.Note{}
+			}
+			l.Notes[[2]int{n.R, n.C}] = model.Note{Author: n.Author, Text: n.Text}
+		}
+	}
 	if f := fl.Filter; f != nil {
 		r := f.Range
 		l.Filter = &model.AutoFilter{Range: model.Range{R0: r[0], C0: r[1], R1: r[2], C1: r[3]}.Clamp(), Cols: f.Cols}

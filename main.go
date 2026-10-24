@@ -335,6 +335,9 @@ func buildMenu(a *docApp) *appMenus {
 	insert.Add("列").OnClick(send("insertRows"))
 	insert.Add("欄").OnClick(send("insertCols"))
 	insert.Add("工作表").SetAccelerator("Shift+F11").OnClick(send("insertSheet"))
+	insert.AddSeparator()
+	insert.Add("表格…").SetAccelerator("CmdOrCtrl+T").OnClick(send("insertTable"))
+	insert.Add("註解").SetAccelerator("Shift+F2").OnClick(send("insertNote"))
 
 	format := root.AddSubmenu("格式")
 	format.Add("儲存格格式…").SetAccelerator("CmdOrCtrl+1").OnClick(send("formatCells"))
@@ -342,6 +345,13 @@ func buildMenu(a *docApp) *appMenus {
 	format.Add("粗體").SetAccelerator("CmdOrCtrl+B").OnClick(send("bold"))
 	format.Add("斜體").SetAccelerator("CmdOrCtrl+I").OnClick(send("italic"))
 	format.Add("底線").SetAccelerator("CmdOrCtrl+U").OnClick(send("underline"))
+	format.AddSeparator()
+	cf := format.AddSubmenu("設定格式化的條件")
+	cf.Add("新增規則…").OnClick(send("condFormat"))
+	cf.Add("管理規則…").OnClick(send("condFormatManager"))
+	cf.AddSeparator()
+	cf.Add("清除所選儲存格的規則").OnClick(send("clearCondFormats"))
+	cf.Add("清除整張工作表的規則").OnClick(send("clearAllCondFormats"))
 	format.AddSeparator()
 	rows := format.AddSubmenu("列")
 	rows.Add("自動調整列高").OnClick(send("autofitRows"))
@@ -352,12 +362,19 @@ func buildMenu(a *docApp) *appMenus {
 	cols.Add("隱藏").SetAccelerator("Ctrl+0").OnClick(send("hideCols"))
 	cols.Add("取消隱藏").SetAccelerator("Ctrl+Shift+0").OnClick(send("unhideCols"))
 
+	formulas := root.AddSubmenu("公式")
+	formulas.Add("定義名稱…").OnClick(send("defineName"))
+	formulas.Add("名稱管理員…").SetAccelerator("CmdOrCtrl+F3").OnClick(send("nameManager"))
+
 	data := root.AddSubmenu("資料")
 	data.Add("排序…").OnClick(send("sort"))
 	data.Add("遞增排序").OnClick(send("sortAsc"))
 	data.Add("遞減排序").OnClick(send("sortDesc"))
 	data.AddSeparator()
 	data.Add("篩選").SetAccelerator("CmdOrCtrl+Shift+F").OnClick(send("filter"))
+	data.AddSeparator()
+	data.Add("資料驗證…").OnClick(send("dataValidation"))
+	data.Add("清除資料驗證").OnClick(send("clearValidation"))
 
 	root.AddRole(application.WindowMenu)
 	return m

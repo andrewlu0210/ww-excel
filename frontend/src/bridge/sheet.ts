@@ -12,8 +12,14 @@ import type {
   CellPos,
   CellsChanged,
   ChangedCell,
+  CFRuleDTO,
   CopyResult,
   DocState,
+  NameDTO,
+  NoteDTO,
+  TableDTO,
+  TargetDTO,
+  ValidationDTO,
   FilterValueDTO,
   FindOptionsDTO,
   HitDTO,
@@ -32,6 +38,12 @@ import type {
 import type { MenuAction } from '../input/keymap';
 
 export type {
+  CFRuleDTO,
+  NameDTO,
+  NoteDTO,
+  TableDTO,
+  TargetDTO,
+  ValidationDTO,
   FuncInfo,
   FormatPatch,
   LayoutChanged,
@@ -101,8 +113,12 @@ export const sheetApi = {
 
   // Edits resolve to null, or to a message for the user when Go rejects
   // the input (e.g. a formula syntax error); nothing changes then.
-  setCell: (sheet: number, row: number, col: number, text: string): Promise<string | null> =>
-    rejected(SheetService.SetCell(sheet, row, col, text)),
+  // error: the input was refused (formula error, data validation);
+  // notice: it was entered but the user should see a message.
+  async setCell(sheet: number, row: number, col: number, text: string): Promise<{ error: string | null; notice: string | null }> {
+    const res = await failed(SheetService.SetCell(sheet, row, col, text));
+    return { error: res.error, notice: res.value?.notice || null };
+  },
   fill: (sheet: number, ranges: RangeDTO[], text: string, activeRow: number, activeCol: number): Promise<string | null> =>
     rejected(SheetService.Fill(sheet, ranges, text, activeRow, activeCol)),
   async functions(): Promise<FuncInfo[]> {
@@ -167,6 +183,41 @@ export const sheetApi = {
   sortFilter: (sheet: number, col: number, desc: boolean): Promise<string | null> =>
     rejected(SheetService.SortFilter(sheet, col, desc)),
 
+  // ---- v0.6 ----
+  setNote: (sheet: number, row: number, col: number, text: string): Promise<string | null> =>
+    rejected(SheetService.SetNote(sheet, row, col, text)),
+  validation: (sheet: number, row: number, col: number): Promise<ValidationDTO | null> =>
+    SheetService.Validation(sheet, row, col),
+  async listValues(sheet: number, row: number, col: number): Promise<string[]> {
+    return (await SheetService.ListValues(sheet, row, col)) ?? [];
+  },
+  setValidation: (sheet: number, ranges: RangeDTO[], v: ValidationDTO | null): Promise<string | null> =>
+    rejected(SheetService.SetValidation(sheet, ranges, v)),
+  async condFormats(sheet: number): Promise<CFRuleDTO[]> {
+    return (await SheetService.CondFormats(sheet)) ?? [];
+  },
+  addCondFormat: (sheet: number, ranges: RangeDTO[], rule: CFRuleDTO): Promise<string | null> =>
+    rejected(SheetService.AddCondFormat(sheet, ranges, rule)),
+  deleteCondFormat: (sheet: number, index: number): Promise<string | null> =>
+    rejected(SheetService.DeleteCondFormat(sheet, index)),
+  clearCondFormats: (sheet: number, ranges: RangeDTO[]): Promise<string | null> =>
+    rejected(SheetService.ClearCondFormats(sheet, ranges)),
+  async tableStyles(): Promise<string[]> {
+    return (await SheetService.TableStyleList()) ?? [];
+  },
+  tableRange: (sheet: number, sel: RangeDTO): Promise<SortInfo> => SheetService.TableRange(sheet, sel),
+  createTable: (sheet: number, rg: RangeDTO, hasHeaders: boolean, style: string) =>
+    failed(SheetService.CreateTable(sheet, rg, hasHeaders, style)),
+  tableAt: (sheet: number, row: number, col: number): Promise<TableDTO | null> => SheetService.TableAt(sheet, row, col),
+  setTableStyle: (sheet: number, name: string, style: string, bands: boolean): Promise<string | null> =>
+    rejected(SheetService.SetTableStyle(sheet, name, style, bands)),
+  renameTable: (sheet: number, old: string, name: string): Promise<string | null> =>
+    rejected(SheetService.RenameTable(sheet, old, name)),
+  toggleTableTotals: (sheet: number, name: string): Promise<string | null> =>
+    rejected(SheetService.ToggleTableTotals(sheet, name)),
+  convertTable: (sheet: number, name: string): Promise<string | null> =>
+    rejected(SheetService.ConvertTable(sheet, name)),
+
   onCellsChanged(cb: (e: CellsChanged) => void): () => void {
     return on('cells:changed', cb);
   },
@@ -197,6 +248,14 @@ export const documentApi = {
   renameSheet: (index: number, name: string): Promise<string | null> =>
     rejected(DocumentService.RenameSheet(index, name)),
   moveSheet: (from: number, to: number): Promise<void> => DocumentService.MoveSheet(from, to),
+  async names(): Promise<NameDTO[]> {
+    return (await DocumentService.Names()) ?? [];
+  },
+  // oldName "" adds a name.
+  setName: (oldName: string, oldScope: number, n: NameDTO): Promise<string | null> =>
+    rejected(DocumentService.SetName(oldName, oldScope, n)),
+  deleteName: (name: string, scope: number): Promise<string | null> => rejected(DocumentService.DeleteName(name, scope)),
+  resolve: (sheet: number, text: string): Promise<TargetDTO> => DocumentService.Resolve(sheet, text),
 
   onState(cb: (s: DocState) => void): () => void {
     return on('doc:state', cb);

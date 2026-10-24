@@ -60,6 +60,8 @@ type Document struct {
 	// Row/column insertions and deletions since the last save, replayed
 	// on the source file before writing changes.
 	shifts map[*model.Sheet][]xlsxfile.Shift
+	// Defined names changed since the last save.
+	namesDirty bool
 
 	// Now is injectable for tests (date input detection).
 	Now func() time.Time
@@ -165,7 +167,7 @@ func (d *Document) SaveAs(path string) error {
 }
 
 func (d *Document) saveXLSX(path string) error {
-	ch := xlsxfile.Changes{Cells: d.changedCells, OldLayouts: map[*model.Sheet]model.Layout{}, Shifts: d.shifts}
+	ch := xlsxfile.Changes{Cells: d.changedCells, OldLayouts: map[*model.Sheet]model.Layout{}, Shifts: d.shifts, Names: d.namesDirty}
 	for sh := range d.layoutDirty {
 		ch.OldLayouts[sh] = d.layoutBase[sh]
 	}
@@ -186,6 +188,7 @@ func (d *Document) resetChanges() {
 	d.changedCells = map[*model.Sheet]map[[2]int]bool{}
 	d.layoutDirty = map[*model.Sheet]bool{}
 	d.shifts = map[*model.Sheet][]xlsxfile.Shift{}
+	d.namesDirty = false
 	d.layoutBase = map[*model.Sheet]model.Layout{}
 	for _, sh := range d.wb.Sheets {
 		d.layoutBase[sh] = sh.Layout.Clone()
@@ -312,7 +315,10 @@ func (d *Document) apply(eff command.Effect) Change {
 	if eff.Shift != nil && eff.Sheet < len(d.wb.Sheets) {
 		d.recordShift(d.wb.Sheets[eff.Sheet], *eff.Shift)
 	}
-	if eff.Structure || eff.Shift != nil {
+	if eff.Names {
+		d.namesDirty = true
+	}
+	if eff.Structure || eff.Shift != nil || eff.Names {
 		// Sheets or positions changed: resolve every reference again.
 		return Change{Effect: eff, Recalc: d.calc.Rebuild()}
 	}
