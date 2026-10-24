@@ -43,6 +43,7 @@ go run ./tools/goldenxlsx           # build testdata/golden/excel-check.xlsx (se
 - 新增鍵盤或編輯行為時，在 `frontend/src/bench/selfTest.ts` 加上對應檢查項
 - 新增或修改函數時，在 `testdata/golden/functions.tsv` 加上案例（`go test ./internal/formula -run TestGolden`）
 - self-test 模擬不了原生 IME 和選單快捷鍵，這兩項每版都要手動確認
+- 需要手動確認的項目記在 `docs/manual-checks.md`；每完成一版就把新的待確認項目加進去，確認後打勾
 - 跑 self-test 或量測前先確認沒有殘留的 `bin/ww-excel` 程序（`pgrep -fl bin/ww-excel`）；Go 端有看門狗會在 3 分鐘後強制結束
 
 ---
