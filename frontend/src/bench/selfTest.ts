@@ -7,7 +7,7 @@ import type { MenuAction } from '../input/keymap';
 import type { Range } from '../grid/selection';
 import { ensureFont } from '../stores/fontLoader';
 import { fontCss, styleStore } from '../stores/styles';
-import type { CellPos, Selection } from '../grid/selection';
+import { single, type CellPos, type Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import type { BlockCache } from '../stores/viewportCache';
 
@@ -884,7 +884,7 @@ async function outputTests(sheet: SheetDriver, h: Helpers): Promise<void> {
 // v1.0: preferences (appearance, Enter direction) and the VoiceOver live
 // region. Runs on sheet 0 of the reopened v0.7 file, from row 100.
 async function polishTests(sheet: SheetDriver, h: Helpers): Promise<void> {
-  const { key, type, goTo, step, expect, expectCell } = h;
+  const { key, type, step, expect, expectCell } = h;
   const waitFor = async (ok: () => boolean) => {
     for (let i = 0; i < 40 && !ok(); i++) await new Promise((r) => setTimeout(r, 50));
   };
@@ -908,7 +908,9 @@ async function polishTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   // 54. Enter moves right when set so; ⇧Enter goes the other way.
   await settingsApi.set({ ...initial, enterMove: 'right' });
   await new Promise((r) => setTimeout(r, 100));
-  await goTo(100, 0);
+  // Jump there directly: 100 ArrowDown presses take seconds.
+  sheet.setSelectionForTest(single({ row: 100, col: 0 }));
+  await step();
   await type('右');
   await key('Enter');
   await expectCell('Enter 向右：提交', 100, 0, '右');

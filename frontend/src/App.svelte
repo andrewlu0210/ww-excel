@@ -419,7 +419,8 @@
         window.addEventListener('unhandledrejection', (e) => fail(String(e.reason?.stack ?? e.reason)));
         await wait(500);
         // Watchdog: a hung step must still produce a report and quit.
-        const timeout = wait(60_000).then(() => ({ markdown: '# Self-test\n\n❌ 逾時（60 秒）：有步驟沒有完成。\n', failed: 1 }));
+        // A run takes about 45s; the first run after a build is slower.
+        const timeout = wait(120_000).then(() => ({ markdown: '# Self-test\n\n❌ 逾時（120 秒）：有步驟沒有完成。\n', failed: 1 }));
         // Sheet operations remount the sheet view; the driver always
         // talks to the current one.
         const driver = new Proxy({} as NonNullable<typeof sheetView>, {

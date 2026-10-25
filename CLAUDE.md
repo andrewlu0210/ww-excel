@@ -29,7 +29,7 @@ cd frontend && npm run check        # svelte-check (needs up-to-date bindings)
 WW_BENCH=1 WW_BENCH_OUT="$PWD/docs/perf-latest.md" ./bin/ww-excel
 
 # Editing self-test: drives the real controller with simulated keys, writes
-# docs/selftest-latest.md + docs/selftest.png, quits (60s watchdog)
+# docs/selftest-latest.md + docs/selftest.png, quits (120s watchdog)
 WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
 # WW_LANG=en 加在前面可以預覽英文介面（比對中文文字的檢查項會失敗）
 

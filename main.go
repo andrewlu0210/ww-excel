@@ -73,14 +73,14 @@ type docWindow struct {
 
 func main() {
 	a := &docApp{hub: service.NewHub(), windows: map[uint]*docWindow{}}
-	a.recent = service.LoadRecent(service.DefaultRecentPath())
-	// The unattended modes must not touch the user's preferences or
-	// recovery snapshots.
-	settingsPath, recoveryDir := settings.DefaultPath(), recovery.DefaultDir()
+	// The unattended modes must not touch the user's preferences, recent
+	// files or recovery snapshots.
+	settingsPath, recoveryDir, recentPath := settings.DefaultPath(), recovery.DefaultDir(), service.DefaultRecentPath()
 	preferred := preferredLanguages()
 	if unattended() {
 		tmp, _ := os.MkdirTemp("", "ww-excel-test")
 		settingsPath, recoveryDir = filepath.Join(tmp, "settings.json"), filepath.Join(tmp, "Recovery")
+		recentPath = filepath.Join(tmp, "recent.json")
 		// The checks compare Chinese UI text; WW_LANG=en previews the
 		// English UI (the checks on text then fail).
 		preferred = []string{"zh-Hant-TW"}
@@ -88,6 +88,7 @@ func main() {
 			preferred = []string{l}
 		}
 	}
+	a.recent = service.LoadRecent(recentPath)
 	a.settings = service.NewSettingsService(settings.Load(settingsPath), preferred)
 	a.autosave = service.NewAutosaver(recovery.New(recoveryDir), a.hub)
 	dialogs := service.WailsDialogs{Window: func() application.Window { return a.app.Window.Current() }}
