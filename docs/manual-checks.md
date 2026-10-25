@@ -171,3 +171,4 @@ self-test 模擬不了原生 IME、選單操作、系統剪貼簿與其他 app �
 - [ ] **Universal**：`UNIVERSAL=1 scripts/package.sh` 的 app 在 Intel Mac 能執行
 - [ ] **檢查更新**：「說明 › 檢查更新…」。還沒有 release 時顯示「已是最新版本」；在 GitHub 建立比 1.0.0 新的 release（tag 如 `v1.0.1`，非草稿、非 pre-release）後，會出現「有新版本」並可開啟下載頁面；啟動時檢查只在有新版時出現
 - [ ] **Finder 開檔**：用 DMG 安裝的 app，重測 v0.5 的 Finder 開檔與拖到 Dock 圖示
+- [ ] **同時開多個檔案不閃退**（v1.0.1 修正）：在 Finder 選 5 個以上的檔案一起開啟，或用命令列 `./bin/ww-excel a.csv b.csv …`；每個檔案一個視窗，切換視窗時「復原」選單文字正確

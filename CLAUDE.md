@@ -279,6 +279,7 @@ ww-excel/
   - **當機復原**（`internal/recovery`）：每份文件一組 `<id>.wwx` + `<id>.json`（含 PID），放在 `~/Library/Application Support/ww-excel/Recovery`。`service.Autosaver` 依偏好設定的間隔寫入有變動的文件，文件變乾淨、關閉或程式正常結束（`OnShutdown`）時刪除。啟動時 PID 已不存在的快照就是當機留下的，`service.Recover` 詢問後以「…（已復原）」開啟（沒有路徑、維持已編輯）
   - **偏好設定**（`internal/settings`）：`settings.json`，`SettingsService` 綁定給前端；變更時 Go 套用外觀（cgo 設定 `NSApp.appearance`，`appearance_darwin.go`）、語言改變時重建選單，再廣播 `settings:changed`。前端設定 `data-theme` 並通知 Canvas 重讀顏色；語言改變時重新載入視窗
   - **多語系**：原始碼裡的繁中文字就是 key，`internal/i18n/en.json` 是英文表。Go 的 `i18n.T` 支援含 `%s`／`%d` 的 key，會反向比對已經格式化的訊息（含巢狀，例如 parser 的「…（位置 N）」）；前端的 `t()` 用同一張表（啟動時由 Go 提供），Go 傳來的錯誤訊息在 `bridge` 用 `tr()` 翻譯。同一句中文有兩種意思時用 `t('情境|中文')`。新文件的工作表、表格、欄、數列名稱依語言命名（Sheet1、Table1…）。自動測試與量測模式固定用繁中
+  - **選單只能在主執行緒修改**：Wails 的 `Menu.Update` 會釋放並重建所有 NSMenuItem，其他 goroutine 同時 `SetLabel` 會寫到已釋放的物件而閃退（SIGSEGV，同時開多個檔案就會發生）。所有選單變動都經過 `main.go` 的 `onMain`（`application.InvokeSync`），復原／重做只改項目本身、不重建整個選單；app 執行前的第一次建立直接呼叫 `buildMenus`
   - **VoiceOver**：編輯用的 textarea 一直有焦點，所以作用中儲存格用 `aria-live` 區域播報（位址＋值或選取範圍，150ms 去抖動）
   - **打包**：`scripts/package.sh` 建立 `dist/WW Excel.app` 與 DMG，版本用 `-X main.version` 寫入；有 `SIGN_IDENTITY` 時加 hardened runtime 簽章，有 `NOTARY_PROFILE` 時送 notarytool 並 staple。檢查更新讀 GitHub Releases 的 latest（`internal/update`），repo 由 `main.updateRepo` 指定
 - 已知限制：檢查更新需要 repo 是公開的（私有 repo 和沒有 release 都回 404，視為已是最新版）；只會提示並開啟下載頁面，不會自動下載安裝（沒有用 Sparkle）；英文翻譯沒有經過母語者審稿，函數參數說明仍是英文縮寫；自動儲存是 Excel 的「自動回復」，不會覆寫原檔；100 萬格的文件每次快照約 0.4 秒，期間編輯會稍有延遲；選單的 About／Hide／Quit 是系統角色，文字跟隨 macOS 語言

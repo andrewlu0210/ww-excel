@@ -31,7 +31,7 @@ var assets embed.FS
 
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.0.0"
+	version = "1.0.1"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )
@@ -129,8 +129,10 @@ func main() {
 	})
 	service.ConnectClipboard(sheets, a.app.Clipboard.SetText, a.app.Clipboard.Text)
 
-	a.setMenus()
-	a.recent.OnChange = func(files []string) { a.menus.setRecent(a, files) }
+	a.buildMenus()
+	a.recent.OnChange = func(files []string) {
+		onMain(func() { a.menus.setRecent(a, files) })
+	}
 	a.settings.Changed = a.settingsChanged
 
 	first := a.openWindow(initialDocument())
@@ -208,11 +210,11 @@ func (a *docApp) openWindow(doc *document.Document) *docWindow {
 	w.session.OnState = func(st service.DocState) {
 		w.win.SetTitle(windowTitle(st))
 		if w.win.IsFocused() {
-			a.menus.update(st)
+			a.updateMenus(st)
 		}
 	}
 	w.win.OnWindowEvent(events.Common.WindowFocus, func(*application.WindowEvent) {
-		a.menus.update(w.session.State())
+		a.updateMenus(w.session.State())
 	})
 
 	// Ask about unsaved changes before closing. The hook runs on the UI
@@ -246,11 +248,27 @@ func (a *docApp) forget(id uint) {
 	}
 }
 
-// setMenus (re)builds the menu bar in the current language.
-func (a *docApp) setMenus() {
+// onMain runs a menu change on the main thread. Menu changes must not
+// overlap: Menu.Update rebuilds every NSMenuItem, and a label set from
+// another goroutine at the same time would write to a released item
+// (SIGSEGV). Running them all on the main thread serializes them; on
+// the main thread itself fn runs inline.
+func onMain(fn func()) { application.InvokeSync(fn) }
+
+// setMenus rebuilds the menu bar in the current language.
+func (a *docApp) setMenus() { onMain(a.buildMenus) }
+
+// buildMenus creates the menu bar. Called directly only before the app
+// runs, when there is no main-thread loop to dispatch to yet.
+func (a *docApp) buildMenus() {
 	a.menus = buildMenu(a)
 	a.app.Menu.Set(a.menus.root)
 	a.menus.setRecent(a, a.recent.List())
+}
+
+// updateMenus shows a document's undo/redo state in the menu bar.
+func (a *docApp) updateMenus(st service.DocState) {
+	onMain(func() { a.menus.update(st) })
 }
 
 // settingsChanged applies new preferences to the app and every window.
@@ -259,7 +277,7 @@ func (a *docApp) settingsChanged(old, cur service.UISettings) {
 		setAppearance(cur.Appearance)
 	}
 	if old.Lang != cur.Lang {
-		application.InvokeSync(a.setMenus)
+		a.setMenus()
 		a.mu.Lock()
 		for _, w := range a.windows {
 			st := w.session.State()
@@ -268,7 +286,7 @@ func (a *docApp) settingsChanged(old, cur service.UISettings) {
 		a.mu.Unlock()
 		if w := a.app.Window.Current(); w != nil {
 			if dw := a.windowFor(w); dw != nil {
-				a.menus.update(dw.session.State())
+				a.updateMenus(dw.session.State())
 			}
 		}
 	}
@@ -533,7 +551,7 @@ func buildMenu(a *docApp) *appMenus {
 	return m
 }
 
-// setRecent rebuilds 最近使用的檔案.
+// setRecent rebuilds 最近使用的檔案; it must run on the main thread.
 func (m *appMenus) setRecent(a *docApp, files []string) {
 	m.recent.Clear()
 	if len(files) == 0 {
@@ -555,10 +573,11 @@ func (m *appMenus) setRecent(a *docApp, files []string) {
 	m.root.Update()
 }
 
+// update must run on the main thread (docApp.updateMenus). The items
+// change in place, so the menu is not rebuilt.
 func (m *appMenus) update(st service.DocState) {
 	m.undo.SetLabel(withAction("復原", st.UndoLabel)).SetEnabled(st.CanUndo)
 	m.redo.SetLabel(withAction("重做", st.RedoLabel)).SetEnabled(st.CanRedo)
-	m.root.Update()
 }
 
 func withAction(verb, label string) string {
