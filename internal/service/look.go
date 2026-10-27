@@ -150,7 +150,7 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 // styles when look is not nil.
 func (l *sheetLook) view(row, col int, c model.Cell) (dto CellDTO, show bool) {
 	v, n, x, st, fc := cellView(l.wb, l.sh, row, col, c)
-	dto = CellDTO{V: v, N: n, X: x, St: st, Fc: fc}
+	dto = CellDTO{V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(c.Rich, l.wb.StyleTable().Get(st).Font)}
 	show = c.HasContent() || st != 0
 	st2, bar, bc, any := l.style(row, col, c, st)
 	if any {

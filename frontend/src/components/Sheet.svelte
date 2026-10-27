@@ -37,6 +37,7 @@
   import { HEADER_H, metrics, REF_COLORS, type Highlight } from '../grid/renderer';
   import { LINE_HEIGHT, TextCache } from '../grid/text';
   import { styleStore } from '../stores/styles';
+  import { drawShape } from '../shapes/render';
   import {
     clampPos,
     current,
@@ -74,6 +75,11 @@
   import Grid from './Grid.svelte';
 
   interface Props {
+    paintMode?: 'off' | 'once' | 'repeat';
+    paintSource?: Range | null;
+    oncancelpaint?: () => void;
+    onpainted?: () => void;
+    zoom?: number;
     sheet: number;
     info: SheetInfo;
     initialSelection?: Selection;
@@ -100,6 +106,11 @@
   }
 
   let {
+    paintMode = 'off',
+    paintSource = null,
+    oncancelpaint,
+    onpainted,
+    zoom = 100,
     sheet,
     info,
     initialSelection,
@@ -115,6 +126,8 @@
     crossEdit = null,
     oncrossdone,
   }: Props = $props();
+
+  let scale = $derived(zoom / 100);
 
   // Fixed for the lifetime of the component: the grid is always full size.
   const lim = untrack(() => ({ rows: info.rows, cols: info.cols }));
@@ -175,7 +188,7 @@
 
   function objectRect(o: ObjectDTO): { x: number; y: number; w: number; h: number } {
     const rc = grid?.areaRect({ r0: o.row, c0: o.col, r1: o.row, c1: o.col }) ?? { x: 0, y: 0, w: 0, h: 0 };
-    return { x: rc.x + o.dx, y: rc.y + o.dy, w: o.w, h: o.h };
+    return { x: rc.x + o.dx * scale, y: rc.y + o.dy * scale, w: o.w * scale, h: o.h * scale };
   }
 
   // Chart data and pictures for the objects on this sheet.
@@ -206,8 +219,24 @@
   function commitObject(o: ObjectDTO, rect: { x: number; y: number; w: number; h: number }, label: string): void {
     if (!grid) return;
     const at = grid.cellAtPoint(rect.x + 0.5, rect.y + 0.5);
-    const next = { ...o, row: at.pos.row, col: at.pos.col, dx: Math.max(0, rect.x - at.rect.x), dy: Math.max(0, rect.y - at.rect.y), w: rect.w, h: rect.h, chart: null };
+    const next = { ...o, row: at.pos.row, col: at.pos.col, dx: Math.max(0, (rect.x - at.rect.x) / scale), dy: Math.max(0, (rect.y - at.rect.y) / scale), w: rect.w / scale, h: rect.h / scale, chart: null };
     void serial(() => sheetApi.updateObject(sheet, next, label)).then(notify);
+  }
+
+  // Composite visible DOM objects as well as the grid for compatibility snapshots.
+  export function snapshotWithObjects(): string {
+    return grid?.snapshot((ctx, dpr) => {
+      ctx.save(); ctx.scale(dpr, dpr);
+      const vp = grid!.viewport();
+      ctx.beginPath(); ctx.rect(metrics.headerW * scale, HEADER_H * scale, vp.width - metrics.headerW * scale, vp.height - HEADER_H * scale); ctx.clip();
+      for (const o of objects) {
+        const element = root.querySelector<HTMLCanvasElement | HTMLImageElement>(`[data-object-id="${o.id}"] canvas, [data-object-id="${o.id}"] img`);
+        if (!element || element instanceof HTMLImageElement && (!element.complete || !element.naturalWidth)) continue;
+        const rect = objectRect(o);
+        ctx.drawImage(element, rect.x, rect.y, rect.w, rect.h);
+      }
+      ctx.restore();
+    }) ?? '';
   }
 
   export function getObjects(): ObjectDTO[] {
@@ -226,14 +255,15 @@
   export function chartImages(): Record<number, string> {
     const out: Record<number, string> = {};
     for (const o of objects) {
-      if (o.kind !== 'chart' || !o.chart) continue;
+      if (!o.chart && !o.shape) continue;
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(o.w * 2);
       canvas.height = Math.round(o.h * 2);
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
       ctx.scale(2, 2);
-      drawChart(ctx, o.w, o.h, o.chart, toChartData(chartData.get(o.id)), LIGHT_THEME);
+      if (o.shape) drawShape(ctx, o.w, o.h, o.shape);
+      else if (o.chart) drawChart(ctx, o.w, o.h, o.chart, toChartData(chartData.get(o.id)), LIGHT_THEME);
       out[o.id] = canvas.toDataURL('image/png');
     }
     return out;
@@ -501,6 +531,7 @@
   // Entry point for menu items and ⌘ shortcuts. Must not be called from
   // inside the queue.
   export async function runMenu(action: MenuAction, pasteText: string | null = null): Promise<void> {
+    if (paintMode !== 'off') oncancelpaint?.();
     const now = performance.now();
     if (lastMenu.action === action && now - lastMenu.at < 150) return;
     lastMenu = { action, at: now };
@@ -783,6 +814,11 @@
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    if (paintMode !== 'off' && e.key === 'Escape') {
+      e.preventDefault();
+      oncancelpaint?.();
+      return;
+    }
     if (editing) {
       if (suggestions.length > 0 && handleSuggestionKey(e)) {
         e.preventDefault();
@@ -971,10 +1007,12 @@
     const cellStyle = styleStore.get(grid.styleAt(pos.row, pos.col));
     if (cellStyle) {
       st.font = cellStyle.font;
-      st.lineHeight = `${Math.round(cellStyle.fontPx * LINE_HEIGHT)}px`;
+      st.fontSize = `${cellStyle.fontPx * scale}px`;
+      st.lineHeight = `${Math.round(cellStyle.fontPx * LINE_HEIGHT * scale)}px`;
       st.color = cellStyle.color ?? '';
     }
-    st.left = `${Math.max(rc.x, metrics.headerW) - 1}px`;
+    st.padding = `${scale}px ${3 * scale}px 0 ${4 * scale}px`;
+    st.left = `${Math.max(rc.x, metrics.headerW * scale) - 1}px`;
     st.top = `${rc.y - 1}px`;
     if (!editing) {
       st.width = `${rc.w + 1}px`;
@@ -982,7 +1020,7 @@
       return;
     }
     const maxW = Math.max(rc.w + 1, vp.width - rc.x - 2);
-    const want = textWidth(editor.value) + 12;
+    const want = textWidth(editor.value) + 12 * scale;
     st.width = `${Math.min(maxW, Math.max(rc.w + 1, want))}px`;
     st.height = 'auto';
     st.height = `${Math.max(rc.h + 1, editor.scrollHeight + 2)}px`;
@@ -1057,6 +1095,29 @@
         break;
       }
     }
+    if (e.kind === 'up' && paintMode !== 'off') void paintFormats();
+  }
+
+  export async function captureFormats(): Promise<Range | null> {
+    if (editing) commit('stay');
+    await whenIdle();
+    const source = { ...current(selection) };
+    const error = await serial(() => sheetApi.captureFormats(sheet, toDTO(source)));
+    if (error) { notify(error); return null; }
+    focus();
+    return source;
+  }
+
+  let paintBusy = false;
+  async function paintFormats(): Promise<void> {
+    if (paintBusy) return;
+    paintBusy = true;
+    const ranges = selection.ranges.map(toDTO);
+    try {
+      const error = await serial(() => sheetApi.paintFormats(sheet, ranges));
+      if (error) notify(error);
+      else onpainted?.();
+    } finally { paintBusy = false; }
   }
 
   // ---- Backend events ----
@@ -1906,6 +1967,8 @@
   <Grid
     bind:this={grid}
     {sheet}
+    {zoom}
+    painting={paintMode !== 'off'}
     {info}
     {layout}
     {selection}
@@ -1917,7 +1980,7 @@
       layoutEditor();
       viewTick++;
     }}
-    {copyRange}
+    copyRange={paintSource ?? copyRange}
     {fillPreview}
     onfilterbutton={(e) => void onFilterButton(e)}
     oncontext={onContext}
@@ -1926,10 +1989,11 @@
     {#if objects.length > 0}
       <ObjectLayer
         {objects}
+        {scale}
         rectOf={objectRect}
         tick={viewTick}
-        left={metrics.headerW}
-        top={HEADER_H}
+        left={metrics.headerW * scale}
+        top={HEADER_H * scale}
         selected={selectedObject}
         {chartData}
         {images}

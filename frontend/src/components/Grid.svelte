@@ -18,12 +18,15 @@
     type SheetLook,
   } from '../grid/renderer';
   import { ScrollAxis } from '../grid/scroll';
+  import { fitZoom, ZoomTransform } from '../grid/zoom';
   import type { CellPos, Range, Selection } from '../grid/selection';
   import type { ContextRequest, GridPointer, PointerArea, ResizeRequest } from '../input/pointer';
   import { styleStore } from '../stores/styles';
   import { BlockCache } from '../stores/viewportCache';
 
   interface Props {
+    painting?: boolean;
+    zoom?: number;
     sheet: number;
     info: SheetInfo;
     layout: LayoutDTO | null;
@@ -49,6 +52,8 @@
   }
 
   let {
+    painting = false,
+    zoom = 100,
     sheet,
     info,
     layout,
@@ -84,6 +89,8 @@
   );
   // Draw cost of the grid layer per frame (ms).
   export const drawTimes = new Samples(240);
+
+  let transform = $derived(new ZoomTransform(zoom));
 
   const scrollY = new ScrollAxis();
   const scrollX = new ScrollAxis();
@@ -158,35 +165,35 @@
   }
 
   function viewW(): number {
-    return scroller.clientWidth;
+    return transform.toLogical(scroller.clientWidth);
   }
 
   function viewH(): number {
-    return scroller.clientHeight;
+    return transform.toLogical(scroller.clientHeight);
   }
 
   function updateSpacer(): void {
-    scrollY.update(HEADER_H + rows.total, viewH());
-    scrollX.update(metrics.headerW + cols.total, viewW());
+    scrollY.update(transform.toScreen(HEADER_H + rows.total), scroller.clientHeight);
+    scrollX.update(transform.toScreen(metrics.headerW + cols.total), scroller.clientWidth);
     spacerH = scrollY.spacer;
     spacerW = scrollX.spacer;
   }
 
   function resize(): void {
     // Exclude space taken by non-overlay scrollbars.
-    const w = viewW();
-    const h = viewH();
+    const w = scroller.clientWidth;
+    const h = scroller.clientHeight;
     const dpr = window.devicePixelRatio || 1;
-    gridLayer?.resize(w, h, dpr);
-    selLayer?.resize(w, h, dpr);
+    gridLayer?.resize(w, h, dpr, transform.scale);
+    selLayer?.resize(w, h, dpr, transform.scale);
     updateSpacer();
     drawNow();
   }
 
   function onScroll(): void {
     if (benchRunning || destroyed || !scroller) return;
-    sx = scrollX.toContent(scroller.scrollLeft);
-    sy = scrollY.toContent(scroller.scrollTop);
+    sx = transform.toLogical(scrollX.toContent(scroller.scrollLeft));
+    sy = transform.toLogical(scrollY.toContent(scroller.scrollTop));
     schedule();
   }
 
@@ -196,8 +203,8 @@
     if (destroyed || !scroller) return;
     sx = clamp(x, cols.total - (viewW() - metrics.headerW));
     sy = clamp(y, rows.total - (viewH() - HEADER_H));
-    scroller.scrollLeft = scrollX.toScroll(sx);
-    scroller.scrollTop = scrollY.toScroll(sy);
+    scroller.scrollLeft = scrollX.toScroll(transform.toScreen(sx));
+    scroller.scrollTop = scrollY.toScroll(transform.toScreen(sy));
     schedule();
   }
 
@@ -235,6 +242,15 @@
     if (l) untrack(() => applyLayout(l));
   });
 
+  $effect(() => {
+    void transform;
+    untrack(() => {
+      if (!gridLayer || !scroller || destroyed) return;
+      resize();
+      setScroll(sx, sy);
+    });
+  });
+
   // ---- Pointer input ----
 
   type Drag =
@@ -246,7 +262,7 @@
 
   function local(e: { clientX: number; clientY: number }): { x: number; y: number } {
     const rect = host.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return { x: transform.toLogical(e.clientX - rect.left), y: transform.toLogical(e.clientY - rect.top) };
   }
 
   function areaAt(x: number, y: number): PointerArea {
@@ -265,15 +281,15 @@
       const c = cols.indexAt(x - metrics.headerW + s);
       const right = metrics.headerW + cols.offset(c + 1) - s;
       const left = metrics.headerW + cols.offset(c) - s;
-      if (Math.abs(x - right) <= 4) return { rows: false, index: c };
-      if (Math.abs(x - left) <= 4 && c > 0) return { rows: false, index: prevVisible(cols, c) };
+      if (Math.abs(x - right) <= transform.toLogical(4)) return { rows: false, index: c };
+      if (Math.abs(x - left) <= transform.toLogical(4) && c > 0) return { rows: false, index: prevVisible(cols, c) };
     } else if (area === 'row') {
       const s = scrollYAt(y);
       const r = rows.indexAt(y - HEADER_H + s);
       const bottom = HEADER_H + rows.offset(r + 1) - s;
       const top = HEADER_H + rows.offset(r) - s;
-      if (Math.abs(y - bottom) <= 3) return { rows: true, index: r };
-      if (Math.abs(y - top) <= 3 && r > 0) return { rows: true, index: prevVisible(rows, r) };
+      if (Math.abs(y - bottom) <= transform.toLogical(3)) return { rows: true, index: r };
+      if (Math.abs(y - top) <= transform.toLogical(3) && r > 0) return { rows: true, index: prevVisible(rows, r) };
     }
     return null;
   }
@@ -310,7 +326,7 @@
     e.preventDefault();
     lastPointer = { ...p, shift: e.shiftKey, meta: e.metaKey };
     scroller.setPointerCapture(e.pointerId);
-    const border = borderAt(p.x, p.y);
+    const border = painting ? null : borderAt(p.x, p.y);
     if (border) {
       const axis = border.rows ? rows : cols;
       drag = {
@@ -323,18 +339,18 @@
       };
       return;
     }
-    if (onHandle(p.x, p.y)) {
+    if (!painting && onHandle(p.x, p.y)) {
       drag = { kind: 'select', area: 'fill', pointerId: e.pointerId };
       emit('down', 'fill');
       return;
     }
     const area = areaAt(p.x, p.y);
-    if (area === 'cell') {
+    if (!painting && area === 'cell') {
       const btn = filterButtonAt(p.x, p.y);
       if (btn) {
         scroller.releasePointerCapture(e.pointerId);
         const rect = host.getBoundingClientRect();
-        onfilterbutton?.({ col: btn.col, x: rect.left + btn.x, y: rect.top + btn.y });
+        onfilterbutton?.({ col: btn.col, x: rect.left + transform.toScreen(btn.x), y: rect.top + transform.toScreen(btn.y) });
         return;
       }
     }
@@ -353,7 +369,7 @@
     if (!f) return null;
     const pos = posAt(x, y);
     if (pos.row !== f.r0 || pos.col < f.c0 || pos.col > f.c1) return null;
-    const b = filterButton(cellRect(pos));
+    const b = filterButton(frozenRect(rows, cols, { r0: pos.row, c0: pos.col, r1: pos.row, c1: pos.col }, look.freeze, sx, sy));
     if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) return null;
     return { col: pos.col, x: b.x, y: b.y + b.h };
   }
@@ -376,7 +392,7 @@
         onhover?.(over);
       }
       const border = borderAt(p.x, p.y);
-      scroller.style.cursor = border
+      scroller.style.cursor = painting ? 'copy' : border
         ? border.rows
           ? 'row-resize'
           : 'col-resize'
@@ -425,13 +441,14 @@
   }
 
   function onDblClick(e: MouseEvent): void {
+    if (painting) return;
     const p = local(e);
-    const border = borderAt(p.x, p.y);
+    const border = painting ? null : borderAt(p.x, p.y);
     if (border) {
       onautofit?.(border);
       return;
     }
-    if (onHandle(p.x, p.y)) {
+    if (!painting && onHandle(p.x, p.y)) {
       emit('dbl', 'fill');
       return;
     }
@@ -472,15 +489,34 @@
 
   // Rectangle of a range in host coordinates (may lie off screen).
   export function areaRect(r: Range): Rect {
-    return frozenRect(rows, cols, r, look.freeze, sx, sy);
+    return transform.rect(frozenRect(rows, cols, r, look.freeze, sx, sy));
   }
 
   export function cellRect(pos: CellPos): Rect {
     return areaRect({ r0: pos.row, c0: pos.col, r1: pos.row, c1: pos.col });
   }
 
+  function selectionBounds(): Range {
+    return selection.ranges.reduce((a, b) => ({
+      r0: Math.min(a.r0, b.r0), c0: Math.min(a.c0, b.c0),
+      r1: Math.max(a.r1, b.r1), c1: Math.max(a.c1, b.c1),
+    }));
+  }
+
+  export function zoomForSelection(): number {
+    const r = selectionBounds();
+    const width = frozenW() + Math.max(0, cols.offset(r.c1 + 1) - cols.offset(Math.max(r.c0, look.freeze.cols)));
+    const height = frozenH() + Math.max(0, rows.offset(r.r1 + 1) - rows.offset(Math.max(r.r0, look.freeze.rows)));
+    return fitZoom(scroller.clientWidth, scroller.clientHeight, metrics.headerW + width, HEADER_H + height);
+  }
+
+  export function revealSelection(): void {
+    const r = selectionBounds();
+    setScroll(Math.max(0, cols.offset(r.c0) - frozenW()), Math.max(0, rows.offset(r.r0) - frozenH()));
+  }
+
   export function viewport(): { width: number; height: number } {
-    return { width: viewW(), height: viewH() };
+    return { width: scroller.clientWidth, height: scroller.clientHeight };
   }
 
   export function rowHeight(row: number): number {
@@ -606,8 +642,8 @@
         const pos = step(i);
         sx = clamp(pos.x, cols.total - (viewW() - metrics.headerW));
         sy = clamp(pos.y, rows.total - (viewH() - HEADER_H));
-        scroller.scrollLeft = scrollX.toScroll(sx);
-        scroller.scrollTop = scrollY.toScroll(sy);
+        scroller.scrollLeft = scrollX.toScroll(transform.toScreen(sx));
+        scroller.scrollTop = scrollY.toScroll(transform.toScreen(sy));
         const t0 = performance.now();
         drawNow();
         drawMs.push(performance.now() - t0);
@@ -618,13 +654,14 @@
   }
 
   // Composites both layers into a PNG data URL.
-  export function snapshot(): string {
+  export function snapshot(objects?: (ctx: CanvasRenderingContext2D, dpr: number) => void): string {
     const out = document.createElement('canvas');
     out.width = gridCanvas.width;
     out.height = gridCanvas.height;
     const ctx = out.getContext('2d')!;
     ctx.drawImage(gridCanvas, 0, 0);
     ctx.drawImage(selCanvas, 0, 0);
+    objects?.(ctx, window.devicePixelRatio || 1);
     return out.toDataURL('image/png');
   }
 
@@ -636,7 +673,7 @@
   // The cell under a point in host coordinates, and that cell's
   // rectangle (for anchoring dragged objects).
   export function cellAtPoint(x: number, y: number): { pos: CellPos; rect: Rect } {
-    const pos = posAt(x, y);
+    const pos = posAt(transform.toLogical(x), transform.toLogical(y));
     return { pos, rect: cellRect(pos) };
   }
 
@@ -660,6 +697,7 @@
   <!-- Transparent native scroller on top: receives wheel, scrollbar and pointer input. -->
   <div
     class="scroller"
+    style:cursor={painting ? 'copy' : undefined}
     role="application"
     aria-label={t('工作表格線')}
     bind:this={scroller}

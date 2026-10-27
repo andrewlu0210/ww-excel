@@ -87,14 +87,15 @@ type fileFilter struct {
 // A cell has at most one value field (n, s, b or e). F is the formula
 // text without "="; the value then is its cached result.
 type fileCell struct {
-	R  int      `json:"r"`
-	C  int      `json:"c"`
-	N  *float64 `json:"n,omitempty"`
-	S  *string  `json:"s,omitempty"`
-	B  *bool    `json:"b,omitempty"`
-	E  string   `json:"e,omitempty"`
-	F  string   `json:"f,omitempty"`
-	St uint32   `json:"st,omitempty"`
+	Rich *model.RichText `json:"rich,omitempty"`
+	R    int             `json:"r"`
+	C    int             `json:"c"`
+	N    *float64        `json:"n,omitempty"`
+	S    *string         `json:"s,omitempty"`
+	B    *bool           `json:"b,omitempty"`
+	E    string          `json:"e,omitempty"`
+	F    string          `json:"f,omitempty"`
+	St   uint32          `json:"st,omitempty"`
 }
 
 func Write(w io.Writer, wb *model.Workbook) error {
@@ -103,7 +104,7 @@ func Write(w io.Writer, wb *model.Workbook) error {
 	for _, sh := range wb.Sheets {
 		fs := fileSheet{Name: sh.Name, Layout: writeLayout(sh.Layout), Cells: []fileCell{}}
 		sh.EachInRange(all, func(row, col int, c model.Cell) {
-			fc := fileCell{R: row, C: col, St: c.S}
+			fc := fileCell{R: row, C: col, St: c.S, Rich: c.Rich}
 			switch c.Kind {
 			case model.KindNumber:
 				fc.N = &c.Num
@@ -162,7 +163,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 	if len(doc.Styles) > 0 {
 		wb.Styles = model.NewStyleTable(doc.Styles[0])
 		for i, st := range doc.Styles[1:] {
-			if id := wb.Styles.Intern(st); int(id) != i+1 {
+			if id := wb.Styles.InternExplicit(st); int(id) != i+1 {
 				return nil, fmt.Errorf(".wwx has duplicate styles")
 			}
 		}
@@ -188,6 +189,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 			case fc.E != "":
 				cell = model.ErrorCell(fc.E)
 			}
+			cell.Rich = fc.Rich
 			if fc.F != "" {
 				cell.F = &model.Formula{Text: fc.F}
 			}

@@ -111,11 +111,12 @@ func ClearRanges(wb *model.Workbook, sheet int, ranges []model.Range, mode Clear
 			case ClearContents:
 				after = model.Cell{S: c.S}
 			case ClearFormats:
+				after.Rich = nil
 				after.S = 0
 			case ClearAll:
 				after = model.Cell{}
 			}
-			if after.SameInput(c) && after.S == c.S {
+			if after.SameInput(c) && after.S == c.S && after.Rich == c.Rich {
 				return
 			}
 			changes = append(changes, CellChange{Row: row, Col: col, After: after})

@@ -4,6 +4,8 @@ import type { BlockCache, CellView } from '../stores/viewportCache';
 import { AxisLayout, colName } from './layout';
 import { current, isFullCols, isFullRows, isSingleCell, type Range, type Selection } from './selection';
 import { LINE_HEIGHT, TextCache } from './text';
+import { drawRichLines, layoutRichText, styledRuns, type RichLine } from './richtext';
+import { fontEpoch } from '../stores/fontLoader';
 
 export const HEADER_H = 22;
 
@@ -169,10 +171,10 @@ abstract class Layer {
     this.ctx = ctx;
   }
 
-  resize(width: number, height: number, dpr: number): void {
-    this.width = width;
-    this.height = height;
-    this.dpr = dpr;
+  resize(width: number, height: number, dpr: number, zoom = 1): void {
+    this.width = width / zoom;
+    this.height = height / zoom;
+    this.dpr = dpr * zoom;
     this.canvas.width = Math.round(width * dpr);
     this.canvas.height = Math.round(height * dpr);
     this.canvas.style.width = `${width}px`;
@@ -235,6 +237,7 @@ const BORDER_DASH: Record<string, number[]> = {
 };
 
 export class GridRenderer extends Layer {
+  private richLines = new Map<string, RichLine[]>();
   private theme = readTheme();
   private text: TextCache;
   look: SheetLook = emptyLook();
@@ -599,6 +602,28 @@ export class GridRenderer extends Layer {
     ctx.font = font;
     ctx.fillStyle = cell.color ?? st?.color ?? (st?.fill ? contrastText(st.fill) : this.theme.cellText);
     ctx.textBaseline = 'alphabetic';
+    if (cell.runs?.length) {
+      const width = Math.max(1, cellW - pad * 2);
+      const color = String(ctx.fillStyle);
+      const key = `${fontEpoch}:${width}:${!!d?.wrap}:${color}:${JSON.stringify(cell.runs)}`;
+      let lines = this.richLines.get(key);
+      const measure = (f: string, text: string) => this.text.width(f, text);
+      if (!lines) {
+        lines = layoutRichText(styledRuns(cell.runs, color), width, !!d?.wrap, measure, px);
+        if (this.richLines.size > 2000) this.richLines.clear();
+        this.richLines.set(key, lines);
+      }
+      let clipL = left, clipR = right;
+      if (!d?.wrap && lines[0].width > width && overflow) {
+        if (align === 'left' || align === 'center') clipR = overflow(1);
+        if (align === 'right' || align === 'center') clipL = overflow(-1);
+      }
+      ctx.save(); ctx.beginPath(); ctx.rect(clipL, top, clipR - clipL - 1, bottom - top - 1); ctx.clip();
+      drawRichLines(ctx, lines, measure, { x: left, y: top, w: cellW, h: bottom - top }, align, valign,
+        { left: pad, right: pad, top: 1, bottom: 4 });
+      ctx.restore();
+      return;
+    }
 
     let lines: string[];
     let clipL = left;

@@ -33,6 +33,13 @@ export function EmitBurst(count: number, blocksPerEvent: number): $CancellablePr
 }
 
 /**
+ * FixturePath selects an explicit workbook for read-only display compatibility checks.
+ */
+export function FixturePath(): $CancellablePromise<string> {
+    return $Call.ByID(1922684470);
+}
+
+/**
  * Mem returns current Go heap statistics.
  */
 export function Mem(): $CancellablePromise<$models.MemStats> {

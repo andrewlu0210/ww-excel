@@ -9,13 +9,15 @@
   interface Props {
     style: StyleDTO | null;
     merged: boolean;
+    painting: boolean;
+    onpaint: (repeat: boolean) => void;
     onformat: (patch: FormatPatch) => void;
     onmerge: (center: boolean) => void;
     onclear: (mode: 'contents' | 'formats' | 'all') => void;
     onnumberdialog: () => void;
   }
 
-  let { style, merged, onformat, onmerge, onclear, onnumberdialog }: Props = $props();
+  let { style, merged, painting, onpaint, onformat, onmerge, onclear, onnumberdialog }: Props = $props();
 
   const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
   const numberFormats: { label: string; code: string }[] = [
@@ -72,6 +74,22 @@
 <svelte:window onpointerdown={(e) => open && !(e.target as Element).closest?.('.menu-host') && (open = null)} />
 
 <div class="toolbar" role="toolbar" aria-label={t('常用')}>
+  <div class="group">
+    <button class="format-painter" class:on={painting} aria-pressed={painting} aria-label={t('複製格式')}
+      title={t('複製格式：按一下套用一次，按兩下連續套用；Esc 取消')}
+      onpointerdown={keep} onclick={(e) => { if (e.detail < 2) onpaint(false); }} ondblclick={() => onpaint(true)}>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <g transform="rotate(45 12 12)">
+          <path d="M10.4 10.5V3.6a1.6 1.6 0 0 1 3.2 0v6.9" fill="var(--chrome-bg)" />
+          <circle cx="12" cy="4.3" r="0.55" fill="currentColor" stroke="none" />
+          <path d="M7 14.5h10v7l-3-1-2 1-5-1z" fill="#E99A45" />
+          <path d="M9.5 17v3M12 17v3.5M14.5 17v2.5" stroke="#A7652B" stroke-width="0.8" />
+          <path d="M7 10h10v5H7z" fill="#D4D7DA" />
+          <path d="M8.8 12h6.4" stroke="#92989E" stroke-width="0.8" />
+        </g>
+      </svg>
+    </button>
+  </div>
   <select
     class="font"
     tabindex="-1"

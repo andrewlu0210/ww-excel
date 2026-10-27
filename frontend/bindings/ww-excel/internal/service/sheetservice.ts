@@ -33,6 +33,13 @@ export function AutoFitColumn(sheet: number, col: number): $CancellablePromise<$
 }
 
 /**
+ * CaptureFormats keeps a per-window format sample without touching the clipboard.
+ */
+export function CaptureFormats(sheet: number, area: $models.RangeDTO): $CancellablePromise<void> {
+    return $Call.ByID(746580403, sheet, area);
+}
+
+/**
  * ChartData evaluates a chart's series for drawing.
  */
 export function ChartData(sheet: number, id: number): $CancellablePromise<$models.ChartDataDTO> {
@@ -249,6 +256,13 @@ export function ObjectImage(sheet: number, id: number): $CancellablePromise<stri
  */
 export function PageSetup(sheet: number): $CancellablePromise<$models.PageSetupDTO> {
     return $Call.ByID(16217975, sheet);
+}
+
+/**
+ * PaintFormats is one undoable operation. The sample is reusable until replaced.
+ */
+export function PaintFormats(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3524101745, sheet, ranges);
 }
 
 /**

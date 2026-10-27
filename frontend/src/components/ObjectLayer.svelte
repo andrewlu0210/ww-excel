@@ -4,6 +4,8 @@
   // locally and reports the final rectangle when the pointer is released.
   import { t } from '../i18n';
   import type { ChartDataDTO, ObjectDTO } from '../bridge/sheet';
+  import { drawShape } from '../shapes/render';
+  import { fontEpoch } from '../stores/fontLoader';
   import { drawChart, LIGHT_THEME } from '../charts/render';
 
   interface Rect {
@@ -14,6 +16,7 @@
   }
 
   interface Props {
+    scale?: number;
     objects: ObjectDTO[];
     // Rectangle of an object in host coordinates, recomputed when tick
     // changes (scrolling, layout).
@@ -30,7 +33,7 @@
     onedit: (id: number) => void;
   }
 
-  let { objects, rectOf, tick, left, top, selected, chartData, images, onselect, oncommit, onedit }: Props = $props();
+  let { scale = 1, objects, rectOf, tick, left, top, selected, chartData, images, onselect, oncommit, onedit }: Props = $props();
 
   // An object being dragged: which edges move (move = all).
   let drag = $state<{ id: number; edges: string; x0: number; y0: number; start: Rect; now: Rect } | null>(null);
@@ -42,7 +45,7 @@
   }
 
   function onDown(e: PointerEvent, o: ObjectDTO, edges: string): void {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || o.shape) return;
     e.preventDefault();
     e.stopPropagation();
     onselect(o.id);
@@ -62,15 +65,15 @@
       y += dy;
     } else {
       if (drag.edges.includes('w')) {
-        x = Math.min(s.x + dx, s.x + s.w - 10);
+        x = Math.min(s.x + dx, s.x + s.w - 10 * scale);
         w = s.w - (x - s.x);
       }
-      if (drag.edges.includes('e')) w = Math.max(10, s.w + dx);
+      if (drag.edges.includes('e')) w = Math.max(10 * scale, s.w + dx);
       if (drag.edges.includes('n')) {
-        y = Math.min(s.y + dy, s.y + s.h - 10);
+        y = Math.min(s.y + dy, s.y + s.h - 10 * scale);
         h = s.h - (y - s.y);
       }
-      if (drag.edges.includes('s')) h = Math.max(10, s.h + dy);
+      if (drag.edges.includes('s')) h = Math.max(10 * scale, s.h + dy);
       // Shift keeps the aspect ratio (always for corner drags of pictures).
       const o = objects.find((x) => x.id === drag!.id);
       if ((e.shiftKey || o?.kind === 'image') && drag.edges.length === 2) {
@@ -95,15 +98,29 @@
   }
 
   // Draws a chart into its canvas whenever size or data change.
-  function chart(canvas: HTMLCanvasElement, args: { o: ObjectDTO; w: number; h: number; data: ChartDataDTO | undefined }) {
+  function chart(canvas: HTMLCanvasElement, args: { o: ObjectDTO; w: number; h: number; data: ChartDataDTO | undefined; scale: number }) {
     const paint = (a: typeof args) => {
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.max(1, Math.round(a.w * dpr));
       canvas.height = Math.max(1, Math.round(a.h * dpr));
       const ctx = canvas.getContext('2d');
       if (!ctx || !a.o.chart) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawChart(ctx, a.w, a.h, a.o.chart, toChartData(a.data), LIGHT_THEME);
+      ctx.setTransform(dpr * a.scale, 0, 0, dpr * a.scale, 0, 0);
+      drawChart(ctx, a.w / a.scale, a.h / a.scale, a.o.chart, toChartData(a.data), LIGHT_THEME);
+    };
+    paint(args);
+    return { update: paint };
+  }
+
+  function shape(canvas: HTMLCanvasElement, args: { o: ObjectDTO; w: number; h: number; scale: number; tick: number }) {
+    const paint = (a: typeof args) => {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(a.w * dpr));
+      canvas.height = Math.max(1, Math.round(a.h * dpr));
+      const ctx = canvas.getContext('2d');
+      if (!ctx || !a.o.shape) return;
+      ctx.setTransform(dpr * a.scale, 0, 0, dpr * a.scale, 0, 0);
+      drawShape(ctx, a.w / a.scale, a.h / a.scale, a.o.shape);
     };
     paint(args);
     return { update: paint };
@@ -118,7 +135,9 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="object"
+      data-object-id={o.id}
       class:selected={selected === o.id}
+      class:readonly={!!o.shape}
       style:left="{r.x - left}px"
       style:top="{r.y - top}px"
       style:width="{r.w}px"
@@ -129,12 +148,14 @@
       onpointercancel={onUp}
       ondblclick={() => o.kind === 'chart' && onedit(o.id)}
     >
-      {#if o.kind === 'chart'}
-        <canvas use:chart={{ o, w: r.w, h: r.h, data: chartData.get(o.id) }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
+      {#if o.shape}
+        <canvas use:shape={{ o, w: r.w, h: r.h, scale, tick: tick + fontEpoch }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
+      {:else if o.kind === 'chart'}
+        <canvas use:chart={{ o, w: r.w, h: r.h, data: chartData.get(o.id), scale }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
       {:else if images.get(o.imageKey)}
         <img src={images.get(o.imageKey)} alt="" draggable="false" />
       {/if}
-      {#if selected === o.id}
+      {#if selected === o.id && !o.shape}
         {#each handles as hd (hd)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -164,6 +185,7 @@
 </script>
 
 <style>
+  .object.readonly { pointer-events: none; }
   .objects {
     position: absolute;
     right: 0;

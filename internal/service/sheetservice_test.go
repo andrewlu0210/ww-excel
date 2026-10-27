@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -80,7 +81,7 @@ func TestEditEmitsOneDiffAndBumpsVersion(t *testing.T) {
 	if len(rec.diffs) != 1 || d.Version <= v0 {
 		t.Fatalf("diffs=%d version=%d (was %d)", len(rec.diffs), d.Version, v0)
 	}
-	if len(d.Cells) != 1 || d.Cells[0] != (ChangedCell{Row: 2, Col: 3, V: "12.5", N: true}) || len(d.Styles) != 0 {
+	if len(d.Cells) != 1 || !reflect.DeepEqual(d.Cells[0], ChangedCell{Row: 2, Col: 3, V: "12.5", N: true}) || len(d.Styles) != 0 {
 		t.Fatalf("diff cells = %+v", d.Cells)
 	}
 	if d.UsedRows != 3 || d.UsedCols != 4 || d.Select != nil {
@@ -163,7 +164,7 @@ func TestFormulaEditing(t *testing.T) {
 		t.Fatalf("diffs = %d, want one more", len(rec.diffs)-n)
 	}
 	d := rec.lastDiff(t)
-	if len(d.Cells) != 2 || d.Cells[1] != (ChangedCell{Row: 0, Col: 1, V: "50", N: true}) {
+	if len(d.Cells) != 2 || !reflect.DeepEqual(d.Cells[1], ChangedCell{Row: 0, Col: 1, V: "50", N: true}) {
 		t.Fatalf("diff = %+v", d.Cells)
 	}
 

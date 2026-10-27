@@ -142,6 +142,8 @@ export const sheetApi = {
   },
   clear: (sheet: number, ranges: RangeDTO[], mode: 'contents' | 'formats' | 'all' = 'contents'): Promise<void> =>
     SheetService.Clear(sheet, ranges, mode),
+  captureFormats: (sheet: number, area: RangeDTO): Promise<string | null> => rejected(SheetService.CaptureFormats(sheet, area)),
+  paintFormats: (sheet: number, ranges: RangeDTO[]): Promise<string | null> => rejected(SheetService.PaintFormats(sheet, ranges)),
   format: (sheet: number, ranges: RangeDTO[], patch: FormatPatch): Promise<string | null> =>
     rejected(SheetService.Format(sheet, ranges, patch)),
   setSizes: (sheet: number, rows: boolean, indices: number[], px: number): Promise<void> =>
@@ -317,6 +319,7 @@ export const settingsApi = {
 export const benchApi = {
   benchMode: (): Promise<boolean> => BenchService.BenchMode(),
   selfTestMode: (): Promise<boolean> => BenchService.SelfTestMode(),
+  fixturePath: (): Promise<string> => BenchService.FixturePath(),
   ping: (): Promise<number> => BenchService.Ping(),
   mem: (): Promise<MemStats> => BenchService.Mem(),
   emitBurst: (count: number, blocksPerEvent: number): Promise<void> =>

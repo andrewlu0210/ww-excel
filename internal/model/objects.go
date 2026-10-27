@@ -13,10 +13,12 @@ type Object struct {
 	Anchor Anchor
 	W, H   float64 // size in pixels at 100%
 	Chart  *Chart
+	Shape  *Shape
 	Image  *Image
 }
 
 const (
+	ObjectShape = "shape"
 	ObjectChart = "chart"
 	ObjectImage = "image"
 )

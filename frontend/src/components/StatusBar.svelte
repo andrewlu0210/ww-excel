@@ -1,11 +1,15 @@
 <script lang="ts">
   import { t } from '../i18n';
+  import ZoomControl from './ZoomControl.svelte';
   import { onMount, type Snippet } from 'svelte';
   import { FpsMeter, type Samples } from '../grid/perf';
   import type { SheetMode } from '../input/keymap';
   import type { BlockCache } from '../stores/viewportCache';
 
   interface Props {
+    zoom: number;
+    onzoom: (value: number) => void;
+    onzoomdialog: () => void;
     mode: SheetMode;
     // Sheet tabs, rendered next to the mode.
     tabs?: Snippet;
@@ -17,9 +21,12 @@
     onbench: () => void;
   }
 
-  let { mode, tabs, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
+  let { zoom, onzoom, onzoomdialog, mode, tabs, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
 
   const MODE_LABEL: Record<SheetMode, string> = { ready: t('就緒'), enter: t('模式|輸入'), edit: t('編輯'), point: t('指向') };
+
+  // Opt in at Vite startup/build time; normal users do not need diagnostics.
+  const showPerf = import.meta.env.VITE_PERF_HUD === '1';
 
   let fps = $state(0);
   let drawP95 = $state(0);
@@ -27,6 +34,7 @@
   let blocks = $state(0);
 
   onMount(() => {
+    if (!showPerf) return;
     const meter = new FpsMeter();
     meter.start();
     const timer = setInterval(() => {
@@ -51,12 +59,17 @@
       <span class="circular" title={t('公式直接或間接參照到自己的儲存格，結果顯示為 0')}>{t('循環參照：%s', circular)}</span>
     {/if}
   </div>
-  <div class="hud">
-    <span title="Frames per second">{fps.toFixed(0)} fps</span>
-    <span title="Grid draw time, p95">draw {drawP95.toFixed(1)} ms</span>
-    <span title="Last GetBlocks round trip">fetch {fetchMs.toFixed(1)} ms</span>
-    <span title="Blocks cached in the frontend">{blocks} blocks</span>
-    <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? t('量測中…') : t('效能量測')}</button>
+  <div class="right">
+    {#if showPerf}
+      <div class="hud">
+        <span title="Frames per second">{fps.toFixed(0)} fps</span>
+        <span title="Grid draw time, p95">draw {drawP95.toFixed(1)} ms</span>
+        <span title="Last GetBlocks round trip">fetch {fetchMs.toFixed(1)} ms</span>
+        <span title="Blocks cached in the frontend">{blocks} blocks</span>
+        <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? t('量測中…') : t('效能量測')}</button>
+      </div>
+    {/if}
+    <ZoomControl {zoom} onchange={onzoom} onopen={onzoomdialog} />
   </div>
 </footer>
 
@@ -66,13 +79,18 @@
     align-items: center;
     justify-content: space-between;
     height: 26px;
+    flex-shrink: 0;
+    gap: 8px;
     padding: 0 8px;
     background: var(--chrome-bg);
     border-top: 1px solid var(--chrome-border);
     font-size: 11px;
     color: var(--chrome-muted);
   }
+  .right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
   .left {
+    min-width: 0;
+    overflow: hidden;
     display: flex;
     align-items: center;
     height: 100%;
@@ -99,4 +117,5 @@
     background: var(--app-bg);
     color: var(--chrome-text);
   }
+  @media (max-width: 1150px) { .hud { display: none; } }
 </style>

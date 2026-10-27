@@ -82,6 +82,7 @@ type Formula struct {
 // calculated result. S is the style ID (0 = inherit the row/column
 // style, else the workbook default); a cell may hold only a style.
 type Cell struct {
+	Rich *RichText
 	Kind CellKind
 	S    uint32
 	Num  float64
@@ -110,6 +111,7 @@ func (c Cell) HasContent() bool { return c.Kind != KindEmpty || c.F != nil }
 
 // Value returns the cell without its style, e.g. to compare contents.
 func (c Cell) Value() Cell {
+	c.Rich = nil
 	c.S = 0
 	return c
 }

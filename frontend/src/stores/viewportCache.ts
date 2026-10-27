@@ -1,6 +1,8 @@
+import type { TextRunDTO } from '../../bindings/ww-excel/internal/service/models';
 import type { BlockDTO, BlockRef, BlocksResult, CellsChanged } from '../bridge/sheet';
 
 export interface CellView {
+  runs?: TextRunDTO[];
   text: string;
   numeric: boolean; // right-aligned by default
   center: boolean; // logicals and errors are centered by default
@@ -11,6 +13,7 @@ export interface CellView {
 }
 
 interface CellFields {
+  runs?: TextRunDTO[] | null;
   v: string;
   n?: boolean;
   x?: boolean;
@@ -23,6 +26,7 @@ interface CellFields {
 function view(c: CellFields): CellView {
   return {
     text: c.v,
+    runs: c.runs ?? undefined,
     numeric: c.n === true,
     center: c.x === true,
     style: c.st ?? 0,

@@ -8,6 +8,14 @@ macOS 原生的試算表 App，目標是提供接近 Microsoft Excel 的操作�
 
 > 上圖是自動測試產生的畫面，包含條件式格式、資料橫條、表格與篩選按鈕。
 
+## v1.1.0 更新
+
+- 新增工作表縮放控制，可使用滑桿、加減按鈕，或點擊百分比選擇常用比例、自訂比例與選取範圍最適化。
+- 新增複製格式刷子，支援拖曳套用、連續套用及跨工作表操作。
+- 改善 Excel 檔案顯示：讀取儲存格富文字的分段字色，以及矩形、圓角矩形文字方塊和主題色。
+- 更新 App 與 Dock 圖示，並補上「關於 WW Excel」的說明、版本與製作者資訊。
+- 狀態列預設隱藏效能量測資訊，開發時可透過 `VITE_PERF_HUD=1` 顯示。
+
 ## 下載
 
 到 [Releases](https://github.com/andrewlu0210/ww-excel/releases) 下載最新的 `WW-Excel-x.y.z.dmg`，把 WW Excel 拖進「應用程式」即可。
@@ -21,11 +29,13 @@ macOS 原生的試算表 App，目標是提供接近 Microsoft Excel 的操作�
 - 直接在儲存格輸入，或用公式列編輯；Enter／Tab／方向鍵的行為與 Excel 相同（F2 切換輸入／編輯模式，⌥Enter 換行）
 - 中文輸入法（注音、倉頡）從第一個按鍵就能組字，候選字視窗出現在儲存格旁
 - 復原／重做（⌘Z／⇧⌘Z），多步驟的操作算一次復原
+- 複製格式：先選來源再按工具列刷子，點選或拖曳目標套用；雙擊刷子可連續套用，Esc 取消，可跨工作表操作
 - 剪下、拷貝、貼上，可以和 Excel、Numbers、網頁表格互相複製；選擇性貼上（值、格式、公式、轉置、略過空格）
 - 填滿控點：自動數列、日期、星期、月份與自訂清單；⌘D／⌘R 向下、向右填滿
 - 插入／刪除列與欄，公式參照自動調整（參照失效時顯示 `#REF!`）
 - 尋找與取代（可搜尋整本活頁簿）、排序（多層）、自動篩選
 - 凍結窗格、隱藏列欄、調整列高欄寬（雙擊自動調整）、合併儲存格
+- 工作表縮放（10%–400%）：右下角加減按鈕、滑桿與縮放視窗（常用比例、自訂百分比、選取範圍最適化）；本次開啟期間各工作表分別記住比例
 
 ### 公式
 - 自己實作的公式引擎，**308 個函數**：數學、統計（含常態、t、卡方、F 等分配）、財務（PMT、IRR、XIRR、折舊…）、邏輯、查閱（VLOOKUP、XLOOKUP、INDEX/MATCH…）、文字、日期與時間、資訊
@@ -81,6 +91,7 @@ go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
 export PATH="$HOME/go/bin:$PATH"
 
 wails3 dev                       # 開發模式（hot reload）
+VITE_PERF_HUD=1 wails3 dev       # 顯示狀態列的效能資訊與量測按鈕（預設隱藏）
 wails3 build                     # 建置 -> bin/ww-excel
 ./bin/ww-excel path/to/file.xlsx # 啟動時開啟檔案
 
@@ -91,6 +102,9 @@ cd frontend && npm test          # 前端測試
 WW_SELFTEST=1 WW_BENCH_OUT="$PWD/docs/selftest-latest.md" ./bin/ww-excel
 
 scripts/package.sh               # 打包 dist/WW Excel.app 與 DMG（UNIVERSAL=1 產生 Universal 版）
+
+# 重新產生 App 圖示（保留 PNG 的透明外框）
+wails3 task common:generate:icons -f
 ```
 
 ### 架構
@@ -114,4 +128,5 @@ Svelte (WKWebView)                      Go
 
 - 沒有動態陣列與溢出（`FILTER`、`SORT`、`UNIQUE`）、`LET`／`LAMBDA`、樞紐分析表、巨集
 - 修改過的 Excel 圖表會簡化成這裡支援的格式（顏色、資料標籤等會遺失）
+- 匯入的文字方塊目前僅供顯示，尚不能編輯；修改富文字儲存格的內容會清除其分段格式
 - 只有 macOS 版

@@ -55,6 +55,11 @@ func (w *writer) objects(sh *model.Sheet, old, cur []model.Object) error {
 		}
 	}
 	for _, o := range cur {
+		if o.Shape != nil {
+			if _, exists := byID[o.ID]; exists {
+				continue
+			}
+		}
 		if !dirty[cellOf(o.Anchor)] {
 			continue
 		}
@@ -68,6 +73,17 @@ func (w *writer) objects(sh *model.Sheet, old, cur []model.Object) error {
 func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 	format := excelize.GraphicOptions{OffsetX: int(o.Anchor.DX), OffsetY: int(o.Anchor.DY), Positioning: "oneCell"}
 	switch {
+	case o.Shape != nil:
+		shape := o.Shape
+		opts := &excelize.Shape{Cell: cell, Type: shape.Geometry, Width: uint(o.W), Height: uint(o.H), Format: format}
+		if opts.Type == "" {
+			opts.Type = "rect"
+		}
+		if shape.Fill != "" {
+			opts.Fill = excelize.Fill{Color: []string{shape.Fill}}
+		}
+		opts.Paragraph = richExcelRuns(shape.Text, shape.Font)
+		return w.f.AddShape(sh.Name, opts)
 	case o.Image != nil:
 		cfg, _, err := image.DecodeConfig(bytes.NewReader(o.Image.Data))
 		if err != nil || cfg.Width == 0 || cfg.Height == 0 {

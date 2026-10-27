@@ -47,6 +47,24 @@ func ApplyStyle(wb *model.Workbook, sheet int, ranges []model.Range, name string
 		if id == 0 {
 			id = sh.Layout.StyleAt(row, col)
 		}
+		if c.Rich != nil {
+			base := styles.Get(id)
+			rich := &model.RichText{Runs: append([]model.TextRun(nil), c.Rich.Runs...)}
+			changed := false
+			for i, run := range rich.Runs {
+				before := run.Font.Resolve(base.Font)
+				st := base
+				st.Font = before
+				next := patch(st, At{Row: row, Col: col, Range: cur}).Font
+				if next != before {
+					rich.Runs[i].Font = model.RichFontOf(next)
+					changed = true
+				}
+			}
+			if changed {
+				c.Rich = rich
+			}
+		}
 		c.S = restyleAt(id, row, col)
 		cells.Changes = append(cells.Changes, CellChange{Row: row, Col: col, After: c})
 	}

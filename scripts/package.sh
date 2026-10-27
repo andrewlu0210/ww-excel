@@ -31,6 +31,9 @@ if [ -n "$NOTARY_PROFILE" ] && [ "$SIGN_IDENTITY" = "-" ]; then
 fi
 
 echo "==> WW Excel $VERSION"
+echo "==> Icons"
+wails3 task common:generate:icons
+
 echo "==> Frontend"
 wails3 generate bindings -clean=true -ts -i >/dev/null
 (cd frontend && npm run build >/dev/null)

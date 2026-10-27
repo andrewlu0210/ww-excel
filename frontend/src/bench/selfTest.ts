@@ -9,6 +9,8 @@ import { ensureFont } from '../stores/fontLoader';
 import { fontCss, styleStore } from '../stores/styles';
 import { single, type CellPos, type Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
+import { zoomSelfTest } from './zoomSelfTest';
+import { formatPainterSelfTest } from './formatPainterSelfTest';
 import type { BlockCache } from '../stores/viewportCache';
 
 export interface SheetDriver {
@@ -291,6 +293,8 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await dataTests(sheet, { key, type, goTo, step, expect, expectCell });
   await outputTests(sheet, { key, type, goTo, step, expect, expectCell });
   await polishTests(sheet, { key, type, goTo, step, expect, expectCell });
+  await formatPainterSelfTest(sheet, step, expect);
+  await zoomSelfTest(sheet, step, expect);
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);

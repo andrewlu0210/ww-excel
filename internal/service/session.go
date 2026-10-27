@@ -36,9 +36,10 @@ type RangeDTO struct {
 func (r RangeDTO) model() model.Range { return model.Range{R0: r.R0, C0: r.C0, R1: r.R1, C1: r.C1} }
 
 type ChangedCell struct {
-	Row int    `json:"row"`
-	Col int    `json:"col"`
-	V   string `json:"v"`
+	Runs []TextRunDTO `json:"runs,omitempty"`
+	Row  int          `json:"row"`
+	Col  int          `json:"col"`
+	V    string       `json:"v"`
 	// N: number (right-aligned). X: logical or error (centered).
 	N bool `json:"n,omitempty"`
 	X bool `json:"x,omitempty"`
@@ -92,9 +93,10 @@ type Emitter func(name string, data any)
 
 // Session owns the open document. Both services share it.
 type Session struct {
-	mu   sync.RWMutex
-	doc  *document.Document
-	emit Emitter
+	mu           sync.RWMutex
+	formatSample *document.FormatSample
+	doc          *document.Document
+	emit         Emitter
 
 	// OnState is called after every state change, e.g. to update the
 	// window title and menu labels. Optional.
@@ -259,7 +261,7 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 			for _, p := range cells {
 				cell := sh.Get(p.row, p.col)
 				v, n, x, st, fc := cellView(wb, sh, p.row, p.col, cell)
-				cc := ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc}
+				cc := ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)}
 				if look != nil {
 					dto, _ := look.view(p.row, p.col, cell)
 					cc.St, cc.Bar, cc.Bc = dto.St, dto.Bar, dto.Bc
@@ -294,6 +296,7 @@ func (s *Session) replace(doc *document.Document) {
 	s.mu.Lock()
 	old := s.doc
 	s.doc = doc
+	s.formatSample = nil
 	s.stylesSent = doc.Workbook().StyleTable().Len()
 	state := s.stateLocked()
 	s.mu.Unlock()

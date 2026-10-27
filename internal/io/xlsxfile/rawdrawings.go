@@ -14,14 +14,15 @@ const emuPerPx = 9525
 
 // rawAnchor is where a drawing object sits, from the drawing XML.
 type rawAnchor struct {
-	FromCol int   `xml:"from>col"`
-	FromCX  int64 `xml:"from>colOff"`
-	FromRow int   `xml:"from>row"`
-	FromRY  int64 `xml:"from>rowOff"`
-	ToCol   int   `xml:"to>col"`
-	ToCX    int64 `xml:"to>colOff"`
-	ToRow   int   `xml:"to>row"`
-	ToRY    int64 `xml:"to>rowOff"`
+	Shape   *drawingShape `xml:"sp"`
+	FromCol int           `xml:"from>col"`
+	FromCX  int64         `xml:"from>colOff"`
+	FromRow int           `xml:"from>row"`
+	FromRY  int64         `xml:"from>rowOff"`
+	ToCol   int           `xml:"to>col"`
+	ToCX    int64         `xml:"to>colOff"`
+	ToRow   int           `xml:"to>row"`
+	ToRY    int64         `xml:"to>rowOff"`
 	Ext     struct {
 		CX int64 `xml:"cx,attr"`
 		CY int64 `xml:"cy,attr"`
@@ -41,10 +42,20 @@ func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
 	if drawing == "" {
 		return
 	}
+	theme := drawingTheme(parts)
 	for _, a := range readAnchors(parts, drawing) {
 		obj := model.Object{Anchor: model.Anchor{Row: a.FromRow, Col: a.FromCol, DX: float64(a.FromCX) / emuPerPx, DY: float64(a.FromRY) / emuPerPx}}
 		obj.W, obj.H = anchorSize(&sh.Layout, a)
 		switch {
+		case a.Shape != nil:
+			if ext := a.Shape.Properties.Transform.Ext; ext.CX > 0 && ext.CY > 0 {
+				obj.W, obj.H = ext.CX/emuPerPx, ext.CY/emuPerPx
+			}
+			obj.Shape = a.Shape.model(theme, obj.W, obj.H)
+			if obj.Shape == nil {
+				continue
+			}
+			obj.Kind = model.ObjectShape
 		case a.Chart.RID != "":
 			c := readChart(parts, relTarget(parts, drawing, a.Chart.RID))
 			if c == nil {

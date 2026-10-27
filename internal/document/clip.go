@@ -11,6 +11,7 @@ import (
 // ClipCell is a copied cell, independent of the source workbook so it
 // can be pasted into another document.
 type ClipCell struct {
+	Rich     *model.RichText
 	Row, Col int        // offset from the copied range's top-left
 	Value    model.Cell // the (calculated) value; S and F are cleared
 	Formula  ast.Node   // nil for constants
@@ -51,7 +52,7 @@ func (d *Document) Copy(sheet int, rg model.Range, cut bool) (*Clip, error) {
 			err = ErrClipTooLarge
 			return
 		}
-		cc := ClipCell{Row: row - rg.R0, Col: col - rg.C0, Value: c.Value(), Style: st.Get(sh.EffectiveStyle(row, col))}
+		cc := ClipCell{Row: row - rg.R0, Col: col - rg.C0, Value: c.Value(), Style: st.Get(sh.EffectiveStyle(row, col)), Rich: c.Rich}
 		cc.Value.S, cc.Value.F = 0, nil
 		if c.F != nil {
 			cc.Formula = d.calc.Parsed(c.F, sheet)
@@ -217,6 +218,11 @@ func (d *Document) pasteCells(clip *Clip, sheet int, area model.Range, rows, col
 				}
 				if opt.Mode == PasteAll || opt.Mode == PasteFormats {
 					cell.S = intern(cc.Style)
+					if opt.Mode == PasteAll || cell.SameInput(cc.Value) {
+						cell.Rich = cc.Rich
+					} else {
+						cell.Rich = nil
+					}
 				} else if cell.S == 0 {
 					cell.S = sh.Layout.StyleAt(row, col)
 				}
@@ -240,8 +246,9 @@ func (d *Document) pasteCells(clip *Clip, sheet int, area model.Range, rows, col
 		case PasteFormats:
 			cell = old
 			cell.S = 0
+			cell.Rich = nil
 		}
-		if cell.SameInput(old) && cell.S == old.S {
+		if cell.SameInput(old) && cell.S == old.S && cell.Rich == old.Rich {
 			return
 		}
 		out = append(out, command.CellChange{Row: row, Col: col, After: cell})

@@ -41,7 +41,23 @@ type ChartDTO struct {
 
 // ObjectDTO is a chart or picture. Pictures are fetched separately
 // (ObjectImage); ImageKey changes when the picture does.
+type ShapeDTO struct {
+	Geometry  string       `json:"geometry"`
+	Fill      string       `json:"fill"`
+	LineColor string       `json:"lineColor"`
+	LineWidth float64      `json:"lineWidth"`
+	Radius    float64      `json:"radius"`
+	Runs      []TextRunDTO `json:"runs"`
+	AlignH    string       `json:"alignH"`
+	AlignV    string       `json:"alignV"`
+	Left      float64      `json:"left"`
+	Right     float64      `json:"right"`
+	Top       float64      `json:"top"`
+	Bottom    float64      `json:"bottom"`
+}
+
 type ObjectDTO struct {
+	Shape    *ShapeDTO `json:"shape,omitempty"`
 	ID       int       `json:"id"`
 	Kind     string    `json:"kind"`
 	Row      int       `json:"row"`
@@ -87,6 +103,10 @@ func (c *ChartDTO) model() *model.Chart {
 
 func objectDTO(o model.Object) ObjectDTO {
 	dto := ObjectDTO{ID: o.ID, Kind: o.Kind, Row: o.Anchor.Row, Col: o.Anchor.Col, DX: o.Anchor.DX, DY: o.Anchor.DY, W: o.W, H: o.H, Chart: chartDTO(o.Chart)}
+	if shape := o.Shape; shape != nil {
+		dto.Shape = &ShapeDTO{Geometry: shape.Geometry, Fill: shape.Fill, LineColor: shape.LineColor, LineWidth: shape.LineWidth, Radius: shape.Radius,
+			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom}
+	}
 	if o.Image != nil {
 		h := fnv.New64a()
 		h.Write(o.Image.Data)

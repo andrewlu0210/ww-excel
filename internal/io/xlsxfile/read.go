@@ -38,11 +38,12 @@ func Read(path string) (*model.Workbook, *excelize.File, error) {
 }
 
 type reader struct {
-	f      *excelize.File
-	parts  map[string]*zip.File
-	wb     *model.Workbook
-	styles map[int]uint32
-	sst    []string
+	f       *excelize.File
+	parts   map[string]*zip.File
+	wb      *model.Workbook
+	styles  map[int]uint32
+	sst     []string
+	richSST map[int]*model.RichText
 }
 
 func load(f *excelize.File, file string) (*model.Workbook, error) {
@@ -61,7 +62,7 @@ func load(f *excelize.File, file string) (*model.Workbook, error) {
 		defStyle.Font = model.DefaultFont
 	}
 	r := &reader{f: f, parts: parts, wb: &model.Workbook{Styles: model.NewStyleTable(defStyle)}, styles: map[int]uint32{0: 0}}
-	if r.sst, err = readSharedStrings(parts); err != nil {
+	if r.sst, r.richSST, err = readSharedStrings(parts, f); err != nil {
 		return nil, err
 	}
 	sheets, err := sheetList(parts)
@@ -112,7 +113,7 @@ func (r *reader) style(id int) uint32 {
 	if st.Font.Size == 0 {
 		st.Font.Size = def.Font.Size
 	}
-	s := r.wb.Styles.Intern(st)
+	s := r.wb.Styles.InternExplicit(st)
 	r.styles[id] = s
 	return s
 }
@@ -165,8 +166,8 @@ func decodePart(parts map[string]*zip.File, name string, v any) error {
 	return xml.NewDecoder(r).Decode(v)
 }
 
-// readSharedStrings reads xl/sharedStrings.xml (rich text runs joined).
-func readSharedStrings(parts map[string]*zip.File) ([]string, error) {
+// readSharedStrings keeps rich runs separately so plain strings stay compact.
+func readSharedStrings(parts map[string]*zip.File, f *excelize.File) ([]string, map[int]*model.RichText, error) {
 	name := "xl/sharedStrings.xml"
 	if _, ok := parts[name]; !ok {
 		if t := relOfType(parts, "xl/workbook.xml", "/sharedStrings"); t != "" {
@@ -175,48 +176,33 @@ func readSharedStrings(parts map[string]*zip.File) ([]string, error) {
 	}
 	p, ok := parts[name]
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 	rc, err := p.Open()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rc.Close()
 	dec := xml.NewDecoder(rc)
 	var out []string
-	var b strings.Builder
-	inT, inPhonetic := false, false
+	rich := map[int]*model.RichText{}
 	for {
 		tok, err := dec.RawToken()
 		if err == io.EOF {
-			return out, nil
+			return out, rich, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		switch t := tok.(type) {
-		case xml.StartElement:
-			switch t.Name.Local {
-			case "si":
-				b.Reset()
-			case "t":
-				inT = true
-			case "rPh":
-				inPhonetic = true // ruby text is not part of the value
+		if t, ok := tok.(xml.StartElement); ok && t.Name.Local == "si" {
+			value, runs, err := readTextElement(dec, "si", f)
+			if err != nil {
+				return nil, nil, err
 			}
-		case xml.EndElement:
-			switch t.Name.Local {
-			case "si":
-				out = append(out, b.String())
-			case "t":
-				inT = false
-			case "rPh":
-				inPhonetic = false
+			if runs != nil {
+				rich[len(out)] = runs
 			}
-		case xml.CharData:
-			if inT && !inPhonetic {
-				b.Write(t)
-			}
+			out = append(out, value)
 		}
 	}
 }
@@ -295,7 +281,8 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 
 	st := &sheetState{ps: model.DefaultPageSetup()}
 	sharedF := map[string]shared{}
-	var text strings.Builder // character data of the current leaf element
+	var text strings.Builder
+	var inlineRich *model.RichText // character data of the current leaf element
 	collect := false
 	row, col := 0, -1
 	// The cell being read.
@@ -390,6 +377,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 					col++
 				}
 				cType, cStyle = attr(t, "t"), atoi(attr(t, "s"))
+				inlineRich = nil
 				hasV, hasF, inIS = false, false, false
 				v, ftext, fType, fRef, fSI = "", "", "", "", ""
 			case "v":
@@ -406,8 +394,12 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 				text.Reset()
 				collect = true
 			case "is":
-				inIS = true
-				text.Reset()
+				var textErr error
+				v, inlineRich, textErr = readTextElement(dec, "is", r.f)
+				if textErr != nil {
+					return nil, textErr
+				}
+				hasV = true
 			case "t":
 				if inIS {
 					collect = true
@@ -531,6 +523,9 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 					formula = r.formulaText(ftext, fType, fRef, fSI, row, col, sharedF)
 				}
 				cell := r.cellValue(cType, v, hasV)
+				if inlineRich != nil {
+					cell.Rich = inlineRich
+				}
 				if formula != "" {
 					cell.F = &model.Formula{Text: formula}
 				}
@@ -698,7 +693,9 @@ func (r *reader) cellValue(typ, v string, hasV bool) model.Cell {
 		if err != nil || i < 0 || i >= len(r.sst) {
 			return model.Cell{}
 		}
-		return model.StringCell(r.sst[i])
+		cell := model.StringCell(r.sst[i])
+		cell.Rich = r.richSST[i]
+		return cell
 	case "str", "inlineStr":
 		return model.StringCell(v)
 	case "b":

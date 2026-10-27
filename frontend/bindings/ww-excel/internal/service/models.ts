@@ -60,6 +60,7 @@ export interface CFRuleDTO {
  * within the block; short JSON keys keep the payload small.
  */
 export interface CellDTO {
+    "runs"?: TextRunDTO[] | null;
     "r": number;
     "c": number;
     "v": string;
@@ -117,6 +118,7 @@ export interface CellsChanged {
 }
 
 export interface ChangedCell {
+    "runs"?: TextRunDTO[] | null;
     "row": number;
     "col": number;
     "v": string;
@@ -329,11 +331,8 @@ export interface NoteDTO {
     "text": string;
 }
 
-/**
- * ObjectDTO is a chart or picture. Pictures are fetched separately
- * (ObjectImage); ImageKey changes when the picture does.
- */
 export interface ObjectDTO {
+    "shape"?: ShapeDTO | null;
     "id": number;
     "kind": string;
     "row": number;
@@ -408,6 +407,25 @@ export interface SetCellResult {
     "notice": string;
 }
 
+/**
+ * ObjectDTO is a chart or picture. Pictures are fetched separately
+ * (ObjectImage); ImageKey changes when the picture does.
+ */
+export interface ShapeDTO {
+    "geometry": string;
+    "fill": string;
+    "lineColor": string;
+    "lineWidth": number;
+    "radius": number;
+    "runs": TextRunDTO[] | null;
+    "alignH": string;
+    "alignV": string;
+    "left": number;
+    "right": number;
+    "top": number;
+    "bottom": number;
+}
+
 export interface SheetInfo {
     "name": string;
     "rows": number;
@@ -471,6 +489,11 @@ export interface TargetDTO {
     "ok": boolean;
     "sheet": number;
     "range": RangeDTO;
+}
+
+export interface TextRunDTO {
+    "text": string;
+    "font": FontDTO;
 }
 
 /**

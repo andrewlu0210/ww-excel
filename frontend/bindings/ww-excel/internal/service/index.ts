@@ -45,6 +45,7 @@ export type {
     RangeDTO,
     SeriesDataDTO,
     SetCellResult,
+    ShapeDTO,
     SheetInfo,
     SizeDTO,
     SortInfo,
@@ -53,6 +54,7 @@ export type {
     StyleRefDTO,
     TableDTO,
     TargetDTO,
+    TextRunDTO,
     TextSample,
     UISettings,
     ValidationDTO

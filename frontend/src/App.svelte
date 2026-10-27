@@ -3,6 +3,7 @@
   import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest } from './bench/selfTest';
+  import { workbookCompatibilityTest } from './bench/workbookCompatibilityTest';
   import {
     benchApi,
     documentApi,
@@ -36,6 +37,8 @@
   import Sheet from './components/Sheet.svelte';
   import SheetTabs from './components/SheetTabs.svelte';
   import StatusBar from './components/StatusBar.svelte';
+  import ZoomDialog from './components/ZoomDialog.svelte';
+  import { normalizeZoom, SheetZooms } from './grid/zoom';
   import Toolbar from './components/Toolbar.svelte';
   import { current, fromRange, single, type CrossEdit, type Range, type Selection } from './grid/selection';
   import type { MenuAction, SheetMode } from './input/keymap';
@@ -52,6 +55,33 @@
   let generation = $state(0);
   // Remembered selection per sheet name, restored when switching back.
   const selections = new Map<string, Selection>();
+  const zooms = new SheetZooms();
+  let zoom = $state(100);
+  let zoomDialog = $state(false);
+  let paintMode = $state<'off' | 'once' | 'repeat'>('off');
+  let paintSource = $state<{ name: string; range: Range } | null>(null);
+  let paintRequest = 0;
+
+  function cancelPainter(): void {
+    paintRequest++;
+    paintMode = 'off';
+    paintSource = null;
+  }
+
+  async function startPainter(repeat: boolean): Promise<void> {
+    if (!repeat && paintMode !== 'off') { cancelPainter(); return; }
+    if (repeat && paintMode !== 'off') { paintMode = 'repeat'; return; }
+    const request = ++paintRequest;
+    const source = await sheetView?.captureFormats();
+    if (request !== paintRequest || !source) return;
+    paintSource = { name: sheets[active], range: source };
+    paintMode = repeat ? 'repeat' : 'once';
+  }
+
+  function changeZoom(value: number): void {
+    zoom = normalizeZoom(value);
+    zooms.set(sheets[active], zoom);
+  }
 
   let sheetView = $state<ReturnType<typeof Sheet>>();
   let mode = $state<SheetMode>('ready');
@@ -93,11 +123,14 @@
     const i = Math.max(0, Math.min(index, sheets.length - 1));
     info = await sheetApi.info(i);
     active = i;
+    zoom = zooms.get(sheets[i]);
     generation++;
   }
 
   function onStructure(st: DocState): void {
+    cancelPainter();
     const current = sheets[active];
+    zooms.reconcile(sheets, st.sheets ?? []);
     sheets = st.sheets ?? [];
     if (preferIndex !== null) {
       const i = preferIndex;
@@ -117,7 +150,9 @@
   }
 
   async function onReset(st: DocState): Promise<void> {
+    cancelPainter();
     selections.clear();
+    zooms.clear();
     styleStore.reset();
     sheets = st.sheets ?? [];
     await showSheet(0);
@@ -430,7 +465,8 @@
             return typeof member === 'function' ? member.bind(v) : member;
           },
         });
-        const result = await Promise.race([runSelfTest(driver, SHEET), timeout]);
+        const fixture = await benchApi.fixturePath();
+        const result = await Promise.race([fixture ? workbookCompatibilityTest(driver, fixture) : runSelfTest(driver, SHEET), timeout]);
         const g = sheetView!.getGrid()!;
         await benchApi.snapshot('selftest', g.snapshot());
         await benchApi.report(result.markdown);
@@ -444,6 +480,8 @@
 <main class="app">
   {#if info}
     <Toolbar
+      painting={paintMode !== 'off'}
+      onpaint={(repeat) => void startPainter(repeat)}
       style={activeStyle}
       merged={activeMerged}
       onformat={(p) => void format(p)}
@@ -455,7 +493,12 @@
       <Sheet
         bind:this={sheetView}
         sheet={active}
+        {zoom}
         {info}
+        {paintMode}
+        paintSource={paintSource?.name === sheets[active] ? paintSource.range : null}
+        oncancelpaint={cancelPainter}
+        onpainted={() => { if (paintMode === 'once') cancelPainter(); }}
         initialSelection={selections.get(sheets[active])}
         bind:mode
         bind:activeStyle
@@ -474,7 +517,7 @@
         }}
       />
     {/key}
-    <StatusBar {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench}>
+    <StatusBar {zoom} onzoom={changeZoom} onzoomdialog={() => (zoomDialog = true)} {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench}>
       {#snippet tabs()}
         <SheetTabs
           {sheets}
@@ -497,6 +540,23 @@
 
   {#if toast}
     <div class="toast" role="status">{toast}</div>
+  {/if}
+
+  {#if zoomDialog}
+    <ZoomDialog {zoom}
+      onapply={async (value) => {
+        const g = sheetView?.getGrid();
+        changeZoom(value ?? g?.zoomForSelection() ?? zoom);
+        zoomDialog = false;
+        await tick();
+        if (value === null) g?.revealSelection();
+        sheetView?.focus();
+      }}
+      onclose={() => {
+        zoomDialog = false;
+        sheetView?.focus();
+      }}
+    />
   {/if}
 
   {#if numberDialog}

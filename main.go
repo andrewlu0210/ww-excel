@@ -29,9 +29,14 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// Use PNG for runtime Dock/About images; ICNS is reserved for bundle resources.
+//
+//go:embed build/appicon.png
+var appIcon []byte
+
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.0.1"
+	version = "1.1.0"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )
@@ -102,6 +107,7 @@ func main() {
 
 	a.app = application.New(application.Options{
 		Name:        "WW Excel",
+		Icon:        appIcon,
 		Description: "Spreadsheet app for macOS",
 		Services: []application.Service{
 			application.NewService(sheets),
@@ -145,6 +151,9 @@ func main() {
 	}, stopAutosave)
 
 	a.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		// Finder cannot supply a bundle icon for direct executable launches.
+		// Reapply after Cocoa finishes launching so it does not reset the Dock image.
+		a.app.SetIcon(appIcon)
 		setAppearance(a.settings.Get().Appearance)
 		// Offer the snapshots of a session that crashed.
 		go service.Recover(a.docs, service.WindowContext(first.win), a.autosave.Store)
@@ -441,7 +450,7 @@ func buildMenu(a *docApp) *appMenus {
 
 	root := a.app.NewMenu()
 	app := root.AddSubmenu("WW Excel")
-	app.AddRole(application.About)
+	app.Add(T("關於 WW Excel")).OnClick(func(*application.Context) { showAbout() })
 	app.AddSeparator()
 	app.Add(T("偏好設定…")).SetAccelerator("CmdOrCtrl+,").OnClick(send("preferences"))
 	app.AddSeparator()

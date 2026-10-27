@@ -348,7 +348,11 @@ func (w *writer) cell(sh *model.Sheet, row, col int, c model.Cell) error {
 			// Text results are not cached (see FullCalcOnLoad).
 			err = f.SetCellValue(sh.Name, name, nil)
 		} else {
-			err = f.SetCellStr(sh.Name, name, c.Str)
+			if c.Rich != nil {
+				err = f.SetCellRichText(sh.Name, name, richExcelRuns(c.Rich, w.wb.StyleTable().Get(sh.EffectiveStyle(row, col)).Font))
+			} else {
+				err = f.SetCellStr(sh.Name, name, c.Str)
+			}
 		}
 	case model.KindError:
 		if c.F == nil {
@@ -432,6 +436,29 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 		if err := f.SetRowStyle(sh.Name, row+1, row+1, x); err != nil {
 			return err
 		}
+	}
+	// Excelize's row/column style setters also overwrite existing cells.
+	// Restore explicit formats so painting default styles survives saving.
+	changedCols, changedRows := union(old.ColStyles, l.ColStyles), union(old.RowStyles, l.RowStyles)
+	var styleErr error
+	if len(changedCols) > 0 || len(changedRows) > 0 {
+		sh.EachInRange(model.Range{R1: model.MaxRows - 1, C1: model.MaxCols - 1}, func(row, col int, c model.Cell) {
+			_, colChanged := changedCols[col]
+			_, rowChanged := changedRows[row]
+			if styleErr != nil || c.S == 0 || !colChanged && !rowChanged {
+				return
+			}
+			x, err := w.style(c.S)
+			if err != nil {
+				styleErr = err
+				return
+			}
+			name, _ := excelize.CoordinatesToCellName(col+1, row+1)
+			styleErr = f.SetCellStyle(sh.Name, name, name, x)
+		})
+	}
+	if styleErr != nil {
+		return styleErr
 	}
 	cellName := func(r, c int) string { n, _ := excelize.CoordinatesToCellName(c+1, r+1); return n }
 	isIn := func(list []model.Range, m model.Range) bool {

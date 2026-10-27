@@ -72,6 +72,20 @@ func (t *StyleTable) Intern(s Style) uint32 {
 	return id
 }
 
+// InternExplicit reserves a nonzero ID even for the default style, so a
+// copied default format overrides a destination row or column style.
+func (t *StyleTable) InternExplicit(s Style) uint32 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if id, ok := t.index[s]; ok && id != 0 {
+		return id
+	}
+	id := uint32(len(t.list))
+	t.list = append(t.list, s)
+	t.index[s] = id
+	return id
+}
+
 func (t *StyleTable) Get(id uint32) Style {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

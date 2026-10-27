@@ -13,9 +13,10 @@ import (
 // CellDTO is a single non-empty cell inside a block. R and C are offsets
 // within the block; short JSON keys keep the payload small.
 type CellDTO struct {
-	R int    `json:"r"`
-	C int    `json:"c"`
-	V string `json:"v"`
+	Runs []TextRunDTO `json:"runs,omitempty"`
+	R    int          `json:"r"`
+	C    int          `json:"c"`
+	V    string       `json:"v"`
 	// N: number (right-aligned). X: logical or error (centered).
 	N bool `json:"n,omitempty"`
 	X bool `json:"x,omitempty"`
@@ -140,7 +141,7 @@ func (s *SheetService) GetBlocks(ctx context.Context, sheet int, refs []BlockRef
 						dto.Cells = make([]CellDTO, 0, b.Count())
 						b.Each(func(r, c int, cell model.Cell) {
 							v, n, x, st, fc := cellView(wb, sh, r0+r, c0+c, cell)
-							dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc})
+							dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)})
 						})
 					}
 				} else {

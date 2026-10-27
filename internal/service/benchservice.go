@@ -179,3 +179,11 @@ func (b *BenchService) ReportBench(report string) error {
 	}
 	return nil
 }
+
+// FixturePath selects an explicit workbook for read-only display compatibility checks.
+func (b *BenchService) FixturePath() string {
+	if !b.SelfTestMode() {
+		return ""
+	}
+	return os.Getenv("WW_XLSX_FIXTURE")
+}
