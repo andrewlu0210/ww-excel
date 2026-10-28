@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"math"
 	"sort"
 
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 	"ww-excel/internal/formula"
 	"ww-excel/internal/model"
+	"ww-excel/internal/numfmt"
 )
 
 // CellDTO is a single non-empty cell inside a block. R and C are offsets
@@ -209,7 +211,19 @@ func (s *SheetService) EditText(ctx context.Context, sheet, row, col int) string
 	var text string
 	s.at(ctx).read(func(d *document.Document) {
 		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) {
-			text = sh.Get(row, col).EditText()
+			cell := sh.Get(row, col)
+			text = cell.EditText()
+			st := d.Workbook().StyleTable().Get(sh.EffectiveStyle(row, col))
+			if cell.F == nil && cell.Kind == model.KindNumber && numfmt.IsDate(st.NumFmt) {
+				candidate := numfmt.Format(cell.Num, "yyyy/m/d h:mm:ss")
+				if cell.Num == math.Trunc(cell.Num) {
+					candidate = numfmt.Format(cell.Num, "yyyy/m/d")
+				}
+				// Only expose date text when submitting it preserves the stored value.
+				if value, _, ok := numfmt.Detect(candidate, d.Now()); ok && value == cell.Num {
+					text = candidate
+				}
+			}
 		}
 	})
 	return text

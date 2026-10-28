@@ -446,3 +446,36 @@ func TestRecentFiles(t *testing.T) {
 		t.Fatalf("recent = %v", got)
 	}
 }
+
+func TestDateEditTextPreservesValueAndFormat(t *testing.T) {
+	wb := model.NewWorkbook()
+	sh := wb.Sheets[0]
+	st := model.Style{Font: model.DefaultFont, NumFmt: "yyyy/m/d;@"}
+	id := wb.StyleTable().Intern(st)
+	for i, v := range []float64{46260, 46356, 46296} {
+		sh.Set(i, 0, model.Cell{Kind: model.KindNumber, Num: v, S: id})
+	}
+	svc := NewSheetService(NewSession(document.FromWorkbook(wb, ""), func(string, any) {}))
+	for i, want := range []string{"2026/8/26", "2026/11/30", "2026/10/1"} {
+		before := sh.Get(i, 0)
+		if got := svc.EditText(bg, 0, i, 0); got != want {
+			t.Fatalf("edit text=%q want %q", got, want)
+		}
+		if text, _ := display(before, st); text != want {
+			t.Fatalf("grid=%q want %q", text, want)
+		}
+		if _, err := svc.SetCell(bg, 0, i, 0, want); err != nil {
+			t.Fatal(err)
+		}
+		after := sh.Get(i, 0)
+		if after.Num != before.Num || wb.StyleTable().Get(sh.EffectiveStyle(i, 0)).NumFmt != st.NumFmt {
+			t.Fatalf("date changed on submit: %+v", after)
+		}
+	}
+	if _, err := svc.SetCell(bg, 0, 4, 0, "=DATE(2026,8,26)"); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.EditText(bg, 0, 4, 0); got != "=DATE(2026,8,26)" {
+		t.Fatal(got)
+	}
+}

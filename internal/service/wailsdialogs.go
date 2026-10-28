@@ -13,12 +13,14 @@ import (
 // window returned by Window.
 type WailsDialogs struct {
 	Window func() application.Window
+	Icon   []byte
 }
 
 func (w WailsDialogs) AskSave(docName string) SaveChoice {
 	// Button callbacks may run on another thread after Show returns.
 	choice := make(chan SaveChoice, 1)
 	d := application.Get().Dialog.Question().
+		SetIcon(w.Icon).
 		SetTitle(fmt.Sprintf(i18n.T("要儲存對「%s」所做的變更嗎？"), docName)).
 		SetMessage(i18n.T("如果不儲存，您的變更將會遺失。"))
 	save := d.AddButton(i18n.T("儲存")).OnClick(func() { choice <- ChoiceSave })

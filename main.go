@@ -36,7 +36,7 @@ var appIcon []byte
 
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.1.0"
+	version = "1.1.1"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )
@@ -96,7 +96,7 @@ func main() {
 	a.recent = service.LoadRecent(recentPath)
 	a.settings = service.NewSettingsService(settings.Load(settingsPath), preferred)
 	a.autosave = service.NewAutosaver(recovery.New(recoveryDir), a.hub)
-	dialogs := service.WailsDialogs{Window: func() application.Window { return a.app.Window.Current() }}
+	dialogs := service.WailsDialogs{Window: func() application.Window { return a.app.Window.Current() }, Icon: appIcon}
 	sheets := service.NewSheetService(a.hub)
 	a.docs = service.NewDocumentService(a.hub, dialogs)
 	a.docs.OpenWindow = func(doc *document.Document) { a.openWindow(doc) }

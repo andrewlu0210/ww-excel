@@ -358,7 +358,8 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 				}
 				ht, _ := strconv.ParseFloat(attr(t, "ht"), 64)
 				hidden := attr(t, "hidden") == "1" || attr(t, "hidden") == "true"
-				if hidden || ht > 0 && ptToPx(ht) != l.DefaultRow && (attr(t, "customHeight") == "1" || attr(t, "customHeight") == "true") {
+				// Auto-sized rows may store a height without customHeight.
+				if hidden || ht > 0 && ptToPx(ht) != l.DefaultRow {
 					px := l.DefaultRow
 					if ht > 0 {
 						px = ptToPx(ht)
