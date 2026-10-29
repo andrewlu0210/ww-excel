@@ -4,9 +4,11 @@
   import { t } from '../i18n';
   import type { FormatPatch, StyleDTO } from '../bridge/sheet';
   import { FONT_CHOICES, fontFamilies, fontLabel } from '../stores/fonts';
+  import type { MenuAction } from '../input/keymap';
   import ColorPicker from './ColorPicker.svelte';
 
   interface Props {
+    onaction: (action: MenuAction) => void;
     style: StyleDTO | null;
     merged: boolean;
     painting: boolean;
@@ -17,7 +19,7 @@
     onnumberdialog: () => void;
   }
 
-  let { style, merged, painting, onpaint, onformat, onmerge, onclear, onnumberdialog }: Props = $props();
+  let { onaction, style, merged, painting, onpaint, onformat, onmerge, onclear, onnumberdialog }: Props = $props();
 
   const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
   const numberFormats: { label: string; code: string }[] = [
@@ -74,6 +76,9 @@
 <svelte:window onpointerdown={(e) => open && !(e.target as Element).closest?.('.menu-host') && (open = null)} />
 
 <div class="toolbar" role="toolbar" aria-label={t('常用')}>
+<section class="ribbon-group clipboard"><div class="controls">
+<button class="paste" title={t('貼上')} onpointerdown={keep} onclick={() => onaction('paste')}><svg viewBox="0 0 28 32" width="28" height="32" aria-hidden="true"><path d="M7 6H3v24h20V6h-5M9 3h8v6H9z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 13h15v17H10z" fill="var(--chrome-bg)" stroke="var(--accent)" stroke-width="1.6"/></svg>{t('貼上')}</button>
+<div class="clipboard-stack"><button onpointerdown={keep} onclick={() => onaction('cut')}>{t('剪下')}</button><button onpointerdown={keep} onclick={() => onaction('copy')}>{t('拷貝')}</button>
   <div class="group">
     <button class="format-painter" class:on={painting} aria-pressed={painting} aria-label={t('複製格式')}
       title={t('複製格式：按一下套用一次，按兩下連續套用；Esc 取消')}
@@ -90,6 +95,8 @@
       </svg>
     </button>
   </div>
+</div></div></section>
+<section class="ribbon-group font-group"><div class="controls">
   <select
     class="font"
     tabindex="-1"
@@ -159,6 +166,8 @@
     </div>
   </div>
 
+</div></section>
+<section class="ribbon-group alignment"><div class="controls">
   <div class="group">
     {#each [['left', t('靠左對齊')], ['center', t('置中')], ['right', t('靠右對齊')]] as [h, label] (h)}
       <button class:on={alignH === h} tabindex="-1" title={label} onpointerdown={keep} onclick={() => align(h)} aria-label={label}>
@@ -186,6 +195,8 @@
       onclick={() => onmerge(true)}>{t('跨欄置中')}</button>
   </div>
 
+</div></section>
+<section class="ribbon-group numbers"><div class="controls">
   <div class="group">
     <select class="numfmt" tabindex="-1" title={t('數值格式')} value={numberLabel}
       onchange={(e) => {
@@ -203,6 +214,11 @@
     <button class="text" tabindex="-1" title={t('減少小數位數')} onpointerdown={keep} onclick={() => onformat({ decimals: -1, label: t('減少小數位數') })}>.00→.0</button>
   </div>
 
+</div></section>
+<section class="ribbon-group editing"><div class="controls">
+<button class="text" onpointerdown={keep} onclick={() => onaction('condFormat')}>{t('條件式格式…')}</button>
+<button class="text" onpointerdown={keep} onclick={() => onaction('insertCells')}>{t('插入儲存格…')}</button>
+<button class="text" onpointerdown={keep} onclick={() => onaction('find')}>{t('尋找…')}</button>
   <div class="group">
     <div class="menu-host">
       <button class="text" tabindex="-1" title={t('清除')} onpointerdown={keep} onclick={() => toggleMenu('clear')}>{t('清除 ▾')}</button>
@@ -215,17 +231,32 @@
       {/if}
     </div>
   </div>
+</div></section>
 </div>
 
 <style>
+  .ribbon-group { display:flex; flex-direction:column; justify-content:center; padding:5px 12px; border-right:1px solid var(--chrome-border); flex-shrink:0; }
+  .controls { display:flex; flex-wrap:wrap; align-content:center; align-items:center; gap:5px; min-height:68px; }
+  .clipboard { width:130px; }
+  .clipboard-stack { display:flex; flex-direction:column; }
+  .clipboard-stack .group { justify-content:center; }
+  .paste { flex-direction:column; height:66px; gap:5px; }
+  .font-group { width:255px; }
+  .alignment { width:260px; }
+  .alignment .group { gap:3px; }
+  .numbers { width:220px; }
+  .numbers .group { gap:1px; }
+  .editing { width:170px; border-right:0; }
+  .editing .controls { gap:1px; }
+  @media (max-width:800px) { .ribbon-group { padding:5px 8px 3px; } }
   .toolbar {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 36px;
+    align-items: stretch;
+    gap: 0;
+    min-height: 88px;
     padding: 0 8px;
     background: var(--chrome-bg);
-    border-bottom: 1px solid var(--chrome-border);
+    border-bottom: none;
     font-size: 12px;
     /* Wrap instead of scrolling: overflow other than visible would clip
        the color palettes and menus that drop down from the toolbar. */
@@ -238,25 +269,26 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding-left: 10px;
-    border-left: 1px solid var(--chrome-border);
+    padding-left: 0;
+    border-left: none;
+    flex-wrap: wrap;
   }
   select {
     height: 24px;
     font: inherit;
     color: var(--chrome-text);
-    background: var(--grid-bg);
+    background: var(--input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 4px;
   }
   .font {
-    width: 120px;
+    width: 158px;
   }
   .size {
     width: 52px;
   }
   .numfmt {
-    width: 96px;
+    width: 100%;
   }
   button {
     min-width: 26px;

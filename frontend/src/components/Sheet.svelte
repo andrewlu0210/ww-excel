@@ -2238,7 +2238,7 @@
     padding: 2px 6px;
     border: 1px solid var(--chrome-border);
     border-radius: 4px;
-    background: var(--grid-bg);
+    background: var(--input-bg);
     color: var(--chrome-text);
     outline: none;
     -webkit-user-select: text;
@@ -2330,7 +2330,7 @@
   .name-box {
     font: inherit;
     color: var(--chrome-text);
-    background: var(--grid-bg);
+    background: var(--input-bg);
     outline: none;
   }
   .name-box:focus {

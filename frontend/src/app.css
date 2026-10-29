@@ -9,6 +9,7 @@
   --chrome-text: #1f1f1f;
   --chrome-muted: #6b6b6b;
 
+  --input-bg: #ffffff;
   --grid-bg: #ffffff;
   --grid-line: #e1e1e1;
   --cell-text: #1f1f1f;
@@ -44,9 +45,10 @@
     --chrome-text: #e8e8e8;
     --chrome-muted: #9a9a9a;
 
-    --grid-bg: #1b1b1b;
-    --grid-line: #333333;
-    --cell-text: #e6e6e6;
+    --input-bg: #1b1b1b;
+    --grid-bg: #ffffff;
+    --grid-line: #d4d4d4;
+    --cell-text: #1f1f1f;
     --header-bg: #262626;
     --header-text: #b4b4b4;
     --header-line: #3d3d3d;
@@ -84,9 +86,10 @@
   --chrome-text: #e8e8e8;
   --chrome-muted: #9a9a9a;
 
-  --grid-bg: #1b1b1b;
-  --grid-line: #333333;
-  --cell-text: #e6e6e6;
+  --input-bg: #1b1b1b;
+    --grid-bg: #ffffff;
+  --grid-line: #d4d4d4;
+  --cell-text: #1f1f1f;
   --header-bg: #262626;
   --header-text: #b4b4b4;
   --header-line: #3d3d3d;
@@ -180,7 +183,7 @@ body {
   padding: 4px 8px;
   font: inherit;
   color: var(--chrome-text);
-  background: var(--grid-bg);
+  background: var(--input-bg);
   border: 1px solid var(--chrome-border);
   border-radius: 4px;
   -webkit-user-select: text;

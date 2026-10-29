@@ -135,7 +135,7 @@
     padding: 2px 4px;
     font: inherit;
     color: var(--chrome-text);
-    background: var(--grid-bg);
+    background: var(--input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 4px;
   }

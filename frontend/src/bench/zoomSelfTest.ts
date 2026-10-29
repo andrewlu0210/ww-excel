@@ -142,7 +142,7 @@ export async function zoomSelfTest(
   const added = await documentApi.addSheet((await documentApi.state()).sheets?.length ?? 1);
   await step();
   const selectTab = async (index: number) => {
-    document.querySelectorAll<HTMLElement>('[role="tab"]')[index].dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+    document.querySelectorAll<HTMLElement>('[data-sheet-tabs] [role="tab"]')[index].dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
     window.dispatchEvent(new PointerEvent('pointerup'));
     await step();
   };

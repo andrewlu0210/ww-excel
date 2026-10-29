@@ -72,13 +72,13 @@ export async function formatPainterSelfTest(
   await select(130, 0);
   button().click();
   await step();
-  const tab = document.querySelectorAll<HTMLElement>('[role="tab"]')[target];
+  const tab = document.querySelectorAll<HTMLElement>('[data-sheet-tabs] [role="tab"]')[target];
   tab.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
   window.dispatchEvent(new PointerEvent('pointerup'));
   await step();
   await apply(2, 2);
   expect('複製格式：跨工作表套用', !!(await style(2, 2, target))?.font.bold, '');
-  document.querySelectorAll<HTMLElement>('[role="tab"]')[0].dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
+  document.querySelectorAll<HTMLElement>('[data-sheet-tabs] [role="tab"]')[0].dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
   window.dispatchEvent(new PointerEvent('pointerup'));
   await step();
 }

@@ -1,4 +1,10 @@
 {
+ "插入儲存格…": "Insert Cells…",
+ "條件式格式…": "Conditional Formatting…",
+ "剪貼簿": "Clipboard",
+ "頁面配置": "Page Layout",
+ "功能區": "Ribbon",
+ "快速存取工具列": "Quick Access Toolbar",
  "由台北科研-Andrew製作": "Created by 台北科研-Andrew",
  "macOS 試算表工具，支援 Excel 檔案編輯、公式計算與圖表。": "A spreadsheet app for macOS, with Excel file editing, formulas, and charts.",
  "版本 %s": "Version %s",

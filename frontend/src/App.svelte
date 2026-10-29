@@ -40,6 +40,7 @@
   import ZoomDialog from './components/ZoomDialog.svelte';
   import { normalizeZoom, SheetZooms } from './grid/zoom';
   import Toolbar from './components/Toolbar.svelte';
+  import Ribbon from './components/Ribbon.svelte';
   import { current, fromRange, single, type CrossEdit, type Range, type Selection } from './grid/selection';
   import type { MenuAction, SheetMode } from './input/keymap';
   import { styleStore } from './stores/styles';
@@ -87,6 +88,8 @@
   let mode = $state<SheetMode>('ready');
   let activeStyle = $state<StyleDTO | null>(null);
   let activeMerged = $state(false);
+  let canUndo = $state(false);
+  let canRedo = $state(false);
   let circular = $state('');
   let numberDialog = $state(false);
   let findPanel = $state<{ replace: boolean } | null>(null);
@@ -427,6 +430,7 @@
         else void sheetView?.runMenu(action);
       }),
       documentApi.onState((st) => {
+        canUndo = st.canUndo; canRedo = st.canRedo;
         circular = st.circular;
         names = st.names ?? [];
       }),
@@ -436,6 +440,7 @@
 
     void (async () => {
       const st = await documentApi.state();
+      canUndo = st.canUndo; canRedo = st.canRedo;
       sheets = st.sheets ?? [];
       circular = st.circular;
       names = st.names ?? [];
@@ -479,7 +484,14 @@
 
 <main class="app">
   {#if info}
+    <Ribbon {canUndo} {canRedo} onaction={(action) => {
+      if (action === 'preferences') onAppAction(action);
+      else void sheetView?.runMenu(action);
+    }}>
     <Toolbar
+      onaction={(action) => {
+        void sheetView?.runMenu(action);
+      }}
       painting={paintMode !== 'off'}
       onpaint={(repeat) => void startPainter(repeat)}
       style={activeStyle}
@@ -489,6 +501,7 @@
       onclear={(m) => void sheetView?.clearRanges(m)}
       onnumberdialog={() => (numberDialog = true)}
     />
+    </Ribbon>
     {#key generation}
       <Sheet
         bind:this={sheetView}

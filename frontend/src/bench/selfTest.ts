@@ -9,6 +9,7 @@ import { ensureFont } from '../stores/fontLoader';
 import { fontCss, styleStore } from '../stores/styles';
 import { single, type CellPos, type Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
+import { ribbonSelfTest } from './ribbonSelfTest';
 import { zoomSelfTest } from './zoomSelfTest';
 import { formatPainterSelfTest } from './formatPainterSelfTest';
 import type { BlockCache } from '../stores/viewportCache';
@@ -295,6 +296,7 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await polishTests(sheet, { key, type, goTo, step, expect, expectCell });
   await formatPainterSelfTest(sheet, step, expect);
   await zoomSelfTest(sheet, step, expect);
+  await ribbonSelfTest(sheet, step, expect);
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);
@@ -899,7 +901,7 @@ async function polishTests(sheet: SheetDriver, h: Helpers): Promise<void> {
   await settingsApi.set({ ...initial, appearance: 'dark' });
   await waitFor(() => document.documentElement.dataset.theme === 'dark');
   const bg = getComputedStyle(document.documentElement).getPropertyValue('--grid-bg').trim();
-  expect('外觀：強制深色', document.documentElement.dataset.theme === 'dark' && bg === '#1b1b1b', `theme=${document.documentElement.dataset.theme} --grid-bg=${bg}`);
+  expect('外觀：強制深色', document.documentElement.dataset.theme === 'dark' && ['#fff', '#ffffff'].includes(bg.toLowerCase()) && getComputedStyle(document.documentElement).getPropertyValue('--cell-text').trim() === '#1f1f1f' && getComputedStyle(document.documentElement).getPropertyValue('--input-bg').trim() === '#1b1b1b', `theme=${document.documentElement.dataset.theme} --grid-bg=${bg}`);
   await new Promise((r) => setTimeout(r, 200));
   await settingsApi.set({ ...initial, appearance: 'light' });
   await waitFor(() => document.documentElement.dataset.theme === 'light');

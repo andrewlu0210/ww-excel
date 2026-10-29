@@ -14,7 +14,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   check('活頁簿讀取八張工作表', state.sheets?.length === 8, JSON.stringify(state.sheets));
 
   const select = async (i: number) => {
-    const tab = document.querySelectorAll<HTMLElement>('[role="tab"]')[i];
+    const tab = document.querySelectorAll<HTMLElement>('[data-sheet-tabs] [role="tab"]')[i];
     if (!tab) throw new Error(`Missing worksheet tab ${i}`);
     tab.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }));
     window.dispatchEvent(new PointerEvent('pointerup'));

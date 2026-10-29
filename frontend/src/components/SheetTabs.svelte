@@ -76,7 +76,7 @@
   onpointerdown={(e) => menu && !(e.target as Element).closest?.('.tab-menu') && (menu = null)}
 />
 
-<div class="tabs" role="tablist" aria-label={t('工作表')}>
+<div class="tabs" data-sheet-tabs role="tablist" aria-label={t('工作表')}>
   {#each sheets as name, i (i + ':' + name)}
     {#if renaming === i}
       <span class="tab active editing">
@@ -156,7 +156,7 @@
     color: var(--accent);
     font-weight: 600;
     border-bottom-color: var(--accent);
-    background: var(--grid-bg);
+    background: var(--input-bg);
   }
   .tab.drop {
     box-shadow: inset 2px 0 0 var(--accent);
@@ -169,7 +169,7 @@
     font: inherit;
     padding: 1px 4px;
     color: var(--chrome-text);
-    background: var(--grid-bg);
+    background: var(--input-bg);
     border: 1px solid var(--accent);
     border-radius: 3px;
     -webkit-user-select: text;

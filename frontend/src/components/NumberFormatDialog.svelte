@@ -145,7 +145,7 @@
     font: 13px ui-monospace, Menlo, monospace;
     padding: 5px 8px;
     color: var(--chrome-text);
-    background: var(--grid-bg);
+    background: var(--input-bg);
     border: 1px solid var(--chrome-border);
     border-radius: 4px;
     -webkit-user-select: text;
