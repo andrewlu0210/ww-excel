@@ -10,11 +10,11 @@
         <key>CFBundleIdentifier</key>
             <string>com.ww.excel</string>
         <key>CFBundleVersion</key>
-            <string>1.2.0</string>
+            <string>1.2.1</string>
         <key>CFBundleGetInfoString</key>
-            <string>WW Excel 1.2.0</string>
+            <string>WW Excel 1.2.1</string>
         <key>CFBundleShortVersionString</key>
-            <string>1.2.0</string>
+            <string>1.2.1</string>
         <key>CFBundleIconFile</key>
             <string>icons</string>
         <key>LSMinimumSystemVersion</key>
