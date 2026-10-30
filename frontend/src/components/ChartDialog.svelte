@@ -30,6 +30,7 @@
     { value: 'line', label: t('折線圖') },
     { value: 'area', label: t('區域圖') },
     { value: 'pie', label: t('圓形圖') },
+    { value: 'doughnut', label: t('環圈圖') },
     { value: 'scatter', label: t('XY 散佈圖') },
   ];
 
@@ -97,7 +98,7 @@
             <option value="none">{t('不顯示')}</option>
           </select>
         </label>
-        {#if chart.type !== 'pie'}
+        {#if !['pie', 'doughnut'].includes(chart.type)}
           <label>{t('橫軸標題')} <input type="text" bind:value={chart.xTitle} /></label>
           <label>{t('縱軸標題')} <input type="text" bind:value={chart.yTitle} /></label>
         {/if}

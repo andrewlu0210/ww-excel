@@ -96,3 +96,36 @@ func TestCoverage(t *testing.T) {
 		t.Errorf("no English for %q (%s)", k, where)
 	}
 }
+
+func TestSimplifiedChinese(t *testing.T) {
+	defer SetLanguage(Chinese)
+	SetLanguage(SimplifiedChinese)
+	for _, tc := range []struct{ in, want string }{
+		{"儲存", "保存"}, {"貼上", "粘贴"}, {"字型", "字体"},
+		{"無法開啟「客戶資料.xlsx」", "无法打开「客戶資料.xlsx」"},
+		{"這裡不能出現「)」（位置 4）", "这里不能出现「)」（位置 4）"},
+	} {
+		if got := T(tc.in); got != tc.want {
+			t.Errorf("T(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+	load()
+	for key := range catalogs[English].exact {
+		value, ok := Dictionary()[key]
+		if !ok {
+			t.Errorf("missing simplified translation: %q", key)
+			continue
+		}
+		if strings.Join(verb.FindAllString(key, -1), ",") != strings.Join(verb.FindAllString(value, -1), ",") {
+			t.Errorf("placeholders changed: %q -> %q", key, value)
+		}
+	}
+	SetLanguage(English)
+	if T("儲存") != "Save" {
+		t.Fatal("English catalog lost")
+	}
+	SetLanguage(Chinese)
+	if T("儲存") != "儲存" || len(Dictionary()) != 0 {
+		t.Fatal("Traditional Chinese fallback failed")
+	}
+}

@@ -121,6 +121,25 @@ type FilterValue struct {
 	Shown bool
 }
 
+// FilterForColumn also exposes a table's filter before criteria are applied.
+func (d *Document) FilterForColumn(sheet, col int) *model.AutoFilter {
+	if sheet < 0 || sheet >= len(d.wb.Sheets) {
+		return nil
+	}
+	l := &d.wb.Sheets[sheet].Layout
+	if f := l.Filter; f != nil && col >= f.Range.C0 && col <= f.Range.C1 {
+		return f
+	}
+	for _, t := range l.Tables {
+		if !t.NoFilter && col >= t.Range.C0 && col <= t.Range.C1 {
+			rg := t.Range
+			rg.R1 = t.DataRows().R1
+			return &model.AutoFilter{Range: rg, Cols: map[int][]string{}}
+		}
+	}
+	return nil
+}
+
 // FilterValues lists the distinct display values of a filter column
 // (data rows only), sorted like an ascending sort; "" stands for blanks.
 func (d *Document) FilterValues(sheet, col int, display DisplayFunc) []FilterValue {
@@ -128,7 +147,7 @@ func (d *Document) FilterValues(sheet, col int, display DisplayFunc) []FilterVal
 		return nil
 	}
 	sh := d.wb.Sheets[sheet]
-	f := sh.Layout.Filter
+	f := d.FilterForColumn(sheet, col)
 	if f == nil || col < f.Range.C0 || col > f.Range.C1 {
 		return nil
 	}
@@ -173,7 +192,7 @@ func (d *Document) FilterCommand(sheet, col int, shown []string, display Display
 		return nil, errors.New("無效的工作表")
 	}
 	sh := d.wb.Sheets[sheet]
-	f := sh.Layout.Filter
+	f := d.FilterForColumn(sheet, col)
 	if f == nil || col < f.Range.C0 || col > f.Range.C1 {
 		return nil, errors.New("這一欄沒有篩選")
 	}
@@ -184,6 +203,9 @@ func (d *Document) FilterCommand(sheet, col int, shown []string, display Display
 		nf.Cols[col] = append([]string{}, shown...)
 	}
 	return d.layoutCommand(sheet, "篩選", nil, func(l *model.Layout) {
+		if l.Filter != nil && l.Filter.Range != nf.Range {
+			showRows(l, l.Filter.Range.R0+1, l.Filter.Range.R1)
+		}
 		l.Filter = nf
 		d.applyFilter(sh, l, display)
 	})

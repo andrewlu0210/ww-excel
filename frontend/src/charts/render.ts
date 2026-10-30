@@ -2,8 +2,30 @@
 // scatter, in Excel's default look. Pure apart from the canvas, so the
 // same code draws on screen and the pictures sent to the PDF renderer.
 
+interface ChartAxis {
+  lineColor: string;
+  lineHidden: boolean;
+  hidden: boolean;
+  majorTick: string;
+  gridLines: boolean;
+  hideLabels: boolean;
+}
+
 export interface ChartSpec {
-  type: string; // column, bar, line, area, pie, scatter
+  valueAxis?: ChartAxis | null;
+  categoryAxis?: ChartAxis | null;
+  series?: {
+    color?: string;
+    pointColors?: { [key: string]: string | undefined } | null;
+    labels?: {
+      fontSize: number;
+      color: string;
+      points: { [key: string]: { hidden: boolean; center: boolean } | undefined } | null;
+    } | null;
+  }[] | null;
+  background?: string;
+  holeSize?: number;
+  type: string; // column, bar, line, area, pie, doughnut, scatter
   title: string;
   legend: string; // right, bottom, top, none
   xTitle: string;
@@ -12,12 +34,14 @@ export interface ChartSpec {
 }
 
 export interface ChartSeriesData {
+  labels?: string[];
   name: string;
   values: (number | null)[];
   x: (number | null)[];
 }
 
 export interface ChartData {
+  valueScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
   categories: string[];
   series: ChartSeriesData[];
 }
@@ -45,6 +69,15 @@ export function seriesColor(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
 
+function chartColor(spec:ChartSpec, i:number):string {
+  const color=spec.series?.[i]?.color;
+  return color ? `#${color}` : seriesColor(i);
+}
+function pointColor(spec:ChartSpec, i:number):string {
+  const color=spec.series?.[0]?.pointColors?.[i];
+  return color ? `#${color}` : seriesColor(i);
+}
+
 // "Nice" axis: rounded bounds and a step of 1, 2 or 5 × 10^n.
 export function niceScale(min: number, max: number, ticks = 5): { min: number; max: number; step: number } {
   if (!isFinite(min) || !isFinite(max)) return { min: 0, max: 1, step: 0.2 };
@@ -60,6 +93,12 @@ export function niceScale(min: number, max: number, ticks = 5): { min: number; m
   const norm = raw / mag;
   const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
   return { min: Math.floor(min / step) * step, max: Math.ceil(max / step) * step, step };
+}
+
+// Bars encode magnitude as length, so their automatic axis must include zero.
+export function categoryScale(type: string, min: number, max: number) {
+  return ['column', 'bar', 'area'].includes(type)
+    ? niceScale(Math.min(0, min), Math.max(0, max)) : niceScale(min, max);
 }
 
 export function formatTick(v: number, step: number): string {
@@ -79,8 +118,13 @@ interface Box {
 
 export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, spec: ChartSpec, data: ChartData, theme: ChartTheme = LIGHT_THEME): void {
   ctx.save();
-  ctx.fillStyle = theme.bg;
-  ctx.fillRect(0, 0, w, h);
+  const background = spec.background === 'transparent' ? 'transparent' : spec.background ? `#${spec.background}` : theme.bg;
+  theme = { ...theme, bg: background };
+  if (background === 'transparent') ctx.clearRect(0, 0, w, h);
+  else {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, w, h);
+  }
   ctx.textBaseline = 'middle';
   let box: Box = { x: 10, y: 10, w: w - 20, h: h - 20 };
 
@@ -92,16 +136,16 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
     box = { ...box, y: box.y + 26, h: box.h - 26 };
   }
 
-  const pie = spec.type === 'pie';
+  const pie = spec.type === 'pie' || spec.type === 'doughnut';
   const labels = pie ? data.categories : data.series.map((s) => s.name);
-  const colors = pie ? data.categories.map((_, i) => seriesColor(i)) : data.series.map((_, i) => seriesColor(i));
+  const colors = pie ? data.categories.map((_, i) => pointColor(spec, i)) : data.series.map((_, i) => chartColor(spec, i));
   box = drawLegend(ctx, box, spec.legend, labels, colors, theme);
 
   if (data.series.length === 0) {
     ctx.restore();
     return;
   }
-  if (pie) drawPie(ctx, box, data, theme);
+  if (pie) drawPie(ctx, box, spec, data, theme, spec.type === 'doughnut' ? Math.max(10, Math.min(90, spec.holeSize || 50)) / 100 : 0);
   else if (spec.type === 'scatter') drawScatter(ctx, box, spec, data, theme);
   else drawCategoryChart(ctx, box, spec, data, theme);
   ctx.restore();
@@ -176,11 +220,13 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     lo = 0;
     hi = 1;
   }
-  const scale = niceScale(lo, hi);
+  const scale = data.valueScale ?? categoryScale(spec.type, lo, hi);
   ctx.font = `11px ${theme.font}`;
   const tickLabels: string[] = [];
-  for (let v = scale.min; v <= scale.max + scale.step / 2; v += scale.step) tickLabels.push(formatTick(v, scale.step));
-  const valueLabelW = Math.max(...tickLabels.map((t) => ctx.measureText(t).width)) + 8;
+  for (let i=0; i<=200 && scale.min+i*scale.step<=scale.max+scale.step*1e-8; i++) {
+    tickLabels.push(data.valueScale?.labels?.[i] ?? formatTick(scale.min+i*scale.step,scale.step));
+  }
+  const valueLabelW = spec.valueAxis?.hidden || spec.valueAxis?.hideLabels ? 0 : Math.max(...tickLabels.map((t) => ctx.measureText(t).width)) + 8;
   const catLabelW = Math.max(0, ...data.categories.map((c) => ctx.measureText(c).width)) + 8;
 
   // Plot area inside the axes and axis titles.
@@ -196,26 +242,37 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   const toPx = (v: number) =>
     horizontal ? plot.x + ((v - scale.min) / (scale.max - scale.min)) * plot.w : plot.y + plot.h - ((v - scale.min) / (scale.max - scale.min)) * plot.h;
 
-  // Gridlines and value labels.
-  ctx.strokeStyle = theme.grid;
-  ctx.lineWidth = 1;
+  // Gridlines, axis lines and tick marks are independent Excel settings.
+  const axisLine = (axis:ChartAxis | null | undefined, x1:number,y1:number,x2:number,y2:number) => {
+    if (axis?.hidden || axis?.lineHidden) return;
+    ctx.strokeStyle = axis?.lineColor ? `#${axis.lineColor}` : theme.muted;
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  };
+  const valueAxis=spec.valueAxis;
+  const categoryAxis=spec.categoryAxis;
+  const zero=toPx(Math.max(scale.min,Math.min(0,scale.max)));
+  axisLine(valueAxis,plot.x,horizontal ? plot.y+plot.h : plot.y,horizontal ? plot.x+plot.w : plot.x,plot.y+plot.h);
+  axisLine(categoryAxis,horizontal ? zero : plot.x,horizontal ? plot.y : zero,horizontal ? zero : plot.x+plot.w,horizontal ? plot.y+plot.h : zero);
   ctx.fillStyle = theme.muted;
   tickLabels.forEach((label, i) => {
-    const v = scale.min + i * scale.step;
-    const p = Math.round(toPx(v)) + 0.5;
-    ctx.beginPath();
-    if (horizontal) {
-      ctx.moveTo(p, plot.y);
-      ctx.lineTo(p, plot.y + plot.h);
-      ctx.textAlign = 'center';
-      ctx.fillText(label, p, plot.y + plot.h + 10);
-    } else {
-      ctx.moveTo(plot.x, p);
-      ctx.lineTo(plot.x + plot.w, p);
-      ctx.textAlign = 'right';
-      ctx.fillText(label, plot.x - 6, p);
+    const p = toPx(scale.min+i*scale.step);
+    if (!valueAxis?.hidden && (valueAxis?.gridLines ?? true)) {
+      ctx.strokeStyle=theme.grid;ctx.lineWidth=1;
+      ctx.beginPath();
+      ctx.moveTo(horizontal ? p : plot.x,horizontal ? plot.y : p);
+      ctx.lineTo(horizontal ? p : plot.x+plot.w,horizontal ? plot.y+plot.h : p);
+      ctx.stroke();
     }
-    ctx.stroke();
+    if (!valueAxis?.hidden && !valueAxis?.hideLabels) {
+      ctx.textAlign=horizontal ? 'center' : 'right';
+      ctx.fillText(label,horizontal ? p : plot.x-8,horizontal ? plot.y+plot.h+10 : p);
+    }
+    if (valueAxis?.majorTick && valueAxis.majorTick!=='none') {
+      const outside=valueAxis.majorTick==='out' || valueAxis.majorTick==='cross' ? 4 : 0;
+      const inside=valueAxis.majorTick==='in' || valueAxis.majorTick==='cross' ? 4 : 0;
+      axisLine(valueAxis,horizontal ? p : plot.x-outside,horizontal ? plot.y+plot.h+outside : p,horizontal ? p : plot.x+inside,horizontal ? plot.y+plot.h-inside : p);
+    }
   });
 
   // Category labels (skip some when crowded).
@@ -223,6 +280,13 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   const every = Math.max(1, Math.ceil((horizontal ? 14 : catLabelW * 0.8) / band));
   ctx.fillStyle = theme.muted;
   for (let i = 0; i < n; i += every) {
+    const p = (horizontal ? plot.y : plot.x) + band * (i + .5);
+    if (categoryAxis?.majorTick && categoryAxis.majorTick!=='none') {
+      const outside=categoryAxis.majorTick==='out' || categoryAxis.majorTick==='cross' ? 4 : 0;
+      const inside=categoryAxis.majorTick==='in' || categoryAxis.majorTick==='cross' ? 4 : 0;
+      axisLine(categoryAxis,horizontal ? zero-outside : p,horizontal ? p : zero-inside,horizontal ? zero+inside : p,horizontal ? p : zero+outside);
+    }
+    if(categoryAxis?.hidden || categoryAxis?.hideLabels) continue;
     const label = data.categories[i] ?? String(i + 1);
     if (horizontal) {
       ctx.textAlign = 'right';
@@ -247,7 +311,6 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     ctx.restore();
   }
 
-  const zero = toPx(Math.max(scale.min, Math.min(0, scale.max)));
   const k = data.series.length;
   if (spec.type === 'column' || spec.type === 'bar') {
     const gap = band * 0.25;
@@ -256,7 +319,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     const pos = new Array<number>(n).fill(0);
     const neg = new Array<number>(n).fill(0);
     data.series.forEach((s, si) => {
-      ctx.fillStyle = seriesColor(si);
+      ctx.fillStyle = chartColor(spec, si);
       for (let i = 0; i < n; i++) {
         const v = s.values[i];
         if (!finite(v)) continue;
@@ -281,7 +344,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   const stack = new Array<number>(n).fill(0);
   const series = spec.type === 'area' && stacked ? data.series : data.series;
   series.forEach((s, si) => {
-    const color = seriesColor(si);
+    const color = chartColor(spec, si);
     const pts: ([number, number] | null)[] = [];
     for (let i = 0; i < n; i++) {
       const v = s.values[i];
@@ -344,7 +407,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   });
 }
 
-function drawPie(ctx: CanvasRenderingContext2D, box: Box, data: ChartData, theme: ChartTheme): void {
+function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: ChartData, theme: ChartTheme, hole = 0): void {
   const values = data.series[0].values.map((v) => (finite(v) && v > 0 ? v : 0));
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return;
@@ -356,21 +419,26 @@ function drawPie(ctx: CanvasRenderingContext2D, box: Box, data: ChartData, theme
   values.forEach((v, i) => {
     if (v <= 0) return;
     const sweep = (v / total) * Math.PI * 2;
-    ctx.fillStyle = seriesColor(i);
+    ctx.fillStyle = pointColor(spec, i);
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
+    if (!hole) ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, r, angle, angle + sweep);
+    if (hole) ctx.arc(cx, cy, r * hole, angle + sweep, angle, true);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = theme.bg;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    // Percentage label inside larger slices.
-    if (sweep > 0.25) {
+    const labels = spec.series?.[0]?.labels;
+    const point = labels?.points?.[i];
+    const text = labels ? data.series[0].labels?.[i] ?? '' : `${Math.round((v / total) * 100)}%`;
+    if (!point?.hidden && text && (labels || sweep > 0.25)) {
       const mid = angle + sweep / 2;
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = labels?.color ? `#${labels.color}` : '#ffffff';
+      ctx.font = `${labels?.fontSize ? labels.fontSize * 96 / 72 : 11}px ${theme.font}`;
       ctx.textAlign = 'center';
-      ctx.fillText(`${Math.round((v / total) * 100)}%`, cx + Math.cos(mid) * r * 0.62, cy + Math.sin(mid) * r * 0.62);
+      const radius = point?.center && hole ? 0 : r * (hole ? (1 + hole) / 2 : 0.62);
+      ctx.fillText(text, cx + Math.cos(mid) * radius, cy + Math.sin(mid) * radius);
     }
     angle += sweep;
   });
@@ -440,7 +508,7 @@ function drawScatter(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, d
     ctx.restore();
   }
   data.series.forEach((s, si) => {
-    ctx.fillStyle = seriesColor(si);
+    ctx.fillStyle = chartColor(spec, si);
     for (const p of pointsOf(s)) {
       if (!p) continue;
       ctx.beginPath();

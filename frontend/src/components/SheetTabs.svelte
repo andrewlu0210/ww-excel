@@ -6,6 +6,7 @@
 
   interface Props {
     sheets: string[];
+    hidden?: number[];
     active: number;
     onselect: (i: number) => void;
     onadd: () => void;
@@ -16,7 +17,9 @@
     ondone: () => void;
   }
 
-  let { sheets, active, onselect, onadd, onrename, ondelete, onmove, ondone }: Props = $props();
+  let { sheets, hidden = [], active, onselect, onadd, onrename, ondelete, onmove, ondone }: Props = $props();
+
+  const visibleCount = $derived(sheets.length - hidden.length);
 
   let renaming = $state<number | null>(null);
   let draft = $state('');
@@ -78,6 +81,7 @@
 
 <div class="tabs" data-sheet-tabs role="tablist" aria-label={t('工作表')}>
   {#each sheets as name, i (i + ':' + name)}
+    {#if !hidden.includes(i)}
     {#if renaming === i}
       <span class="tab active editing">
         <input
@@ -99,6 +103,7 @@
         class="tab"
         class:active={i === active}
         class:drop={dropAt === i}
+        data-sheet-index={i}
         role="tab"
         aria-selected={i === active}
         tabindex="-1"
@@ -112,6 +117,7 @@
         }}>{name}</button
       >
     {/if}
+    {/if}
   {/each}
   <button class="add" tabindex="-1" title={t('新增工作表 (⇧F11)')} onpointerdown={(e) => e.preventDefault()} onclick={onadd}>{t('＋')}</button>
 </div>
@@ -121,7 +127,7 @@
   <ul class="tab-menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
     <li><button role="menuitem" onclick={() => { menu = null; onadd(); }}>{t('插入工作表')}</button></li>
     <li><button role="menuitem" onclick={() => void startRename(i)}>{t('重新命名')}</button></li>
-    <li><button role="menuitem" disabled={sheets.length <= 1} onclick={() => { menu = null; ondelete(i); }}>{t('刪除')}</button></li>
+    <li><button role="menuitem" disabled={visibleCount <= 1} onclick={() => { menu = null; ondelete(i); }}>{t('刪除')}</button></li>
     <li><button role="menuitem" disabled={i === 0} onclick={() => { menu = null; onmove(i, i - 1); }}>{t('左移')}</button></li>
     <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => { menu = null; onmove(i, i + 1); }}>{t('右移')}</button></li>
   </ul>

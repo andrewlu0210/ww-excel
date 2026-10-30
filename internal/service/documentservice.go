@@ -299,7 +299,7 @@ func Recover(ds *DocumentService, ctx context.Context, store *recovery.Store) {
 	}
 	title := i18n.T("WW Excel 上次沒有正常結束")
 	msg := fmt.Sprintf(i18n.T("有 %d 份文件的變更還沒儲存，要復原嗎？"), len(orphans)) + "\n\n" + strings.Join(names, "\n")
-	restore := ds.dialogs.Confirm(title, msg, i18n.T("復原"))
+	restore := ds.dialogs.Confirm(title, msg, i18n.T("復原文件"))
 	for _, e := range orphans {
 		if restore {
 			wb, err := store.Load(e)

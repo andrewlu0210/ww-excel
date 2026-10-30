@@ -78,3 +78,28 @@ func TestTables(t *testing.T) {
 		t.Fatalf("after convert: %q %q", editText(d, 0, 6, 0), editText(d, 0, 1, 3))
 	}
 }
+
+func TestTableFilterWithoutWorksheetFilter(t *testing.T) {
+	d := New()
+	for r, v := range []string{"Item", "Apple", "Banana"} {
+		enter(t, d, 0, r, 0, v)
+	}
+	cmd, _, err := d.CreateTableCommand(0, rg(0, 0, 2, 0), true, "")
+	must(t, d)(cmd, err)
+	d.Workbook().Sheets[0].Layout.Filter = nil
+	values := d.FilterValues(0, 0, plain)
+	if len(values) != 2 || values[0].Text != "Apple" || values[1].Text != "Banana" {
+		t.Fatalf("table filter values: %+v", values)
+	}
+	if d.Workbook().Sheets[0].Layout.Filter != nil {
+		t.Fatal("reading dropdown values changed worksheet filter")
+	}
+	must(t, d)(d.FilterCommand(0, 0, []string{"Apple"}, plain))
+	if !d.Workbook().Sheets[0].Layout.Rows[2].Hidden {
+		t.Fatal("table filter did not hide unmatched row")
+	}
+	d.Undo()
+	if d.Workbook().Sheets[0].Layout.Rows[2].Hidden {
+		t.Fatal("undo did not restore row")
+	}
+}

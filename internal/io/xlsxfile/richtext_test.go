@@ -66,7 +66,7 @@ func TestRichTextXLSXRoundTrip(t *testing.T) {
 
 // The user-provided workbook is optional locally; synthetic tests remain portable.
 func TestUserWorkbookDisplayCompatibility(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "test.xlsx")
+	path := filepath.Join("..", "..", "..", "test_data", "test.xlsx")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Skip("local user workbook not present")
 	}

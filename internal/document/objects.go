@@ -78,7 +78,7 @@ func (d *Document) checkChart(c *model.Chart) error {
 		return errors.New("缺少圖表設定")
 	}
 	switch c.Type {
-	case "column", "bar", "line", "pie", "scatter", "area":
+	case "column", "bar", "line", "pie", "doughnut", "scatter", "area":
 	default:
 		return fmt.Errorf("不支援的圖表類型「%s」", c.Type)
 	}
@@ -133,6 +133,8 @@ func (d *Document) ChartData(sheet int, c *model.Chart, display DisplayFunc) Cha
 		}
 		if i == 0 && s.Categories != "" {
 			out.Categories = d.chartTexts(sheet, s.Categories, display)
+		} else if i == 0 && s.CategoryLabels != nil {
+			out.Categories = append([]string{}, s.CategoryLabels...)
 		}
 		out.Series = append(out.Series, sd)
 	}
@@ -141,7 +143,11 @@ func (d *Document) ChartData(sheet int, c *model.Chart, display DisplayFunc) Cha
 		n = max(n, len(s.Values))
 	}
 	for len(out.Categories) < n {
-		out.Categories = append(out.Categories, fmt.Sprint(len(out.Categories)+1))
+		label := fmt.Sprint(len(out.Categories) + 1)
+		if len(c.Series) > 0 && c.Series[0].Categories == "" && c.Series[0].CategoryLabels != nil {
+			label = ""
+		}
+		out.Categories = append(out.Categories, label)
 	}
 	return out
 }
@@ -284,7 +290,7 @@ func (d *Document) ChartFromRange(sheet int, rg model.Range, typ string) (*model
 			chart.Series[i].Categories = x
 		}
 	}
-	if typ == "pie" {
+	if typ == "pie" || typ == "doughnut" {
 		chart.Series = chart.Series[:1]
 	}
 	if len(chart.Series) == 1 && chart.Series[0].Name != "" {

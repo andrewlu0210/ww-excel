@@ -1,5 +1,5 @@
 // UI translation. Source strings are the Traditional Chinese text in the
-// code; Go owns the English table (internal/i18n/en.json) and sends it
+// code; Go owns the translation catalogs and sends the selected table
 // at startup. The language is fixed for the page's lifetime: changing it
 // reloads the window.
 let dict: Record<string, string> = {};
@@ -15,7 +15,7 @@ const VERB = /%[sdvqcw]/g;
 
 export function setLanguage(lang: string, table: Record<string, string> | null): void {
   current = lang;
-  dict = lang === 'en' && table ? table : {};
+  dict = lang !== 'zh-TW' && table ? table : {};
   patterns = Object.entries(dict)
     .filter(([zh]) => /%[sdvqcw]/.test(zh))
     // Most specific first: "%s（位置 %d）" must not win over longer keys.
@@ -47,7 +47,7 @@ export function t(s: string, ...args: (string | number)[]): string {
 // tr translates a finished message, e.g. an error from Go that was
 // formatted from a key with placeholders.
 export function tr(msg: string): string {
-  if (current !== 'en' || !msg) return msg;
+  if (current === 'zh-TW' || !msg) return msg;
   const exact = dict[msg];
   if (exact !== undefined) return exact;
   for (const p of patterns) {

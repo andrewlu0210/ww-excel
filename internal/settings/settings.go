@@ -14,7 +14,7 @@ import (
 type Settings struct {
 	// Appearance is "system", "light" or "dark".
 	Appearance string `json:"appearance"`
-	// Language is "system", "zh-TW" or "en".
+	// Language is "system", "zh-TW", "zh-CN" or "en".
 	Language string `json:"language"`
 	// AutoRecoverMinutes is the autosave interval; 0 turns it off.
 	AutoRecoverMinutes int `json:"autoRecoverMinutes"`
@@ -35,7 +35,7 @@ func (s Settings) Normalize() Settings {
 	if !slices.Contains([]string{"system", "light", "dark"}, s.Appearance) {
 		s.Appearance = d.Appearance
 	}
-	if !slices.Contains([]string{"system", "zh-TW", "en"}, s.Language) {
+	if !slices.Contains([]string{"system", "zh-TW", "zh-CN", "en"}, s.Language) {
 		s.Language = d.Language
 	}
 	if !slices.Contains([]string{"down", "right", "up", "left", "none"}, s.EnterMove) {
@@ -112,14 +112,25 @@ func save(path string, s Settings) error {
 
 // ResolveLanguage turns "system" into a concrete UI language given the
 // system's preferred languages (e.g. ["zh-Hant-TW", "en-US"]): Chinese
-// (any script) maps to zh-TW, everything else to English.
+// resolves its script/region; everything else defaults to English.
 func ResolveLanguage(setting string, preferred []string) string {
-	if setting == "zh-TW" || setting == "en" {
+	if setting == "zh-TW" || setting == "zh-CN" || setting == "en" {
 		return setting
 	}
 	for _, p := range preferred {
-		p = strings.ToLower(p)
+		p = strings.ReplaceAll(strings.ToLower(p), "_", "-")
 		if strings.HasPrefix(p, "zh") {
+			if strings.Contains(p, "-hans") {
+				return "zh-CN"
+			}
+			if strings.Contains(p, "-hant") {
+				return "zh-TW"
+			}
+			for _, part := range strings.Split(p, "-")[1:] {
+				if part == "cn" || part == "sg" {
+					return "zh-CN"
+				}
+			}
 			return "zh-TW"
 		}
 		if strings.HasPrefix(p, "en") {

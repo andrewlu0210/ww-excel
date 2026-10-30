@@ -38,20 +38,56 @@ type Image struct {
 // Chart is a chart linked to cells. Series references are formulas
 // without "=", usually absolute references with the sheet name.
 type Chart struct {
-	// Type: column, bar, line, pie, scatter, area.
-	Type    string
-	Title   string
-	Series  []ChartSeries
-	Legend  string // right, bottom, top, none
-	XTitle  string
-	YTitle  string
-	Stacked bool
+	// Type: column, bar, line, pie, doughnut, scatter, area.
+	Type         string
+	ValueAxis    *ChartAxis
+	CategoryAxis *ChartAxis
+	Background   string // Empty uses the default; transparent or an RGB hex color.
+	HoleSize     int    // Doughnut inner diameter as a percentage (0 uses 50).
+	Title        string
+	Series       []ChartSeries
+	Legend       string // right, bottom, top, none
+	XTitle       string
+	YTitle       string
+	Stacked      bool
+}
+
+type ChartAxis struct {
+	Format     string   `json:"format"`
+	Minimum    *float64 `json:"minimum,omitempty"`
+	Maximum    *float64 `json:"maximum,omitempty"`
+	MajorUnit  float64  `json:"majorUnit"`
+	LineColor  string   `json:"lineColor"`
+	LineHidden bool     `json:"lineHidden"`
+	Hidden     bool     `json:"hidden"`
+	MajorTick  string   `json:"majorTick"`
+	GridLines  bool     `json:"gridLines"`
+	HideLabels bool     `json:"hideLabels"`
+}
+
+type ChartLabels struct {
+	Format      string                  `json:"format"`
+	ShowValue   bool                    `json:"showValue"`
+	ShowPercent bool                    `json:"showPercent"`
+	FontSize    float64                 `json:"fontSize"`
+	Color       string                  `json:"color"`
+	Points      map[int]ChartLabelPoint `json:"points"`
+	RawXML      string                  `json:"rawXML,omitempty"`
+}
+
+type ChartLabelPoint struct {
+	Hidden bool `json:"hidden"`
+	Center bool `json:"center"`
 }
 
 type ChartSeries struct {
-	Name       string // a reference to the name cell, or "" (or a quoted literal)
-	Categories string // x labels (scatter: x values)
-	Values     string
+	CategoryLabels []string       `json:"categoryLabels,omitempty"`
+	Color          string         `json:"color,omitempty"`
+	PointColors    map[int]string `json:"pointColors,omitempty"`
+	Labels         *ChartLabels   `json:"labels,omitempty"`
+	Name           string         // a reference to the name cell, or "" (or a quoted literal)
+	Categories     string         // x labels (scatter: x values)
+	Values         string
 }
 
 func (c *Chart) clone() *Chart {
@@ -59,7 +95,43 @@ func (c *Chart) clone() *Chart {
 		return nil
 	}
 	out := *c
+	cloneAxis := func(a *ChartAxis) *ChartAxis {
+		if a == nil {
+			return nil
+		}
+		b := *a
+		if a.Minimum != nil {
+			v := *a.Minimum
+			b.Minimum = &v
+		}
+		if a.Maximum != nil {
+			v := *a.Maximum
+			b.Maximum = &v
+		}
+		return &b
+	}
+	out.ValueAxis = cloneAxis(c.ValueAxis)
+	out.CategoryAxis = cloneAxis(c.CategoryAxis)
 	out.Series = append([]ChartSeries(nil), c.Series...)
+	for i, s := range c.Series {
+		if s.CategoryLabels != nil {
+			out.Series[i].CategoryLabels = append([]string{}, s.CategoryLabels...)
+		}
+		if s.PointColors != nil {
+			out.Series[i].PointColors = make(map[int]string, len(s.PointColors))
+			for k, v := range s.PointColors {
+				out.Series[i].PointColors[k] = v
+			}
+		}
+		if s.Labels != nil {
+			labels := *s.Labels
+			labels.Points = make(map[int]ChartLabelPoint, len(s.Labels.Points))
+			for k, v := range s.Labels.Points {
+				labels.Points[k] = v
+			}
+			out.Series[i].Labels = &labels
+		}
+	}
 	return &out
 }
 

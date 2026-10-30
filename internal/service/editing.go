@@ -452,7 +452,7 @@ func (s *SheetService) SetFilter(ctx context.Context, sheet, col int, shown []st
 // SortFilter sorts the filter range by one of its columns.
 func (s *SheetService) SortFilter(ctx context.Context, sheet, col int, desc bool) error {
 	return s.exec(ctx, sheet, func(d *document.Document) (command.Command, error) {
-		f := d.Workbook().Sheets[sheet].Layout.Filter
+		f := d.FilterForColumn(sheet, col)
 		if f == nil {
 			return nil, errors.New("沒有篩選")
 		}

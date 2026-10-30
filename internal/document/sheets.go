@@ -122,6 +122,17 @@ func (d *Document) DeleteSheetCommand(index int) (command.Command, error) {
 		return nil, errors.New("工作表不存在")
 	}
 	sh := d.wb.Sheets[index]
+	if sh.Visible() {
+		visible := 0
+		for _, sheet := range d.wb.Sheets {
+			if sheet.Visible() {
+				visible++
+			}
+		}
+		if visible <= 1 {
+			return nil, errors.New("活頁簿至少要有一個工作表")
+		}
+	}
 	edits := d.rewriteFormulas(sh, func(n ast.Node) (ast.Node, bool) { return ast.RemoveSheet(n, sh.Name) })
 	var names nameState
 	return &command.Func{

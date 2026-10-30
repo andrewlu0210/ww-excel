@@ -46,7 +46,7 @@ func paletteFor(style string) tablePalette {
 	if p, ok := tablePalettes[style]; ok {
 		return p
 	}
-	return tablePalettes["TableStyleMedium2"]
+	return tablePalette{}
 }
 
 func newLook(d *document.Document, sheet int) *sheetLook {
@@ -85,6 +85,18 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 	for _, t := range l.tables {
 		if !t.Range.Contains(row, col) {
 			continue
+		}
+		if _, known := tablePalettes[t.Style]; !known {
+			// Preserve direct formatting for imported custom styles.
+			if t.RowBorder.Style != "" && row > t.Range.R0 && row < t.DataRows().R1 {
+				st := l.wb.StyleTable().Get(base)
+				if st.Border.Bottom.Style == "" {
+					st.Border.Bottom = t.RowBorder
+					base = l.wb.StyleTable().Intern(st)
+				}
+			}
+			any = true
+			break
 		}
 		p := paletteFor(t.Style)
 		switch {

@@ -49,6 +49,7 @@
       <select id="pref-language" bind:value={s.language} onchange={save}>
         <option value="system">{t('跟隨系統')}</option>
         <option value="zh-TW">{t('繁體中文')}</option>
+        <option value="zh-CN">简体中文</option>
         <option value="en">English</option>
       </select>
 

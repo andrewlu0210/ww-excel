@@ -18,25 +18,34 @@ import (
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 	"ww-excel/internal/model"
+	"ww-excel/internal/numfmt"
 	"ww-excel/internal/printing"
 )
 
 // ---- Floating objects ----
 
 type ChartSeriesDTO struct {
-	Name       string `json:"name"`
-	Categories string `json:"categories"`
-	Values     string `json:"values"`
+	CategoryLabels []string           `json:"categoryLabels,omitempty"`
+	Color          string             `json:"color,omitempty"`
+	PointColors    map[int]string     `json:"pointColors,omitempty"`
+	Labels         *model.ChartLabels `json:"labels,omitempty"`
+	Name           string             `json:"name"`
+	Categories     string             `json:"categories"`
+	Values         string             `json:"values"`
 }
 
 type ChartDTO struct {
-	Type    string           `json:"type"`
-	Title   string           `json:"title"`
-	Series  []ChartSeriesDTO `json:"series"`
-	Legend  string           `json:"legend"`
-	XTitle  string           `json:"xTitle"`
-	YTitle  string           `json:"yTitle"`
-	Stacked bool             `json:"stacked"`
+	ValueAxis    *model.ChartAxis `json:"valueAxis,omitempty"`
+	CategoryAxis *model.ChartAxis `json:"categoryAxis,omitempty"`
+	Background   string           `json:"background,omitempty"`
+	HoleSize     int              `json:"holeSize,omitempty"`
+	Type         string           `json:"type"`
+	Title        string           `json:"title"`
+	Series       []ChartSeriesDTO `json:"series"`
+	Legend       string           `json:"legend"`
+	XTitle       string           `json:"xTitle"`
+	YTitle       string           `json:"yTitle"`
+	Stacked      bool             `json:"stacked"`
 }
 
 // ObjectDTO is a chart or picture. Pictures are fetched separately
@@ -74,9 +83,9 @@ func chartDTO(c *model.Chart) *ChartDTO {
 	if c == nil {
 		return nil
 	}
-	out := &ChartDTO{Type: c.Type, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
+	out := &ChartDTO{ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
 	for _, s := range c.Series {
-		out.Series = append(out.Series, ChartSeriesDTO{Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
+		out.Series = append(out.Series, ChartSeriesDTO{CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
 	}
 	return out
 }
@@ -93,10 +102,10 @@ func (c *ChartDTO) model() *model.Chart {
 	if c == nil {
 		return nil
 	}
-	out := &model.Chart{Type: c.Type, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
+	out := &model.Chart{ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
 	strip := func(f string) string { return strings.TrimPrefix(strings.TrimSpace(f), "=") }
 	for _, s := range c.Series {
-		out.Series = append(out.Series, model.ChartSeries{Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
+		out.Series = append(out.Series, model.ChartSeries{CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
 	}
 	return out
 }
@@ -195,12 +204,14 @@ func dataURL(img *model.Image) string {
 }
 
 type SeriesDataDTO struct {
+	Labels []string   `json:"labels,omitempty"`
 	Name   string     `json:"name"`
 	Values []*float64 `json:"values"`
 	X      []*float64 `json:"x"`
 }
 
 type ChartDataDTO struct {
+	ValueScale *ChartScaleDTO  `json:"valueScale,omitempty"`
 	Categories []string        `json:"categories"`
 	Series     []SeriesDataDTO `json:"series"`
 }
@@ -218,9 +229,10 @@ func (s *SheetService) ChartData(ctx context.Context, sheet, id int) ChartDataDT
 			return
 		}
 		data := d.ChartData(sheet, o.Chart, shownText(d.Workbook()))
+		out.ValueScale = chartValueScale(o.Chart, data)
 		out.Categories = append(out.Categories, data.Categories...)
-		for _, sd := range data.Series {
-			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X)})
+		for i, sd := range data.Series {
+			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(o.Chart.Series[i].Labels, sd.Values)})
 		}
 	})
 	return out
@@ -234,11 +246,37 @@ func (s *SheetService) ChartPreview(ctx context.Context, sheet int, chart ChartD
 			return
 		}
 		data := d.ChartData(sheet, chart.model(), shownText(d.Workbook()))
+		out.ValueScale = chartValueScale(chart.model(), data)
 		out.Categories = append(out.Categories, data.Categories...)
-		for _, sd := range data.Series {
-			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X)})
+		for i, sd := range data.Series {
+			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(chart.Series[i].Labels, sd.Values)})
 		}
 	})
+	return out
+}
+
+func chartLabelText(labels *model.ChartLabels, values []*float64) []string {
+	if labels == nil {
+		return nil
+	}
+	total := 0.0
+	for _, v := range values {
+		if v != nil && *v > 0 {
+			total += *v
+		}
+	}
+	out := make([]string, len(values))
+	for i, v := range values {
+		if v == nil || labels.Points[i].Hidden {
+			continue
+		}
+		if labels.ShowValue {
+			out[i] = numfmt.Format(*v, labels.Format)
+		}
+		if labels.ShowPercent && total > 0 {
+			out[i] = numfmt.Format(*v/total, "0%")
+		}
+	}
 	return out
 }
 

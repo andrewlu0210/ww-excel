@@ -36,9 +36,10 @@ type fileName struct {
 }
 
 type fileSheet struct {
-	Name   string      `json:"name"`
-	Layout *fileLayout `json:"layout,omitempty"`
-	Cells  []fileCell  `json:"cells"`
+	Visibility string      `json:"visibility,omitempty"`
+	Name       string      `json:"name"`
+	Layout     *fileLayout `json:"layout,omitempty"`
+	Cells      []fileCell  `json:"cells"`
 }
 
 type fileSize struct {
@@ -53,17 +54,18 @@ type fileStyleRef struct {
 }
 
 type fileLayout struct {
-	DefaultRow float64        `json:"defaultRow"`
-	DefaultCol float64        `json:"defaultCol"`
-	Rows       []fileSize     `json:"rows,omitempty"`
-	Cols       []fileSize     `json:"cols,omitempty"`
-	RowStyles  []fileStyleRef `json:"rowStyles,omitempty"`
-	ColStyles  []fileStyleRef `json:"colStyles,omitempty"`
-	Merges     [][4]int       `json:"merges,omitempty"`
-	FreezeRows int            `json:"freezeRows,omitempty"`
-	FreezeCols int            `json:"freezeCols,omitempty"`
-	Filter     *fileFilter    `json:"filter,omitempty"`
-	Notes      []fileNote     `json:"notes,omitempty"`
+	HideGridLines bool           `json:"hideGridLines,omitempty"`
+	DefaultRow    float64        `json:"defaultRow"`
+	DefaultCol    float64        `json:"defaultCol"`
+	Rows          []fileSize     `json:"rows,omitempty"`
+	Cols          []fileSize     `json:"cols,omitempty"`
+	RowStyles     []fileStyleRef `json:"rowStyles,omitempty"`
+	ColStyles     []fileStyleRef `json:"colStyles,omitempty"`
+	Merges        [][4]int       `json:"merges,omitempty"`
+	FreezeRows    int            `json:"freezeRows,omitempty"`
+	FreezeCols    int            `json:"freezeCols,omitempty"`
+	Filter        *fileFilter    `json:"filter,omitempty"`
+	Notes         []fileNote     `json:"notes,omitempty"`
 	// Rules are stored as the model structs.
 	Validations []model.Validation `json:"validations,omitempty"`
 	CondFormats []model.CFRule     `json:"condFormats,omitempty"`
@@ -102,7 +104,7 @@ func Write(w io.Writer, wb *model.Workbook) error {
 	doc := fileDoc{Format: formatID, Version: currentVersion, Styles: wb.StyleTable().Since(0)}
 	all := model.Range{R0: 0, C0: 0, R1: model.MaxRows - 1, C1: model.MaxCols - 1}
 	for _, sh := range wb.Sheets {
-		fs := fileSheet{Name: sh.Name, Layout: writeLayout(sh.Layout), Cells: []fileCell{}}
+		fs := fileSheet{Name: sh.Name, Visibility: sh.Visibility, Layout: writeLayout(sh.Layout), Cells: []fileCell{}}
 		sh.EachInRange(all, func(row, col int, c model.Cell) {
 			fc := fileCell{R: row, C: col, St: c.S, Rich: c.Rich}
 			switch c.Kind {
@@ -171,6 +173,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 	nstyles := uint32(wb.StyleTable().Len())
 	for _, fs := range doc.Sheets {
 		sh := model.NewSheet(fs.Name)
+		sh.Visibility = fs.Visibility
 		if fs.Layout != nil {
 			sh.Layout = readLayout(fs.Layout)
 		}
@@ -216,7 +219,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 }
 
 func writeLayout(l model.Layout) *fileLayout {
-	fl := &fileLayout{DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
+	fl := &fileLayout{HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
 	if f := l.Filter; f != nil {
 		fl.Filter = &fileFilter{Range: [4]int{f.Range.R0, f.Range.C0, f.Range.R1, f.Range.C1}, Cols: f.Cols}
 	}
@@ -275,6 +278,7 @@ func readLayout(fl *fileLayout) model.Layout {
 	for _, m := range fl.Merges {
 		l.Merges = append(l.Merges, model.Range{R0: m[0], C0: m[1], R1: m[2], C1: m[3]})
 	}
+	l.HideGridLines = fl.HideGridLines
 	l.FreezeRows, l.FreezeCols = max(fl.FreezeRows, 0), max(fl.FreezeCols, 0)
 	l.Validations, l.CondFormats, l.Tables = fl.Validations, fl.CondFormats, fl.Tables
 	l.Objects, l.PageSetup = fl.Objects, fl.PageSetup

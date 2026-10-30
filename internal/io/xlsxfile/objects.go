@@ -100,20 +100,49 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		c := o.Chart
 		xc := &excelize.Chart{
 			Type:      chartType(c),
+			HoleSize:  c.HoleSize,
 			Format:    format,
 			Dimension: excelize.ChartDimension{Width: uint(max(o.W, 50)), Height: uint(max(o.H, 50))},
 			Legend:    excelize.ChartLegend{Position: legendPos(c.Legend)},
+		}
+		if a := c.ValueAxis; a != nil {
+			axis := excelize.ChartAxis{None: a.Hidden, MajorGridLines: a.GridLines, Minimum: a.Minimum, Maximum: a.Maximum, MajorUnit: a.MajorUnit, NumFmt: excelize.ChartNumFmt{CustomNumFmt: a.Format}}
+			if c.Type == "bar" {
+				xc.XAxis = axis
+			} else {
+				xc.YAxis = axis
+			}
+		}
+		if c.Background == "transparent" {
+			xc.Fill = excelize.Fill{Type: "pattern"}
+		} else if c.Background != "" {
+			xc.Fill = excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{c.Background}}
 		}
 		if c.Title != "" {
 			xc.Title = excelize.ChartTitle{Paragraph: []excelize.RichTextRun{{Text: c.Title}}}
 		}
 		for _, s := range c.Series {
 			xs := excelize.ChartSeries{Name: s.Name, Categories: s.Categories, Values: s.Values}
+			if s.Color != "" {
+				xs.Fill = excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{s.Color}}
+			}
+			for index, color := range s.PointColors {
+				xs.DataPoint = append(xs.DataPoint, excelize.ChartDataPoint{Index: index, Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{color}}})
+			}
 			xc.Series = append(xc.Series, xs)
 		}
+		before := map[string]bool{}
+		w.f.Pkg.Range(func(k, v any) bool { before[k.(string)] = true; return true })
 		if err := w.f.AddChart(sh.Name, cell, xc); err != nil {
 			return fmt.Errorf("圖表：%w", err)
 		}
+		w.f.Pkg.Range(func(k, v any) bool {
+			name := k.(string)
+			if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.HasSuffix(name, ".xml") {
+				w.f.Pkg.Store(name, restoreChartCategories(restoreChartLabels(v.([]byte), c.Series), c.Series))
+			}
+			return true
+		})
 	}
 	return nil
 }
@@ -127,6 +156,8 @@ func chartType(c *model.Chart) excelize.ChartType {
 		return excelize.Bar
 	case "line":
 		return excelize.Line
+	case "doughnut":
+		return excelize.Doughnut
 	case "pie":
 		return excelize.Pie
 	case "scatter":

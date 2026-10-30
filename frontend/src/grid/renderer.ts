@@ -32,6 +32,7 @@ export interface VisibleRange {
 
 // Sheet-level formatting the renderer needs besides cells.
 export interface SheetLook {
+  hideGridLines?: boolean;
   rowStyles: Map<number, number>;
   colStyles: Map<number, number>;
   merges: Range[];
@@ -39,6 +40,7 @@ export interface SheetLook {
   freeze: Freeze;
   // AutoFilter range (buttons on its first row) and filtered columns.
   filter: Range | null;
+  tableFilters?: Range[];
   filtered: Set<number>;
   // Cells with notes, as row * 16384 + col.
   notes: Set<number>;
@@ -341,7 +343,7 @@ export class GridRenderer extends Layer {
     ctx.beginPath();
     ctx.rect(p.x0, p.y0, p.x1 - p.x0, p.y1 - p.y0);
     ctx.clip();
-    this.drawGridLines(xs, ys);
+    if (!this.look.hideGridLines) this.drawGridLines(xs, ys);
     this.drawFills(cv, xs, ys, covered, merges, sx, sy);
     this.drawBorders(cv, xs, ys, covered, merges, sx, sy);
     this.drawTexts(cv, xs, ys, covered, merges, sx, sy);
@@ -373,37 +375,40 @@ export class GridRenderer extends Layer {
   }
 
   private drawFilterButtons(vr: VisibleRange, sx: number, sy: number): void {
-    const f = this.look.filter;
-    if (!f || f.r0 < vr.r0 || f.r0 > vr.r1) return;
+    const ranges = [...(this.look.tableFilters ?? [])];
+    if (this.look.filter && !ranges.some(f=>f.r0===this.look.filter!.r0 && f.c0===this.look.filter!.c0 && f.c1===this.look.filter!.c1)) ranges.push(this.look.filter);
     const { ctx, theme: th } = this;
-    for (let c = Math.max(f.c0, vr.c0); c <= Math.min(f.c1, vr.c1); c++) {
-      if (this.cols.size(c) === 0) continue;
-      const b = filterButton(rangeRect(this.rows, this.cols, { r0: f.r0, c0: c, r1: f.r0, c1: c }, sx, sy));
-      ctx.fillStyle = th.headerBg;
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.strokeStyle = th.headerLine;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-      const on = this.look.filtered.has(c);
-      ctx.fillStyle = on ? th.accent : th.headerText;
-      const cx = b.x + b.w / 2;
-      const cy = b.y + b.h / 2;
-      ctx.beginPath();
-      if (on) {
-        // Funnel
-        ctx.moveTo(cx - 4, cy - 3);
-        ctx.lineTo(cx + 4, cy - 3);
-        ctx.lineTo(cx + 1, cy + 1);
-        ctx.lineTo(cx + 1, cy + 4);
-        ctx.lineTo(cx - 1, cy + 4);
-        ctx.lineTo(cx - 1, cy + 1);
-      } else {
-        ctx.moveTo(cx - 3.5, cy - 1.5);
-        ctx.lineTo(cx + 3.5, cy - 1.5);
-        ctx.lineTo(cx, cy + 2.5);
+    for (const f of ranges) {
+      if (f.r0 < vr.r0 || f.r0 > vr.r1) continue;
+      for (let c = Math.max(f.c0, vr.c0); c <= Math.min(f.c1, vr.c1); c++) {
+        if (this.cols.size(c) === 0) continue;
+        const b = filterButton(rangeRect(this.rows, this.cols, { r0: f.r0, c0: c, r1: f.r0, c1: c }, sx, sy));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.strokeStyle = '#8a8a8a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+        const on = this.look.filter?.r0===f.r0 && this.look.filter?.c0===f.c0 && this.look.filtered.has(c);
+        ctx.fillStyle = on ? th.accent : '#666666';
+        const cx = b.x + b.w / 2;
+        const cy = b.y + b.h / 2;
+        ctx.beginPath();
+        if (on) {
+          // Funnel
+          ctx.moveTo(cx - 4, cy - 3);
+          ctx.lineTo(cx + 4, cy - 3);
+          ctx.lineTo(cx + 1, cy + 1);
+          ctx.lineTo(cx + 1, cy + 4);
+          ctx.lineTo(cx - 1, cy + 4);
+          ctx.lineTo(cx - 1, cy + 1);
+        } else {
+          ctx.moveTo(cx - 3.5, cy - 1.5);
+          ctx.lineTo(cx + 3.5, cy - 1.5);
+          ctx.lineTo(cx, cy + 2.5);
+        }
+        ctx.closePath();
+        ctx.fill();
       }
-      ctx.closePath();
-      ctx.fill();
     }
   }
 
@@ -441,6 +446,15 @@ export class GridRenderer extends Layer {
     ctx.stroke();
   }
 
+  // Adjacent fills share device-pixel edges, avoiding pale seams at zoom.
+  private fillBackground(x: number, y: number, w: number, h: number): void {
+    const left = Math.round(x * this.dpr) / this.dpr;
+    const top = Math.round(y * this.dpr) / this.dpr;
+    const right = Math.round((x + w) * this.dpr) / this.dpr;
+    const bottom = Math.round((y + h) * this.dpr) / this.dpr;
+    this.ctx.fillRect(left, top, right - left, bottom - top);
+  }
+
   // Fills cover the grid lines, as in Excel. Merged areas are filled
   // with their anchor's fill (or the background, hiding inner lines).
   private drawFills(vr: VisibleRange, xs: number[], ys: number[], covered: Set<number>, merges: Range[], sx: number, sy: number): void {
@@ -456,7 +470,7 @@ export class GridRenderer extends Layer {
         const st = styleStore.get(this.styleAt(r, c));
         if (st?.fill) {
           ctx.fillStyle = st.fill;
-          ctx.fillRect(left, top, right - left, bottom - top);
+          this.fillBackground(left, top, right - left, bottom - top);
         }
         const bar = this.cache.cell(r, c)?.bar;
         if (bar && right > left) {
@@ -474,7 +488,9 @@ export class GridRenderer extends Layer {
       const rc = rangeRect(this.rows, this.cols, m, sx, sy);
       const st = styleStore.get(this.styleAt(m.r0, m.c0));
       ctx.fillStyle = st?.fill ?? this.theme.gridBg;
-      ctx.fillRect(rc.x, rc.y, rc.w - 1, rc.h - 1);
+      // Explicit fills cover outer gridlines as well as the merged interior.
+      if (st?.fill) this.fillBackground(rc.x, rc.y, rc.w, rc.h);
+      else ctx.fillRect(rc.x, rc.y, rc.w - 1, rc.h - 1);
     }
   }
 

@@ -27,3 +27,15 @@ describe('tr', () => {
     expect(tr('不在表中')).toBe('不在表中');
   });
 });
+
+describe('Simplified Chinese', () => {
+ it('translates UI and formatted messages without changing document names', () => {
+  setLanguage('zh-CN', {'儲存':'保存', '每 %d 分鐘':'每 %d 分钟', '無法開啟「%s」':'无法打开「%s」'});
+  expect(t('儲存')).toBe('保存');
+  expect(t('每 %d 分鐘', 5)).toBe('每 5 分钟');
+  expect(tr('無法開啟「客戶資料.xlsx」')).toBe('无法打开「客戶資料.xlsx」');
+  expect(tr('客戶資料.xlsx')).toBe('客戶資料.xlsx');
+  setLanguage('zh-TW', null);
+  expect(t('儲存')).toBe('儲存');
+ });
+});

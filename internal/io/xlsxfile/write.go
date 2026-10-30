@@ -142,15 +142,65 @@ func (w *writer) sheets(full map[*model.Sheet]bool) error {
 			return err
 		}
 	}
+	// Excelize can leave quoted temporary names in defined-name formulas
+	// after the second rename. Resolve them before saving the workbook.
+	for _, dn := range f.GetDefinedName() {
+		node, err := parser.Parse(dn.RefersTo)
+		if err != nil {
+			continue
+		}
+		changed := false
+		for i, sh := range w.wb.Sheets {
+			var renamed bool
+			node, renamed = ast.RenameSheet(node, tmp(i), sh.Name)
+			changed = changed || renamed
+		}
+		if !changed {
+			continue
+		}
+		if dn.Scope == "Workbook" {
+			dn.Scope = ""
+		}
+		if err := f.DeleteDefinedName(&dn); err != nil {
+			return err
+		}
+		dn.RefersTo = ast.Format(node)
+		if err := f.SetDefinedName(&dn); err != nil {
+			return err
+		}
+	}
 	// Order: move each sheet before the one that should follow it.
 	for i := len(w.wb.Sheets) - 2; i >= 0; i-- {
 		if err := f.MoveSheet(w.wb.Sheets[i].Name, w.wb.Sheets[i+1].Name); err != nil {
 			return err
 		}
 	}
-	if idx, err := f.GetSheetIndex(w.wb.Sheets[0].Name); err == nil {
+	// Make visible sheets available before hiding any originally active sheet.
+	firstVisible := ""
+	for _, sh := range w.wb.Sheets {
+		if sh.Visible() {
+			if err := f.SetSheetVisible(sh.Name, true); err != nil {
+				return err
+			}
+			if firstVisible == "" {
+				firstVisible = sh.Name
+			}
+		}
+	}
+	if firstVisible == "" {
+		return fmt.Errorf("workbook must contain a visible worksheet")
+	}
+	if idx, err := f.GetSheetIndex(firstVisible); err == nil {
 		f.SetActiveSheet(idx)
 	}
+	for _, sh := range w.wb.Sheets {
+		if !sh.Visible() {
+			if err := f.SetSheetVisible(sh.Name, false, sh.Visibility == "veryHidden"); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -528,6 +578,12 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 	}
 	if !reflect.DeepEqual(l.CondFormats, old.CondFormats) {
 		if err := writeCondFormats(f, sh.Name, l.CondFormats); err != nil {
+			return err
+		}
+	}
+	if l.HideGridLines != old.HideGridLines {
+		show := !l.HideGridLines
+		if err := f.SetSheetView(sh.Name, 0, &excelize.ViewOptions{ShowGridLines: &show}); err != nil {
 			return err
 		}
 	}

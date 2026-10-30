@@ -42,7 +42,7 @@ func TestResolveLanguage(t *testing.T) {
 		{"en", []string{"zh-Hant-TW"}, "en"},
 		{"zh-TW", []string{"en-US"}, "zh-TW"},
 		{"system", []string{"zh-Hant-TW", "en-US"}, "zh-TW"},
-		{"system", []string{"zh-Hans-CN"}, "zh-TW"},
+		{"system", []string{"zh-Hans-CN"}, "zh-CN"},
 		{"system", []string{"en-GB", "zh-Hant"}, "en"},
 		{"system", []string{"ja-JP"}, "en"},
 		{"system", []string{"ja-JP", "zh-TW"}, "zh-TW"},
@@ -52,5 +52,29 @@ func TestResolveLanguage(t *testing.T) {
 		if got := ResolveLanguage(tc.setting, tc.preferred); got != tc.want {
 			t.Errorf("ResolveLanguage(%q, %v) = %q, want %q", tc.setting, tc.preferred, got, tc.want)
 		}
+	}
+}
+
+func TestSimplifiedLanguagePreferences(t *testing.T) {
+	for _, tc := range []struct{ tag, want string }{
+		{"zh-CN", "zh-CN"}, {"zh_SG", "zh-CN"}, {"zh-Hans", "zh-CN"}, {"zh-Hans-TW", "zh-CN"},
+		{"zh-Hant-CN", "zh-TW"}, {"zh-HK", "zh-TW"}, {"zh-MO", "zh-TW"},
+	} {
+		if got := ResolveLanguage("system", []string{tc.tag}); got != tc.want {
+			t.Errorf("%s -> %s", tc.tag, got)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "settings.json")
+	store := Load(path)
+	s := Defaults()
+	s.Language = "zh-CN"
+	if _, err := store.Set(s); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load(path).Get().Language; got != "zh-CN" {
+		t.Fatal(got)
+	}
+	if got := ResolveLanguage("zh-CN", []string{"en-US"}); got != "zh-CN" {
+		t.Fatal(got)
 	}
 }

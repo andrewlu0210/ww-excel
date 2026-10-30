@@ -218,15 +218,16 @@ type StyleRefDTO struct {
 
 // LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
 type LayoutDTO struct {
-	DefaultRow float64       `json:"defaultRow"`
-	DefaultCol float64       `json:"defaultCol"`
-	Rows       []SizeDTO     `json:"rows"`
-	Cols       []SizeDTO     `json:"cols"`
-	RowStyles  []StyleRefDTO `json:"rowStyles"`
-	ColStyles  []StyleRefDTO `json:"colStyles"`
-	Merges     []RangeDTO    `json:"merges"`
-	FreezeRows int           `json:"freezeRows"`
-	FreezeCols int           `json:"freezeCols"`
+	HideGridLines bool          `json:"hideGridLines,omitempty"`
+	DefaultRow    float64       `json:"defaultRow"`
+	DefaultCol    float64       `json:"defaultCol"`
+	Rows          []SizeDTO     `json:"rows"`
+	Cols          []SizeDTO     `json:"cols"`
+	RowStyles     []StyleRefDTO `json:"rowStyles"`
+	ColStyles     []StyleRefDTO `json:"colStyles"`
+	Merges        []RangeDTO    `json:"merges"`
+	FreezeRows    int           `json:"freezeRows"`
+	FreezeCols    int           `json:"freezeCols"`
 	// Filter is the AutoFilter range, or nil; FilteredCols are the
 	// columns with criteria (their buttons show a funnel).
 	Filter       *RangeDTO `json:"filter"`
@@ -241,7 +242,7 @@ type LayoutDTO struct {
 
 func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 	out := LayoutDTO{
-		DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol,
+		HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol,
 		Rows: []SizeDTO{}, Cols: []SizeDTO{}, RowStyles: []StyleRefDTO{}, ColStyles: []StyleRefDTO{}, Merges: []RangeDTO{},
 		Styles:     stylesSince(wb, knownStyles),
 		FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols, FilteredCols: []int{},

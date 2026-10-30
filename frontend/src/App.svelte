@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { t } from './i18n';
+  import { t, language } from './i18n';
+  import { languageSelfTest } from './bench/languageSelfTest';
   import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest } from './bench/selfTest';
@@ -51,6 +52,7 @@
   let info = $state<SheetInfo>();
   let sheets = $state<string[]>([]);
   let active = $state(0);
+  let hiddenSheets = $state<number[]>([]);
   // Bumped when the sheet list or document changes: remounts the sheet
   // view, whose block cache is keyed by sheet index.
   let generation = $state(0);
@@ -123,7 +125,9 @@
   let grid = $derived(sheetView?.getGrid());
 
   async function showSheet(index: number): Promise<void> {
-    const i = Math.max(0, Math.min(index, sheets.length - 1));
+    const requested = Math.max(0, Math.min(index, sheets.length - 1));
+    const i = hiddenSheets.includes(requested) ? sheets.findIndex((_, i) => !hiddenSheets.includes(i)) : requested;
+    if (i < 0) return;
     info = await sheetApi.info(i);
     active = i;
     zoom = zooms.get(sheets[i]);
@@ -135,6 +139,7 @@
     const current = sheets[active];
     zooms.reconcile(sheets, st.sheets ?? []);
     sheets = st.sheets ?? [];
+    hiddenSheets = st.hiddenSheets ?? [];
     if (preferIndex !== null) {
       const i = preferIndex;
       preferIndex = null;
@@ -158,6 +163,7 @@
     zooms.clear();
     styleStore.reset();
     sheets = st.sheets ?? [];
+    hiddenSheets = st.hiddenSheets ?? [];
     await showSheet(0);
   }
 
@@ -309,6 +315,7 @@
 
   // The name box went to another sheet.
   async function goToSheet(index: number, range: Range): Promise<void> {
+    if (hiddenSheets.includes(index)) return notify(t('工作表已隱藏'));
     selections.set(sheets[index], fromRange(range));
     await showSheet(index);
   }
@@ -442,6 +449,7 @@
       const st = await documentApi.state();
       canUndo = st.canUndo; canRedo = st.canRedo;
       sheets = st.sheets ?? [];
+      hiddenSheets = st.hiddenSheets ?? [];
       circular = st.circular;
       names = st.names ?? [];
       await showSheet(SHEET);
@@ -471,7 +479,7 @@
           },
         });
         const fixture = await benchApi.fixturePath();
-        const result = await Promise.race([fixture ? workbookCompatibilityTest(driver, fixture) : runSelfTest(driver, SHEET), timeout]);
+        const result = await Promise.race([fixture ? workbookCompatibilityTest(driver, fixture) : language() !== 'zh-TW' ? languageSelfTest(() => onAppAction('preferences')) : runSelfTest(driver, SHEET), timeout]);
         const g = sheetView!.getGrid()!;
         await benchApi.snapshot('selftest', g.snapshot());
         await benchApi.report(result.markdown);
@@ -534,6 +542,7 @@
       {#snippet tabs()}
         <SheetTabs
           {sheets}
+          hidden={hiddenSheets}
           {active}
           onselect={(i) => {
             if (i === active) return;

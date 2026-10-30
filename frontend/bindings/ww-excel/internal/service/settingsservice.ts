@@ -19,8 +19,7 @@ import * as settings$0 from "../settings/models.js";
 import * as $models from "./models.js";
 
 /**
- * Dictionary is the English UI table when English is in use, else
- * empty (the source text is Chinese).
+ * Dictionary returns the catalog for the resolved UI language.
  */
 export function Dictionary(): $CancellablePromise<{ [_ in string]?: string } | null> {
     return $Call.ByID(2706696897);

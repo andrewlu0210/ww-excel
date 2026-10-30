@@ -18,10 +18,11 @@ type Size struct {
 
 // Layout holds the per-sheet geometry and whole-row/column formats.
 type Layout struct {
-	DefaultRow float64
-	DefaultCol float64
-	Rows       map[int]Size
-	Cols       map[int]Size
+	HideGridLines bool
+	DefaultRow    float64
+	DefaultCol    float64
+	Rows          map[int]Size
+	Cols          map[int]Size
 	// Whole row/column styles: cells without their own style inherit
 	// them (row style wins over column style, as in Excel).
 	RowStyles map[int]uint32

@@ -211,15 +211,16 @@ func (s *SheetService) ClearCondFormats(ctx context.Context, sheet int, ranges [
 // ---- Tables ----
 
 type TableDTO struct {
-	Name   string   `json:"name"`
-	Range  RangeDTO `json:"range"`
-	Totals bool     `json:"totals"`
-	Style  string   `json:"style"`
-	Bands  bool     `json:"bands"`
+	NoFilter bool     `json:"noFilter,omitempty"`
+	Name     string   `json:"name"`
+	Range    RangeDTO `json:"range"`
+	Totals   bool     `json:"totals"`
+	Style    string   `json:"style"`
+	Bands    bool     `json:"bands"`
 }
 
 func tableDTO(t model.Table) TableDTO {
-	return TableDTO{Name: t.Name, Range: rangeDTO(t.Range), Totals: t.TotalsRow, Style: t.Style, Bands: !t.NoBands}
+	return TableDTO{NoFilter: t.NoFilter, Name: t.Name, Range: rangeDTO(t.Range), Totals: t.TotalsRow, Style: t.Style, Bands: !t.NoBands}
 }
 
 // TableStyleList lists the styles offered for tables.

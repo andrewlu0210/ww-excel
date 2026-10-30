@@ -11,7 +11,9 @@ type Table struct {
 	// Style is the table style name, e.g. TableStyleMedium2.
 	Style string
 	// NoBands turns off banded rows.
-	NoBands bool
+	NoBands   bool
+	NoFilter  bool
+	RowBorder BorderLine
 }
 
 // DataRows is the range of the table's data rows (R0 > R1 when the

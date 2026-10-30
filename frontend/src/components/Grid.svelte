@@ -218,6 +218,8 @@
     rows.reset(l.defaultRow, (l.rows ?? []).map((s): [number, number] => [s.i, s.hidden ? 0 : s.px]));
     cols.reset(l.defaultCol, (l.cols ?? []).map((s): [number, number] => [s.i, s.hidden ? 0 : s.px]));
     look = {
+      hideGridLines:l.hideGridLines ?? false,
+      tableFilters:(l.tables ?? []).filter(t=>!t.noFilter).map(t=>({r0:t.range.r0,c0:t.range.c0,r1:t.range.r1,c1:t.range.c1})),
       rowStyles: new Map((l.rowStyles ?? []).map((s) => [s.i, s.s])),
       colStyles: new Map((l.colStyles ?? []).map((s) => [s.i, s.s])),
       merges: (l.merges ?? []).map((m) => ({ r0: m.r0, c0: m.c0, r1: m.r1, c1: m.c1 })),
@@ -365,9 +367,9 @@
 
   // The filter dropdown button under a point, if any.
   function filterButtonAt(x: number, y: number): { col: number; x: number; y: number } | null {
-    const f = look.filter;
-    if (!f) return null;
     const pos = posAt(x, y);
+    const f=[...(look.tableFilters ?? []),...(look.filter ? [look.filter] : [])].find(r=>pos.row===r.r0 && pos.col>=r.c0 && pos.col<=r.c1);
+    if (!f) return null;
     if (pos.row !== f.r0 || pos.col < f.c0 || pos.col > f.c1) return null;
     const b = filterButton(frozenRect(rows, cols, { r0: pos.row, c0: pos.col, r1: pos.row, c1: pos.col }, look.freeze, sx, sy));
     if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) return null;

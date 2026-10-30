@@ -84,7 +84,8 @@ type DocState struct {
 	// Circular is the first cell in a circular reference, or "".
 	Circular string `json:"circular"`
 	// Sheets are the sheet names in order.
-	Sheets []string `json:"sheets"`
+	Sheets       []string `json:"sheets"`
+	HiddenSheets []int    `json:"hiddenSheets,omitempty"`
 	// Names are the defined names, for autocomplete and the name box.
 	Names []string `json:"names"`
 }
@@ -137,16 +138,17 @@ func (s *Session) State() DocState {
 func (s *Session) stateLocked() DocState {
 	h := s.doc.History()
 	return DocState{
-		Name:      i18n.T(s.doc.Name()),
-		Path:      s.doc.Path(),
-		Dirty:     s.doc.Dirty(),
-		CanUndo:   h.CanUndo(),
-		CanRedo:   h.CanRedo(),
-		UndoLabel: h.UndoLabel(),
-		RedoLabel: h.RedoLabel(),
-		Circular:  s.doc.Circular(),
-		Sheets:    s.sheetNamesLocked(),
-		Names:     s.definedNamesLocked(),
+		Name:         i18n.T(s.doc.Name()),
+		Path:         s.doc.Path(),
+		Dirty:        s.doc.Dirty(),
+		CanUndo:      h.CanUndo(),
+		CanRedo:      h.CanRedo(),
+		UndoLabel:    h.UndoLabel(),
+		RedoLabel:    h.RedoLabel(),
+		Circular:     s.doc.Circular(),
+		Sheets:       s.sheetNamesLocked(),
+		HiddenSheets: s.hiddenSheetsLocked(),
+		Names:        s.definedNamesLocked(),
 	}
 }
 
@@ -355,4 +357,14 @@ func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.doc.Close()
+}
+
+func (s *Session) hiddenSheetsLocked() []int {
+	var hidden []int
+	for i, sh := range s.doc.Workbook().Sheets {
+		if !sh.Visible() {
+			hidden = append(hidden, i)
+		}
+	}
+	return hidden
 }

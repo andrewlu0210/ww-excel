@@ -38,12 +38,13 @@ func Read(path string) (*model.Workbook, *excelize.File, error) {
 }
 
 type reader struct {
-	f       *excelize.File
-	parts   map[string]*zip.File
-	wb      *model.Workbook
-	styles  map[int]uint32
-	sst     []string
-	richSST map[int]*model.RichText
+	tableBorders map[string]model.BorderLine
+	f            *excelize.File
+	parts        map[string]*zip.File
+	wb           *model.Workbook
+	styles       map[int]uint32
+	sst          []string
+	richSST      map[int]*model.RichText
 }
 
 func load(f *excelize.File, file string) (*model.Workbook, error) {
@@ -75,6 +76,7 @@ func load(f *excelize.File, file string) (*model.Workbook, error) {
 		if err != nil {
 			return nil, fmt.Errorf("工作表「%s」：%w", s.name, err)
 		}
+		sh.Visibility = s.state
 		r.wb.Sheets = append(r.wb.Sheets, sh)
 	}
 	if len(r.wb.Sheets) == 0 {
@@ -118,14 +120,15 @@ func (r *reader) style(id int) uint32 {
 	return s
 }
 
-type sheetRef struct{ name, part string }
+type sheetRef struct{ name, part, state string }
 
 // sheetList returns the sheets in workbook order with their parts.
 func sheetList(parts map[string]*zip.File) ([]sheetRef, error) {
 	var wbDoc struct {
 		Sheets []struct {
-			Name string `xml:"name,attr"`
-			RID  string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
+			Name  string `xml:"name,attr"`
+			State string `xml:"state,attr"`
+			RID   string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
 		} `xml:"sheets>sheet"`
 	}
 	if err := decodePart(parts, "xl/workbook.xml", &wbDoc); err != nil {
@@ -134,7 +137,7 @@ func sheetList(parts map[string]*zip.File) ([]sheetRef, error) {
 	var out []sheetRef
 	for _, s := range wbDoc.Sheets {
 		if part := relTarget(parts, "xl/workbook.xml", s.RID); part != "" {
-			out = append(out, sheetRef{s.Name, part})
+			out = append(out, sheetRef{s.Name, part, s.State})
 		}
 	}
 	return out, nil
@@ -319,6 +322,10 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 					if w, err := strconv.ParseFloat(v, 64); err == nil && w > 0 {
 						l.DefaultCol = widthToPx(w + 0.71)
 					}
+				}
+			case "sheetView":
+				if attr(t, "workbookViewId") == "0" || attr(t, "workbookViewId") == "" {
+					l.HideGridLines = attr(t, "showGridLines") == "0" || attr(t, "showGridLines") == "false"
 				}
 			case "pane":
 				st.frozen = strings.HasPrefix(attr(t, "state"), "frozen")
@@ -619,6 +626,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 	}
 	for _, rid := range st.tableRIDs {
 		if t, ok := readTable(r.parts, relTarget(r.parts, part, rid)); ok {
+			t.RowBorder = r.tableRowBorder(t.Style)
 			l.Tables = append(l.Tables, t)
 		}
 	}
@@ -759,10 +767,11 @@ func noteText(c excelize.Comment) string {
 // readTable reads a table part (xl/tables/tableN.xml).
 func readTable(parts map[string]*zip.File, name string) (model.Table, bool) {
 	var t struct {
-		Name   string `xml:"name,attr"`
-		Ref    string `xml:"ref,attr"`
-		Totals int    `xml:"totalsRowCount,attr"`
-		Info   struct {
+		AutoFilter *struct{} `xml:"autoFilter"`
+		Name       string    `xml:"name,attr"`
+		Ref        string    `xml:"ref,attr"`
+		Totals     int       `xml:"totalsRowCount,attr"`
+		Info       struct {
 			Name    string `xml:"name,attr"`
 			Stripes string `xml:"showRowStripes,attr"`
 		} `xml:"tableStyleInfo"`
@@ -774,7 +783,7 @@ func readTable(parts map[string]*zip.File, name string) (model.Table, bool) {
 	if len(rs) != 1 {
 		return model.Table{}, false
 	}
-	return model.Table{Name: t.Name, Range: rs[0], Style: t.Info.Name, TotalsRow: t.Totals > 0, NoBands: t.Info.Stripes == "0"}, true
+	return model.Table{Name: t.Name, Range: rs[0], Style: t.Info.Name, TotalsRow: t.Totals > 0, NoBands: t.Info.Stripes == "0", NoFilter: t.AutoFilter == nil}, true
 }
 
 // cfRuleFromAttrs maps an OOXML cfRule to our rule (without formulas).

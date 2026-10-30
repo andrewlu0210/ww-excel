@@ -25,6 +25,7 @@ export type {
     ChangedCell,
     ChartDTO,
     ChartDataDTO,
+    ChartScaleDTO,
     ChartSeriesDTO,
     CopyResult,
     DocState,

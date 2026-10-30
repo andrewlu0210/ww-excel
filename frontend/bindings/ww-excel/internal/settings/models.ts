@@ -8,7 +8,7 @@ export interface Settings {
     "appearance": string;
 
     /**
-     * Language is "system", "zh-TW" or "en".
+     * Language is "system", "zh-TW", "zh-CN" or "en".
      */
     "language": string;
 

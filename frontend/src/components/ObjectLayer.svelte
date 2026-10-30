@@ -179,7 +179,8 @@
     if (!d) return { categories: [], series: [] };
     return {
       categories: d.categories ?? [],
-      series: (d.series ?? []).map((s) => ({ name: s.name, values: s.values ?? [], x: s.x ?? [] })),
+      valueScale:d.valueScale,
+      series: (d.series ?? []).map((s) => ({ name: s.name, labels:s.labels ?? undefined, values: s.values ?? [], x: s.x ?? [] })),
     };
   }
 </script>
@@ -200,8 +201,7 @@
     pointer-events: auto;
     cursor: move;
     border: 1px solid transparent;
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
-    background: #fff;
+    background: transparent;
   }
   .object.selected {
     border-color: var(--accent);

@@ -228,8 +228,9 @@ func (b *Block) Each(fn func(r, c int, cell Cell)) {
 
 // Sheet stores cells sparsely: only blocks containing data are allocated.
 type Sheet struct {
-	Name   string
-	Layout Layout
+	Visibility string // Empty/visible, hidden or veryHidden.
+	Name       string
+	Layout     Layout
 	// SourceName is the sheet's name in the xlsx file it was loaded
 	// from ("" for new sheets), so in-place saves can map sheets.
 	SourceName string
@@ -330,3 +331,6 @@ func (s *Sheet) EffectiveStyle(row, col int) uint32 {
 	}
 	return s.Layout.StyleAt(row, col)
 }
+
+// Visible reports whether the sheet appears in the worksheet tab bar.
+func (s *Sheet) Visible() bool { return s.Visibility != "hidden" && s.Visibility != "veryHidden" }

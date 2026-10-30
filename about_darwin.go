@@ -91,13 +91,13 @@ import (
 )
 
 const appDescription = "macOS 試算表工具，支援 Excel 檔案編輯、公式計算與圖表。"
-const appCredit = "由台北科研-Andrew製作"
+const appCredit = "由台北科研製作"
 
 func showAbout() {
 	title := C.CString(T("關於 WW Excel"))
 	versionText := C.CString(fmt.Sprintf(T("版本 %s"), version))
 	description := C.CString(T(appDescription))
-	credit := C.CString(appCredit)
+	credit := C.CString(T(appCredit))
 	defer C.free(unsafe.Pointer(title))
 	defer C.free(unsafe.Pointer(versionText))
 	defer C.free(unsafe.Pointer(description))

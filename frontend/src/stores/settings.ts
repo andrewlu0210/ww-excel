@@ -29,7 +29,7 @@ function apply(s: UISettings): void {
 export async function initSettings(): Promise<void> {
   try {
     const s = await settingsApi.get();
-    setLanguage(s.lang, s.lang === 'en' ? await settingsApi.dictionary() : null);
+    setLanguage(s.lang, s.lang !== 'zh-TW' ? await settingsApi.dictionary() : null);
     apply(s);
   } catch {
     // Outside Wails (unit tests, plain browser): defaults.

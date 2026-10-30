@@ -12,7 +12,7 @@ const EventSettingsChanged = "settings:changed"
 // the language actually in use.
 type UISettings struct {
 	settings.Settings
-	// Lang is "zh-TW" or "en" ("system" resolved).
+	// Lang is "zh-TW", "zh-CN" or "en" ("system" resolved).
 	Lang string `json:"lang"`
 }
 
@@ -50,11 +50,7 @@ func (s *SettingsService) Set(v settings.Settings) (UISettings, error) {
 	return cur, err
 }
 
-// Dictionary is the English UI table when English is in use, else
-// empty (the source text is Chinese).
+// Dictionary returns the catalog for the resolved UI language.
 func (s *SettingsService) Dictionary() map[string]string {
-	if s.Get().Lang != i18n.English {
-		return map[string]string{}
-	}
 	return i18n.Dictionary()
 }

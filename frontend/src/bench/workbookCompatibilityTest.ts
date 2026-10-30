@@ -1,5 +1,6 @@
 // Read-only display checks for the user-supplied workbook (WW_XLSX_FIXTURE).
 import { benchApi, documentApi, settingsApi, sheetApi } from '../bridge/sheet';
+import { budgetWorkbookSelfTest } from './budgetWorkbookSelfTest';
 import type Sheet from '../components/Sheet.svelte';
 
 export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>, path: string): Promise<{ markdown: string; failed: number }> {
@@ -11,6 +12,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.[0] === '目前月份') return budgetWorkbookSelfTest(driver);
   check('活頁簿讀取八張工作表', state.sheets?.length === 8, JSON.stringify(state.sheets));
 
   const select = async (i: number) => {

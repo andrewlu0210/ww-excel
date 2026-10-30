@@ -36,7 +36,7 @@ var appIcon []byte
 
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.2.1"
+	version = "1.2.2"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )
@@ -106,7 +106,7 @@ func main() {
 	service.FontSource = fontData
 
 	a.app = application.New(application.Options{
-		Name:        "WW Excel",
+		Name:        applicationDisplayName(),
 		Icon:        appIcon,
 		Description: "Spreadsheet app for macOS",
 		Services: []application.Service{
@@ -154,6 +154,7 @@ func main() {
 		// Finder cannot supply a bundle icon for direct executable launches.
 		// Reapply after Cocoa finishes launching so it does not reset the Dock image.
 		a.app.SetIcon(appIcon)
+		onMain(func() { setApplicationDisplayName(applicationDisplayName()) })
 		setAppearance(a.settings.Get().Appearance)
 		// Offer the snapshots of a session that crashed.
 		go service.Recover(a.docs, service.WindowContext(first.win), a.autosave.Store)
@@ -274,6 +275,7 @@ func (a *docApp) buildMenus() {
 	a.menus = buildMenu(a)
 	a.app.Menu.Set(a.menus.root)
 	a.menus.setRecent(a, a.recent.List())
+	setApplicationDisplayName(applicationDisplayName())
 }
 
 // updateMenus shows a document's undo/redo state in the menu bar.
@@ -449,7 +451,7 @@ func buildMenu(a *docApp) *appMenus {
 	}
 
 	root := a.app.NewMenu()
-	app := root.AddSubmenu("WW Excel")
+	app := root.AddSubmenu(applicationDisplayName())
 	app.Add(T("關於 WW Excel")).OnClick(func(*application.Context) { showAbout() })
 	app.AddSeparator()
 	app.Add(T("偏好設定…")).SetAccelerator("CmdOrCtrl+,").OnClick(send("preferences"))
@@ -596,6 +598,8 @@ func withAction(verb, label string) string {
 	}
 	return fmt.Sprintf(T(verb+"「%s」"), T(label))
 }
+
+func applicationDisplayName() string { return T("旺-Sheet") }
 
 // T translates a UI string (menus are rebuilt when the language changes).
 func T(s string) string { return i18n.T(s) }

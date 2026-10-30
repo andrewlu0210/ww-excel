@@ -115,3 +115,24 @@ func TestChartsAndPictures(t *testing.T) {
 		}
 	}
 }
+
+func TestLiteralChartCategories(t *testing.T) {
+	d := New()
+	enter(t, d, 0, 0, 0, "100")
+	enter(t, d, 0, 1, 0, "80")
+	c := &model.Chart{Type: "column", Series: []model.ChartSeries{{Values: "工作表1!$A$1:$A$2", CategoryLabels: []string{""}}}}
+	data := d.ChartData(0, c, plain)
+	if len(data.Categories) != 2 || data.Categories[0] != "" || data.Categories[1] != "" {
+		t.Fatalf("blank labels replaced with numbers: %#v", data.Categories)
+	}
+	c.Series[0].CategoryLabels = []string{"收入", "支出"}
+	data = d.ChartData(0, c, plain)
+	if data.Categories[0] != "收入" || data.Categories[1] != "支出" {
+		t.Fatalf("lost literal labels: %#v", data.Categories)
+	}
+	c.Series[0].CategoryLabels = nil
+	data = d.ChartData(0, c, plain)
+	if data.Categories[0] != "1" || data.Categories[1] != "2" {
+		t.Fatalf("changed default labels: %#v", data.Categories)
+	}
+}
