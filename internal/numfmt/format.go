@@ -78,6 +78,23 @@ func Render(v float64, code string) (string, string) {
 	return formatNumber(v, sec.tokens, !useAbs), sec.color
 }
 
+// IsLiteral reports whether the selected numeric section prints only text.
+func IsLiteral(v float64, code string) bool {
+	if code == "" || strings.EqualFold(code, "General") {
+		return false
+	}
+	sec, _ := pick(parse(code), v)
+	if sec == nil || sec.isDate {
+		return false
+	}
+	for _, t := range sec.tokens {
+		if t.kind != tLiteral {
+			return false
+		}
+	}
+	return true
+}
+
 // IsDate reports whether a format code shows dates or times.
 func IsDate(code string) bool {
 	for _, s := range parse(code) {

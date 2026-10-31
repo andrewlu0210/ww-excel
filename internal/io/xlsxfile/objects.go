@@ -139,7 +139,7 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		w.f.Pkg.Range(func(k, v any) bool {
 			name := k.(string)
 			if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.HasSuffix(name, ".xml") {
-				w.f.Pkg.Store(name, restoreChartCategories(restoreChartLabels(v.([]byte), c.Series), c.Series))
+				w.f.Pkg.Store(name, restoreChartAppearance(restoreChartCategories(restoreChartLabels(v.([]byte), c.Series), c.Series), c))
 			}
 			return true
 		})

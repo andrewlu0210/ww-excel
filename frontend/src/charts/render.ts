@@ -12,10 +12,16 @@ interface ChartAxis {
 }
 
 export interface ChartSpec {
+  plotArea?: {x:number;y:number;w:number;h:number} | null;
   valueAxis?: ChartAxis | null;
   categoryAxis?: ChartAxis | null;
   series?: {
     color?: string;
+    pointStyles?: {[key:string]: {
+      gradient?: {angle:number;stops:{position:number;color:string}[] | null} | null;
+      shadow?: {color:string;opacity:number;blur:number;x:number;y:number} | null;
+      lineHidden?:boolean;
+    } | undefined} | null;
     pointColors?: { [key: string]: string | undefined } | null;
     labels?: {
       fontSize: number;
@@ -144,6 +150,10 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
   if (data.series.length === 0) {
     ctx.restore();
     return;
+  }
+  if (pie && spec.plotArea) {
+    const p=spec.plotArea;
+    if ([p.x,p.y,p.w,p.h].every(Number.isFinite) && p.w>0 && p.h>0) box={x:p.x*w,y:p.y*h,w:p.w*w,h:p.h*h};
   }
   if (pie) drawPie(ctx, box, spec, data, theme, spec.type === 'doughnut' ? Math.max(10, Math.min(90, spec.holeSize || 50)) / 100 : 0);
   else if (spec.type === 'scatter') drawScatter(ctx, box, spec, data, theme);
@@ -411,24 +421,58 @@ function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: 
   const values = data.series[0].values.map((v) => (finite(v) && v > 0 ? v : 0));
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return;
-  const r = Math.max(10, Math.min(box.w, box.h) / 2 - 8);
+  const r = Math.max(10, Math.min(box.w, box.h) / 2 - (spec.plotArea ? 0 : 8));
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   let angle = -Math.PI / 2;
   ctx.font = `11px ${theme.font}`;
+  // Draw all shadows before the slices so neighboring wedges cannot cast seams over each other.
+  for(let i=0;i<values.length;i++) {
+    const v=values[i],style=spec.series?.[0]?.pointStyles?.[i];
+    const sweep=(v/total)*Math.PI*2;
+    if(v>0 && style?.shadow) {
+      ctx.save();
+    if(style?.shadow) {
+      const shadow=style.shadow,transform=ctx.getTransform?.();
+      const scale=transform ? Math.hypot(transform.a,transform.b) : 1;
+      ctx.shadowColor=`#${shadow.color}${Math.round(Math.max(0,Math.min(1,shadow.opacity))*255).toString(16).padStart(2,'0')}`;
+      ctx.shadowBlur=shadow.blur*scale;ctx.shadowOffsetX=shadow.x*scale;ctx.shadowOffsetY=shadow.y*scale;
+    }
+      ctx.fillStyle=pointColor(spec,i);
+      ctx.beginPath();if(!hole) ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,angle,angle+sweep);
+      if(hole) ctx.arc(cx,cy,r*hole,angle+sweep,angle,true);
+      ctx.closePath();ctx.fill();ctx.restore();
+    }
+    angle+=sweep;
+  }
+  angle=-Math.PI/2;
   values.forEach((v, i) => {
     if (v <= 0) return;
     const sweep = (v / total) * Math.PI * 2;
+    ctx.save();
+    const style=spec.series?.[0]?.pointStyles?.[i];
     ctx.fillStyle = pointColor(spec, i);
+    if (style?.gradient?.stops?.length) {
+      const angle=style.gradient.angle*Math.PI/180;
+      const dx=Math.cos(angle)*r,dy=Math.sin(angle)*r;
+      const gradient=ctx.createLinearGradient(cx-dx,cy-dy,cx+dx,cy+dy);
+      for(const stop of style.gradient.stops) gradient.addColorStop(Math.max(0,Math.min(1,stop.position)),`#${stop.color}`);
+      ctx.fillStyle=gradient;
+    }
     ctx.beginPath();
     if (!hole) ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, r, angle, angle + sweep);
     if (hole) ctx.arc(cx, cy, r * hole, angle + sweep, angle, true);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = theme.bg;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    ctx.shadowColor='transparent';
+    if(!style?.lineHidden) {
+      ctx.strokeStyle = theme.bg;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
     const labels = spec.series?.[0]?.labels;
     const point = labels?.points?.[i];
     const text = labels ? data.series[0].labels?.[i] ?? '' : `${Math.round((v / total) * 100)}%`;

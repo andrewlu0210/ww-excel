@@ -208,7 +208,7 @@ type rawSeries struct {
 		Index struct {
 			Val int `xml:"val,attr"`
 		} `xml:"idx"`
-		Fill drawingFill `xml:"spPr>solidFill"`
+		Appearance rawChartAppearance `xml:"spPr"`
 	} `xml:"dPt"`
 	Labels *rawChartLabels `xml:"dLbls"`
 	Name   string          `xml:"tx>strRef>f"`
@@ -284,18 +284,19 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 		Chart struct {
 			Title []string `xml:"title>tx>rich>p>r>t"`
 			Plot  struct {
-				ValueAxis    *rawChartAxis `xml:"valAx"`
-				CategoryAxis *rawChartAxis `xml:"catAx"`
-				Bar          []rawPlot     `xml:"barChart"`
-				Bar3D        []rawPlot     `xml:"bar3DChart"`
-				Line         []rawPlot     `xml:"lineChart"`
-				Line3D       []rawPlot     `xml:"line3DChart"`
-				Pie          []rawPlot     `xml:"pieChart"`
-				Pie3D        []rawPlot     `xml:"pie3DChart"`
-				Doughnut     []rawPlot     `xml:"doughnutChart"`
-				Scatter      []rawPlot     `xml:"scatterChart"`
-				Area         []rawPlot     `xml:"areaChart"`
-				Area3D       []rawPlot     `xml:"area3DChart"`
+				Manual       *rawChartLayout `xml:"layout>manualLayout"`
+				ValueAxis    *rawChartAxis   `xml:"valAx"`
+				CategoryAxis *rawChartAxis   `xml:"catAx"`
+				Bar          []rawPlot       `xml:"barChart"`
+				Bar3D        []rawPlot       `xml:"bar3DChart"`
+				Line         []rawPlot       `xml:"lineChart"`
+				Line3D       []rawPlot       `xml:"line3DChart"`
+				Pie          []rawPlot       `xml:"pieChart"`
+				Pie3D        []rawPlot       `xml:"pie3DChart"`
+				Doughnut     []rawPlot       `xml:"doughnutChart"`
+				Scatter      []rawPlot       `xml:"scatterChart"`
+				Area         []rawPlot       `xml:"areaChart"`
+				Area3D       []rawPlot       `xml:"area3DChart"`
 			} `xml:"plotArea"`
 			Legend *struct {
 				Pos struct {
@@ -310,6 +311,7 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	p := doc.Chart.Plot
 	theme := drawingTheme(parts)
 	c := &model.Chart{ValueAxis: p.ValueAxis.model(theme), CategoryAxis: p.CategoryAxis.model(theme), Title: strings.Join(doc.Chart.Title, ""), Legend: "none"}
+	c.PlotArea = p.Manual.model()
 	if doc.Properties.NoFill != nil {
 		c.Background = "transparent"
 	} else {
@@ -338,7 +340,7 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	c.Stacked = strings.HasPrefix(plot.Grouping.Val, "stacked") || plot.Grouping.Val == "percentStacked"
 	for _, s := range plot.Series {
-		cs := model.ChartSeries{Name: s.Name, Categories: s.CatStr, Values: s.Val, Color: s.Fill.color(theme), PointColors: map[int]string{}}
+		cs := model.ChartSeries{Name: s.Name, Categories: s.CatStr, Values: s.Val, Color: s.Fill.color(theme), PointColors: map[int]string{}, PointStyles: map[int]model.ChartPointStyle{}}
 		if s.Categories != nil {
 			count := min(max(0, s.Categories.Count.Val), 100000)
 			cs.CategoryLabels = make([]string, count)
@@ -349,8 +351,16 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 			}
 		}
 		for _, p := range s.Points {
-			if color := p.Fill.color(theme); color != "" {
+			if color := p.Appearance.Fill.color(theme); color != "" {
 				cs.PointColors[p.Index.Val] = color
+			}
+		}
+		for _, point := range s.Points {
+			if style, ok := point.Appearance.model(theme); ok {
+				cs.PointStyles[point.Index.Val] = style
+				if style.Gradient != nil && len(style.Gradient.Stops) > 0 {
+					cs.PointColors[point.Index.Val] = style.Gradient.Stops[len(style.Gradient.Stops)/2].Color
+				}
 			}
 		}
 		labels := s.Labels

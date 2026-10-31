@@ -45,8 +45,16 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	full := map[*model.Sheet]bool{}
 	if f == nil {
 		f = excelize.NewFile()
+		styleID, err := f.NewStyle(toExcelize(wb.StyleTable().Default()))
+		if err != nil {
+			return nil, err
+		}
+		f.Styles.CellXfs.Xf[0] = f.Styles.CellXfs.Xf[styleID]
+		if f.Styles.CellStyleXfs != nil && len(f.Styles.CellStyleXfs.Xf) > 0 {
+			f.Styles.CellStyleXfs.Xf[0] = f.Styles.CellXfs.Xf[styleID]
+		}
 	}
-	w := &writer{f: f, wb: wb, styles: map[uint32]int{}}
+	w := &writer{f: f, wb: wb, styles: map[uint32]int{}, digitWidth: fontDigitWidth(outputColumnFont(f, wb.StyleTable().Default().Font))}
 	if err := w.sheets(full); err != nil {
 		return nil, err
 	}
@@ -84,6 +92,9 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	if err := f.SaveAs(tmpName); err != nil {
 		return nil, err
 	}
+	if err := preserveConditionalDetails(tmpName, wb); err != nil {
+		return nil, err
+	}
 	mode := os.FileMode(0o644)
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
@@ -101,9 +112,10 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 }
 
 type writer struct {
-	f      *excelize.File
-	wb     *model.Workbook
-	styles map[uint32]int
+	digitWidth float64
+	f          *excelize.File
+	wb         *model.Workbook
+	styles     map[uint32]int
 }
 
 // sheets makes the file's sheet list match the workbook: renames,
@@ -233,7 +245,7 @@ func (w *writer) tables(sh *model.Sheet, old, cur []model.Table) error {
 		}
 		stripes := !t.NoBands
 		if err := w.f.AddTable(sh.Name, &excelize.Table{
-			Range: formatSqref([]model.Range{rg}), Name: t.Name, StyleName: t.Style, ShowRowStripes: &stripes,
+			Range: formatSqref([]model.Range{rg}), Name: t.Name, StyleName: t.Style, ShowRowStripes: &stripes, ShowFirstColumn: t.FirstColumn, ShowLastColumn: t.LastColumn,
 		}); err != nil {
 			return fmt.Errorf("表格「%s」：%w", t.Name, err)
 		}
@@ -279,6 +291,12 @@ func (w *writer) style(id uint32) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	if x == 0 {
+		// A directly applied default must remain distinct from inherited style 0.
+		x = len(w.f.Styles.CellXfs.Xf)
+		w.f.Styles.CellXfs.Xf = append(w.f.Styles.CellXfs.Xf, w.f.Styles.CellXfs.Xf[0])
+		w.f.Styles.CellXfs.Count = len(w.f.Styles.CellXfs.Xf)
+	}
 	w.styles[id] = x
 	return x, nil
 }
@@ -293,7 +311,7 @@ func (w *writer) fullSheet(sh *model.Sheet) error {
 	if err != nil {
 		return err
 	}
-	return w.layout(sh, model.NewLayout())
+	return w.layout(sh, model.Layout{})
 }
 
 func (w *writer) changedSheet(sh *model.Sheet, ch Changes) error {
@@ -441,6 +459,13 @@ func (w *writer) cell(sh *model.Sheet, row, col int, c model.Cell) error {
 // old (the layout in the file).
 func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 	f, l := w.f, sh.Layout
+	if l.DefaultCol > 0 && l.DefaultCol != old.DefaultCol {
+		width := columnPxToWidth(l.DefaultCol, w.digitWidth)
+		if err := f.SetSheetProps(sh.Name, &excelize.SheetPropsOptions{DefaultColWidth: &width}); err != nil {
+			return err
+		}
+	}
+
 	for col := range union(old.Cols, l.Cols) {
 		name, _ := excelize.ColumnNumberToName(col + 1)
 		size, custom := l.Cols[col]
@@ -448,7 +473,7 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 		if custom {
 			width = size.Px
 		}
-		if err := f.SetColWidth(sh.Name, name, name, pxToWidth(width)); err != nil {
+		if err := f.SetColWidth(sh.Name, name, name, columnPxToWidth(width, w.digitWidth)); err != nil {
 			return err
 		}
 		if err := f.SetColVisible(sh.Name, name, !size.Hidden); err != nil {
@@ -578,6 +603,15 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 	}
 	if !reflect.DeepEqual(l.CondFormats, old.CondFormats) {
 		if err := writeCondFormats(f, sh.Name, l.CondFormats); err != nil {
+			return err
+		}
+	}
+	if l.Zoom != old.Zoom {
+		zoom := float64(l.Zoom)
+		if zoom < 10 || zoom > 400 {
+			zoom = 100
+		}
+		if err := f.SetSheetView(sh.Name, 0, &excelize.ViewOptions{ZoomScale: &zoom}); err != nil {
 			return err
 		}
 	}

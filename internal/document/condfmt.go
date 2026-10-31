@@ -15,7 +15,11 @@ import (
 
 // CFResult is what conditional formatting does to one cell.
 type CFResult struct {
-	Format model.CFFormat // merged formats of the matching rules
+	Icon           *model.CFIcon
+	BarSolid       bool
+	BarBorderColor string
+	HideValue      bool
+	Format         model.CFFormat // merged formats of the matching rules
 	// Fill from a color scale (overrides Format.Fill), RRGGBB.
 	ScaleFill string
 	// Data bar length (0 to 1), and its color; Bar < 0 means none.
@@ -84,7 +88,7 @@ func (e *CFEval) eachIn(ranges []model.Range, fn func(row, col int, c model.Cell
 func (e *CFEval) prepare(r *model.CFRule) *cfPrepared {
 	p := &cfPrepared{rule: r}
 	switch r.Type {
-	case "top", "bottom", "average", "2_color_scale", "3_color_scale", "data_bar":
+	case "top", "bottom", "average", "2_color_scale", "3_color_scale", "data_bar", "icon_set":
 		e.eachIn(r.Ranges, func(_, _ int, c model.Cell) {
 			if c.Kind == model.KindNumber {
 				p.nums = append(p.nums, c.Num)
@@ -144,6 +148,7 @@ func (e *CFEval) At(row, col int, c model.Cell) (CFResult, bool) {
 	res := CFResult{Bar: -1}
 	var merged model.CFFormat
 	matched := false
+	iconApplied := false
 	for _, p := range e.rules {
 		r := p.rule
 		if !model.InRanges(r.Ranges, row, col) {
@@ -160,15 +165,51 @@ func (e *CFEval) At(row, col int, c model.Cell) (CFResult, bool) {
 			if c.Kind == model.KindNumber && res.Bar < 0 && len(p.nums) > 0 {
 				lo := math.Min(0, p.lo)
 				hi := math.Max(0, p.hi)
+				if bar := r.DataBar; bar != nil {
+					if bound, ok := e.cfThreshold(p, bar.Minimum, row, col); ok {
+						lo = bound
+					}
+					if bound, ok := e.cfThreshold(p, bar.Maximum, row, col); ok {
+						hi = bound
+					}
+					res.BarSolid, res.BarBorderColor = bar.Solid, bar.BorderColor
+					res.HideValue = res.HideValue || bar.HideValue
+				}
 				if hi > lo {
 					res.Bar = math.Max(0, math.Min(1, (c.Num-lo)/(hi-lo)))
 				} else {
 					res.Bar = 1
 				}
 				res.BarColor = "638EC6"
-				if len(r.Colors) > 0 {
+				if len(r.Colors) > 0 && r.Colors[0] != "" {
 					res.BarColor = r.Colors[0]
 				}
+				matched = true
+			}
+			continue
+		case "icon_set":
+			if c.Kind == model.KindNumber && r.IconSet != nil && len(r.IconSet.Thresholds) > 0 && !iconApplied {
+				iconApplied = true
+				set := r.IconSet
+				index := 0
+				for i := 1; i < len(set.Thresholds); i++ {
+					threshold := set.Thresholds[i]
+					bound, ok := e.cfThreshold(p, threshold, row, col)
+					if ok && (c.Num > bound || c.Num == bound && !threshold.Strict) {
+						index = i
+					}
+				}
+				if set.Reverse {
+					index = len(set.Thresholds) - 1 - index
+				}
+				icon := model.CFIcon{Set: set.Set, Index: index}
+				if index >= 0 && index < len(set.Icons) {
+					icon = set.Icons[index]
+				}
+				if icon.Set != "NoIcons" {
+					res.Icon = &icon
+				}
+				res.HideValue = res.HideValue || set.HideValue
 				matched = true
 			}
 			continue
@@ -198,6 +239,42 @@ func mergeCF(dst *model.CFFormat, src model.CFFormat) {
 	dst.Italic = dst.Italic || src.Italic
 	dst.Underline = dst.Underline || src.Underline
 	dst.Strike = dst.Strike || src.Strike
+}
+
+func (e *CFEval) cfThreshold(p *cfPrepared, t model.CFThreshold, row, col int) (float64, bool) {
+	switch t.Type {
+	case "autoMin":
+		return math.Min(0, p.lo), len(p.nums) > 0
+	case "min":
+		return p.lo, len(p.nums) > 0
+	case "autoMax":
+		return math.Max(0, p.hi), len(p.nums) > 0
+	case "max":
+		return p.hi, len(p.nums) > 0
+	case "num":
+		v, err := strconv.ParseFloat(t.Value, 64)
+		return v, err == nil && !math.IsNaN(v) && !math.IsInf(v, 0)
+	case "percent", "percentile":
+		v, err := strconv.ParseFloat(t.Value, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || len(p.nums) == 0 {
+			return 0, false
+		}
+		v = math.Max(0, math.Min(100, v))
+		if t.Type == "percentile" {
+			return percentile(p.nums, v/100), true
+		}
+		return p.lo + (p.hi-p.lo)*v/100, true
+	case "formula":
+		node, err := ruleFormula(t.Value, p.rule.Ranges, row, col)
+		if err != nil {
+			return 0, false
+		}
+		value := e.d.calc.EvalAt(node, e.sheet, row, col)
+		if value.Kind == eval.KNumber && !math.IsNaN(value.Num) && !math.IsInf(value.Num, 0) {
+			return value.Num, true
+		}
+	}
+	return 0, false
 }
 
 func (e *CFEval) matches(p *cfPrepared, row, col int, c model.Cell) bool {
@@ -407,7 +484,7 @@ func checkCFRule(r *model.CFRule) error {
 			return fmt.Errorf("公式有誤：%v", err)
 		}
 	case "top", "bottom", "average", "duplicate", "unique", "text", "blanks", "no_blanks", "errors", "no_errors",
-		"2_color_scale", "3_color_scale", "data_bar":
+		"2_color_scale", "3_color_scale", "data_bar", "icon_set":
 	default:
 		return fmt.Errorf("未知的規則類型「%s」", r.Type)
 	}
@@ -438,6 +515,22 @@ func adjustRuleFormulas(sh *model.Sheet, fn func(ast.Node) (ast.Node, bool)) {
 		r := &sh.Layout.CondFormats[i]
 		if r.Type == "cell" || r.Type == "formula" {
 			r.Value1, r.Value2 = fix(r.Value1), fix(r.Value2)
+		}
+		if r.DataBar != nil {
+			if r.DataBar.Minimum.Type == "formula" {
+				r.DataBar.Minimum.Value = fix(r.DataBar.Minimum.Value)
+			}
+			if r.DataBar.Maximum.Type == "formula" {
+				r.DataBar.Maximum.Value = fix(r.DataBar.Maximum.Value)
+			}
+		}
+		if r.IconSet != nil {
+			for j := range r.IconSet.Thresholds {
+				threshold := &r.IconSet.Thresholds[j]
+				if threshold.Type == "formula" {
+					threshold.Value = fix(threshold.Value)
+				}
+			}
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"github.com/xuri/excelize/v2"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,9 +70,9 @@ func TestReadRowHeightWithoutCustomHeight(t *testing.T) {
 	}
 	defer base.Close()
 	layout := wb.Sheets[0].Layout
-	for row, height := range map[int]float64{6: 187, 7: 75, 8: 37} {
+	for row, height := range map[int]float64{6: 140 * 4.0 / 3, 7: 56 * 4.0 / 3, 8: 28 * 4.0 / 3} {
 		size := layout.Rows[row]
-		if size.Px != height {
+		if math.Abs(size.Px-height) > 1e-9 {
 			t.Errorf("row %d height=%v want %v", row+1, size.Px, height)
 		}
 	}

@@ -180,8 +180,26 @@ func writeCondFormats(f *excelize.File, sheet string, rules []model.CFRule) erro
 			} else {
 				o.MaxColor = "#" + colors[1]
 			}
+		case "icon_set":
+			if r.IconSet != nil {
+				o.IconStyle = r.IconSet.Set
+				o.ReverseIcons = r.IconSet.Reverse
+				o.IconsOnly = r.IconSet.HideValue
+			}
 		case "data_bar":
 			o.MinType, o.MaxType = "min", "max"
+			if bar := r.DataBar; bar != nil {
+				if bar.Minimum.Type != "" {
+					o.MinType, o.MinValue = bar.Minimum.Type, bar.Minimum.Value
+				}
+				if bar.Maximum.Type != "" {
+					o.MaxType, o.MaxValue = bar.Maximum.Type, bar.Maximum.Value
+				}
+				o.BarSolid, o.BarOnly = bar.Solid, bar.HideValue
+				if bar.BorderColor != "" {
+					o.BarBorderColor = "#" + bar.BorderColor
+				}
+			}
 			o.BarColor = "#638EC6"
 			if len(r.Colors) > 0 && r.Colors[0] != "" {
 				o.BarColor = "#" + r.Colors[0]

@@ -44,6 +44,8 @@ export interface BorderLineDTO {
 }
 
 export interface CFRuleDTO {
+    "dataBar"?: model$0.CFDataBar | null;
+    "iconSet"?: model$0.CFIconSet | null;
     "ranges": RangeDTO[] | null;
     "type": string;
     "op": string;
@@ -64,6 +66,11 @@ export interface CFRuleDTO {
  * within the block; short JSON keys keep the payload small.
  */
 export interface CellDTO {
+    "textOnly"?: boolean;
+    "hideValue"?: boolean;
+    "icon"?: model$0.CFIcon | null;
+    "barSolid"?: boolean;
+    "barBorderColor"?: string;
     "runs"?: TextRunDTO[] | null;
     "r": number;
     "c": number;
@@ -122,6 +129,11 @@ export interface CellsChanged {
 }
 
 export interface ChangedCell {
+    "textOnly"?: boolean;
+    "hideValue"?: boolean;
+    "icon"?: model$0.CFIcon | null;
+    "barSolid"?: boolean;
+    "barBorderColor"?: string;
     "runs"?: TextRunDTO[] | null;
     "row": number;
     "col": number;
@@ -147,6 +159,7 @@ export interface ChangedCell {
 }
 
 export interface ChartDTO {
+    "plotArea"?: model$0.ChartPlotArea | null;
     "valueAxis"?: model$0.ChartAxis | null;
     "categoryAxis"?: model$0.ChartAxis | null;
     "background"?: string;
@@ -174,6 +187,7 @@ export interface ChartScaleDTO {
 }
 
 export interface ChartSeriesDTO {
+    "pointStyles"?: { [_ in `${number}`]?: model$0.ChartPointStyle } | null;
     "categoryLabels"?: string[] | null;
     "color"?: string;
     "pointColors"?: { [_ in `${number}`]?: string } | null;
@@ -450,6 +464,7 @@ export interface ShapeDTO {
 }
 
 export interface SheetInfo {
+    "zoom"?: number;
     "name": string;
     "rows": number;
     "cols": number;

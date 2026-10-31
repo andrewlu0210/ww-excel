@@ -3,6 +3,7 @@ package document
 import (
 	"path/filepath"
 	"testing"
+	"ww-excel/internal/model"
 )
 
 func TestTables(t *testing.T) {
@@ -100,6 +101,38 @@ func TestTableFilterWithoutWorksheetFilter(t *testing.T) {
 	}
 	d.Undo()
 	if d.Workbook().Sheets[0].Layout.Rows[2].Hidden {
+		t.Fatal("undo did not restore row")
+	}
+}
+
+func TestStackedTableFilterUsesClickedHeader(t *testing.T) {
+	d := New()
+	for _, row := range []struct {
+		r    int
+		text string
+	}{{0, "Income"}, {1, "Salary"}, {2, "Other"}, {4, "Expenses"}, {5, "Rent"}, {6, "Utilities"}} {
+		enter(t, d, 0, row.r, 0, row.text)
+	}
+	for _, r := range []model.Range{rg(0, 0, 2, 0), rg(4, 0, 6, 0)} {
+		cmd, _, err := d.CreateTableCommand(0, r, true, "")
+		must(t, d)(cmd, err)
+	}
+	d.Workbook().Sheets[0].Layout.Filter = nil
+	values := d.FilterValues(0, 0, plain, 4)
+	if len(values) != 2 || values[0].Text != "Rent" || values[1].Text != "Utilities" {
+		t.Fatalf("wrong table values: %+v", values)
+	}
+	must(t, d)(d.FilterCommand(0, 0, []string{"Rent"}, plain, 4))
+	l := &d.Workbook().Sheets[0].Layout
+	if !l.Rows[6].Hidden || l.Rows[1].Hidden || l.Rows[2].Hidden {
+		t.Fatalf("filter affected wrong rows: %+v", l.Rows)
+	}
+	income := d.FilterValues(0, 0, plain, 0)
+	if len(income) != 2 || income[0].Text != "Other" || income[1].Text != "Salary" {
+		t.Fatalf("active expenses filter selected for income header: %+v", income)
+	}
+	d.Undo()
+	if l.Rows[6].Hidden {
 		t.Fatal("undo did not restore row")
 	}
 }

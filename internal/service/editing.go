@@ -427,10 +427,10 @@ type FilterValueDTO struct {
 	Shown bool   `json:"shown"`
 }
 
-func (s *SheetService) FilterValues(ctx context.Context, sheet, col int) []FilterValueDTO {
+func (s *SheetService) FilterValues(ctx context.Context, sheet, col, headerRow int) []FilterValueDTO {
 	out := []FilterValueDTO{}
 	s.at(ctx).read(func(d *document.Document) {
-		for _, v := range d.FilterValues(sheet, col, shownText(d.Workbook())) {
+		for _, v := range d.FilterValues(sheet, col, shownText(d.Workbook()), headerRow) {
 			out = append(out, FilterValueDTO{Text: v.Text, Shown: v.Shown})
 		}
 	})
@@ -438,21 +438,21 @@ func (s *SheetService) FilterValues(ctx context.Context, sheet, col int) []Filte
 }
 
 // SetFilter sets the values a filter column shows; all clears it.
-func (s *SheetService) SetFilter(ctx context.Context, sheet, col int, shown []string, all bool) error {
+func (s *SheetService) SetFilter(ctx context.Context, sheet, col int, shown []string, all bool, headerRow int) error {
 	return s.exec(ctx, sheet, func(d *document.Document) (command.Command, error) {
 		if all {
 			shown = nil
 		} else if shown == nil {
 			shown = []string{}
 		}
-		return d.FilterCommand(sheet, col, shown, shownText(d.Workbook()))
+		return d.FilterCommand(sheet, col, shown, shownText(d.Workbook()), headerRow)
 	})
 }
 
 // SortFilter sorts the filter range by one of its columns.
-func (s *SheetService) SortFilter(ctx context.Context, sheet, col int, desc bool) error {
+func (s *SheetService) SortFilter(ctx context.Context, sheet, col int, desc bool, headerRow int) error {
 	return s.exec(ctx, sheet, func(d *document.Document) (command.Command, error) {
-		f := d.FilterForColumn(sheet, col)
+		f := d.FilterForColumn(sheet, col, headerRow)
 		if f == nil {
 			return nil, errors.New("沒有篩選")
 		}

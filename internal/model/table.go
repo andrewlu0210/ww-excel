@@ -11,9 +11,12 @@ type Table struct {
 	// Style is the table style name, e.g. TableStyleMedium2.
 	Style string
 	// NoBands turns off banded rows.
-	NoBands   bool
-	NoFilter  bool
-	RowBorder BorderLine
+	NoBands     bool
+	FirstColumn bool
+	LastColumn  bool
+	NoFilter    bool
+	RowBorder   BorderLine
+	Appearance  *TableAppearance `json:",omitempty"`
 }
 
 // DataRows is the range of the table's data rows (R0 > R1 when the
@@ -67,4 +70,15 @@ func (l *Layout) TableAt(row, col int) *Table {
 		}
 	}
 	return nil
+}
+
+// TableAppearance contains immutable partial font overrides from custom table styles.
+// Missing font properties inherit the cell font.
+type TableAppearance struct {
+	Whole        *RichFont `json:",omitempty"`
+	Header       *RichFont `json:",omitempty"`
+	First        *RichFont `json:",omitempty"`
+	Last         *RichFont `json:",omitempty"`
+	Totals       *RichFont `json:",omitempty"`
+	HeaderBorder BorderLine
 }

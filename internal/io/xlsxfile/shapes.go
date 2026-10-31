@@ -3,6 +3,7 @@ package xlsxfile
 import (
 	"archive/zip"
 	"encoding/xml"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -21,6 +22,8 @@ type drawingColor struct {
 	LumOff *drawingPercent `xml:"lumOff"`
 	Tint   *drawingPercent `xml:"tint"`
 	Shade  *drawingPercent `xml:"shade"`
+	SatMod *drawingPercent `xml:"satMod"`
+	Alpha  *drawingPercent `xml:"alpha"`
 }
 type drawingFill struct {
 	RGB    *drawingColor `xml:"srgbClr"`
@@ -147,12 +150,36 @@ func (fill drawingFill) color(theme map[string]string) string {
 		}
 		base = normalizeHex(excelize.ThemeColor(base, tint))
 	}
-	if c.Tint != nil {
-		base = normalizeHex(excelize.ThemeColor(base, c.Tint.Val/100000))
+	if c.SatMod != nil {
+		n, _ := strconv.ParseUint(base, 16, 32)
+		r, g, b := float64(n>>16&255)/255, float64(n>>8&255)/255, float64(n&255)/255
+		lo, hi := math.Min(r, math.Min(g, b)), math.Max(r, math.Max(g, b))
+		light := (hi + lo) / 2
+		if hi > lo {
+			saturation := (hi - lo) / (1 - math.Abs(2*light-1))
+			target := math.Max(0, math.Min(1, saturation*c.SatMod.Val/100000))
+			factor := target / saturation
+			base = colorRGB(light+(r-light)*factor, light+(g-light)*factor, light+(b-light)*factor)
+		}
 	}
-	if c.Shade != nil {
-		base = normalizeHex(excelize.ThemeColor(base, c.Shade.Val/100000-1))
+	if c.Tint != nil || c.Shade != nil {
+		n, _ := strconv.ParseUint(base, 16, 32)
+		channels := []float64{float64(n>>16&255) / 255, float64(n>>8&255) / 255, float64(n&255) / 255}
+		// DrawingML tint and shade mix intensities in linear RGB.
+		for i, v := range channels {
+			v = srgbLinear(v)
+			if c.Tint != nil {
+				factor := math.Max(0, math.Min(1, c.Tint.Val/100000))
+				v = v*factor + 1 - factor
+			}
+			if c.Shade != nil {
+				v *= math.Max(0, math.Min(1, c.Shade.Val/100000))
+			}
+			channels[i] = linearSRGB(v)
+		}
+		base = colorRGB(channels[0], channels[1], channels[2])
 	}
+
 	return base
 }
 
@@ -247,4 +274,22 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 		return nil
 	}
 	return shape
+}
+
+func colorRGB(r, g, b float64) string {
+	channel := func(v float64) int { return int(math.Round(math.Max(0, math.Min(1, v)) * 255)) }
+	return fmt.Sprintf("%02X%02X%02X", channel(r), channel(g), channel(b))
+}
+
+func srgbLinear(v float64) float64 {
+	if v <= .04045 {
+		return v / 12.92
+	}
+	return math.Pow((v+.055)/1.055, 2.4)
+}
+func linearSRGB(v float64) float64 {
+	if v <= .0031308 {
+		return 12.92 * v
+	}
+	return 1.055*math.Pow(v, 1/2.4) - .055
 }

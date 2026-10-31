@@ -193,13 +193,13 @@ export const sheetApi = {
   sort: (sheet: number, rg: RangeDTO, keys: SortKeyDTO[], header: boolean): Promise<string | null> =>
     rejected(SheetService.Sort(sheet, rg, keys, header)),
   toggleFilter: (sheet: number, sel: RangeDTO): Promise<string | null> => rejected(SheetService.ToggleFilter(sheet, sel)),
-  async filterValues(sheet: number, col: number): Promise<FilterValueDTO[]> {
-    return (await SheetService.FilterValues(sheet, col)) ?? [];
+  async filterValues(sheet: number, col: number, headerRow=-1): Promise<FilterValueDTO[]> {
+    return (await SheetService.FilterValues(sheet, col,headerRow)) ?? [];
   },
-  setFilter: (sheet: number, col: number, shown: string[], all: boolean): Promise<string | null> =>
-    rejected(SheetService.SetFilter(sheet, col, shown, all)),
-  sortFilter: (sheet: number, col: number, desc: boolean): Promise<string | null> =>
-    rejected(SheetService.SortFilter(sheet, col, desc)),
+  setFilter: (sheet: number, col: number, shown: string[], all: boolean,headerRow=-1): Promise<string | null> =>
+    rejected(SheetService.SetFilter(sheet, col, shown, all,headerRow)),
+  sortFilter: (sheet: number, col: number, desc: boolean,headerRow=-1): Promise<string | null> =>
+    rejected(SheetService.SortFilter(sheet, col, desc,headerRow)),
 
   // ---- v0.6 ----
   setNote: (sheet: number, row: number, col: number, text: string): Promise<string | null> =>

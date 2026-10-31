@@ -1,3 +1,4 @@
+import type { ConditionalIcon, DataBar } from '../grid/conditional';
 import type { TextRunDTO } from '../../bindings/ww-excel/internal/service/models';
 import type { BlockDTO, BlockRef, BlocksResult, CellsChanged } from '../bridge/sheet';
 
@@ -9,10 +10,18 @@ export interface CellView {
   style: number; // style ID (0 = default)
   color: string | null; // number-format color such as [Red], "#RRGGBB"
   // Conditional-format data bar: length 0..1 and "#RRGGBB", or null.
-  bar: { len: number; color: string } | null;
+  bar: DataBar | null;
+  icon?: ConditionalIcon;
+  hideValue?: boolean;
+  textOnly?: boolean;
 }
 
 interface CellFields {
+  icon?: ConditionalIcon | null;
+  hideValue?: boolean;
+  textOnly?: boolean;
+  barSolid?: boolean;
+  barBorderColor?: string;
   runs?: TextRunDTO[] | null;
   v: string;
   n?: boolean;
@@ -31,7 +40,10 @@ function view(c: CellFields): CellView {
     center: c.x === true,
     style: c.st ?? 0,
     color: c.fc ? `#${c.fc}` : null,
-    bar: c.bc ? { len: c.bar ?? 0, color: `#${c.bc}` } : null,
+    bar: c.bc ? { len: c.bar ?? 0, color: `#${c.bc}`, ...(c.barSolid ? {solid:true} : {}), ...(c.barBorderColor ? {borderColor:`#${c.barBorderColor}`} : {}) } : null,
+    ...(c.icon ? {icon:c.icon} : {}),
+    ...(c.hideValue ? {hideValue:true} : {}),
+    ...(c.textOnly ? {textOnly:true} : {}),
   };
 }
 

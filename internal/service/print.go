@@ -25,27 +25,29 @@ import (
 // ---- Floating objects ----
 
 type ChartSeriesDTO struct {
-	CategoryLabels []string           `json:"categoryLabels,omitempty"`
-	Color          string             `json:"color,omitempty"`
-	PointColors    map[int]string     `json:"pointColors,omitempty"`
-	Labels         *model.ChartLabels `json:"labels,omitempty"`
-	Name           string             `json:"name"`
-	Categories     string             `json:"categories"`
-	Values         string             `json:"values"`
+	PointStyles    map[int]model.ChartPointStyle `json:"pointStyles,omitempty"`
+	CategoryLabels []string                      `json:"categoryLabels,omitempty"`
+	Color          string                        `json:"color,omitempty"`
+	PointColors    map[int]string                `json:"pointColors,omitempty"`
+	Labels         *model.ChartLabels            `json:"labels,omitempty"`
+	Name           string                        `json:"name"`
+	Categories     string                        `json:"categories"`
+	Values         string                        `json:"values"`
 }
 
 type ChartDTO struct {
-	ValueAxis    *model.ChartAxis `json:"valueAxis,omitempty"`
-	CategoryAxis *model.ChartAxis `json:"categoryAxis,omitempty"`
-	Background   string           `json:"background,omitempty"`
-	HoleSize     int              `json:"holeSize,omitempty"`
-	Type         string           `json:"type"`
-	Title        string           `json:"title"`
-	Series       []ChartSeriesDTO `json:"series"`
-	Legend       string           `json:"legend"`
-	XTitle       string           `json:"xTitle"`
-	YTitle       string           `json:"yTitle"`
-	Stacked      bool             `json:"stacked"`
+	PlotArea     *model.ChartPlotArea `json:"plotArea,omitempty"`
+	ValueAxis    *model.ChartAxis     `json:"valueAxis,omitempty"`
+	CategoryAxis *model.ChartAxis     `json:"categoryAxis,omitempty"`
+	Background   string               `json:"background,omitempty"`
+	HoleSize     int                  `json:"holeSize,omitempty"`
+	Type         string               `json:"type"`
+	Title        string               `json:"title"`
+	Series       []ChartSeriesDTO     `json:"series"`
+	Legend       string               `json:"legend"`
+	XTitle       string               `json:"xTitle"`
+	YTitle       string               `json:"yTitle"`
+	Stacked      bool                 `json:"stacked"`
 }
 
 // ObjectDTO is a chart or picture. Pictures are fetched separately
@@ -83,9 +85,9 @@ func chartDTO(c *model.Chart) *ChartDTO {
 	if c == nil {
 		return nil
 	}
-	out := &ChartDTO{ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
+	out := &ChartDTO{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
 	for _, s := range c.Series {
-		out.Series = append(out.Series, ChartSeriesDTO{CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
+		out.Series = append(out.Series, ChartSeriesDTO{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
 	}
 	return out
 }
@@ -102,10 +104,10 @@ func (c *ChartDTO) model() *model.Chart {
 	if c == nil {
 		return nil
 	}
-	out := &model.Chart{ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
+	out := &model.Chart{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
 	strip := func(f string) string { return strings.TrimPrefix(strings.TrimSpace(f), "=") }
 	for _, s := range c.Series {
-		out.Series = append(out.Series, model.ChartSeries{CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
+		out.Series = append(out.Series, model.ChartSeries{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
 	}
 	return out
 }

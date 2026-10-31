@@ -154,8 +154,8 @@ export function FillSeries(sheet: number, src: $models.RangeDTO, dst: $models.Ra
     return $Call.ByID(3618456001, sheet, src, dst, copyOnly);
 }
 
-export function FilterValues(sheet: number, col: number): $CancellablePromise<$models.FilterValueDTO[] | null> {
-    return $Call.ByID(2043452641, sheet, col);
+export function FilterValues(sheet: number, col: number, headerRow: number): $CancellablePromise<$models.FilterValueDTO[] | null> {
+    return $Call.ByID(2043452641, sheet, col, headerRow);
 }
 
 /**
@@ -335,8 +335,8 @@ export function SetCell(sheet: number, row: number, col: number, text: string): 
 /**
  * SetFilter sets the values a filter column shows; all clears it.
  */
-export function SetFilter(sheet: number, col: number, shown: string[] | null, all: boolean): $CancellablePromise<void> {
-    return $Call.ByID(315446633, sheet, col, shown, all);
+export function SetFilter(sheet: number, col: number, shown: string[] | null, all: boolean, headerRow: number): $CancellablePromise<void> {
+    return $Call.ByID(315446633, sheet, col, shown, all, headerRow);
 }
 
 /**
@@ -386,8 +386,8 @@ export function Sort(sheet: number, rg: $models.RangeDTO, keys: $models.SortKeyD
 /**
  * SortFilter sorts the filter range by one of its columns.
  */
-export function SortFilter(sheet: number, col: number, desc: boolean): $CancellablePromise<void> {
-    return $Call.ByID(4162256839, sheet, col, desc);
+export function SortFilter(sheet: number, col: number, desc: boolean, headerRow: number): $CancellablePromise<void> {
+    return $Call.ByID(4162256839, sheet, col, desc, headerRow);
 }
 
 /**

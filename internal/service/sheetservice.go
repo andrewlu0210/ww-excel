@@ -15,6 +15,12 @@ import (
 // CellDTO is a single non-empty cell inside a block. R and C are offsets
 // within the block; short JSON keys keep the payload small.
 type CellDTO struct {
+	TextOnly       bool          `json:"textOnly,omitempty"`
+	HideValue      bool          `json:"hideValue,omitempty"`
+	Icon           *model.CFIcon `json:"icon,omitempty"`
+	BarSolid       bool          `json:"barSolid,omitempty"`
+	BarBorderColor string        `json:"barBorderColor,omitempty"`
+
 	Runs []TextRunDTO `json:"runs,omitempty"`
 	R    int          `json:"r"`
 	C    int          `json:"c"`
@@ -51,6 +57,7 @@ type BlocksResult struct {
 }
 
 type SheetInfo struct {
+	Zoom      int    `json:"zoom,omitempty"`
 	Name      string `json:"name"`
 	Rows      int    `json:"rows"`
 	Cols      int    `json:"cols"`
@@ -117,6 +124,10 @@ func (s *SheetService) Info(ctx context.Context, sheet int) SheetInfo {
 	s.at(ctx).read(func(d *document.Document) {
 		if sh := sheetAt(d, sheet); sh != nil {
 			info.Name = sh.Name
+			info.Zoom = sh.Layout.Zoom
+			if info.Zoom == 0 {
+				info.Zoom = 100
+			}
 			info.UsedRows, info.UsedCols = sh.UsedRange()
 		}
 	})
@@ -143,7 +154,7 @@ func (s *SheetService) GetBlocks(ctx context.Context, sheet int, refs []BlockRef
 						dto.Cells = make([]CellDTO, 0, b.Count())
 						b.Each(func(r, c int, cell model.Cell) {
 							v, n, x, st, fc := cellView(wb, sh, r0+r, c0+c, cell)
-							dto.Cells = append(dto.Cells, CellDTO{R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)})
+							dto.Cells = append(dto.Cells, CellDTO{TextOnly: cell.Kind == model.KindNumber && numfmt.IsLiteral(cell.Num, wb.StyleTable().Get(st).NumFmt), R: r, C: c, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)})
 						})
 					}
 				} else {

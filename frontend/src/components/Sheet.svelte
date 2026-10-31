@@ -171,7 +171,7 @@
   let fillPreview = $state<Range | null>(null);
   // Right-click menu and filter dropdown.
   let contextMenu = $state<{ x: number; y: number; area: ContextRequest['area'] } | null>(null);
-  let filterMenu = $state<{ col: number; x: number; y: number; values: FilterValueDTO[]; title: string } | null>(null);
+  let filterMenu = $state<{ row:number; col: number; x: number; y: number; values: FilterValueDTO[]; title: string } | null>(null);
 
   function notify(message: string | null | undefined): void {
     if (message) onnotify?.(message);
@@ -1509,26 +1509,28 @@
     focus();
   }
 
-  async function onFilterButton(e: { col: number; x: number; y: number }): Promise<void> {
+  async function onFilterButton(e: { row:number; col: number; x: number; y: number }): Promise<void> {
     if (editing) commit('stay');
-    const values = await sheetApi.filterValues(sheet, e.col);
+    const values = await sheetApi.filterValues(sheet, e.col,e.row);
     const base = root.getBoundingClientRect();
-    filterMenu = { col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: t('欄 %s', colName(e.col)) };
+    filterMenu = { row:e.row,col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: t('欄 %s', colName(e.col)) };
   }
 
   async function applyFilter(shown: string[] | null): Promise<void> {
     const col = filterMenu?.col;
+    const row=filterMenu?.row ?? -1;
     filterMenu = null;
     if (col === undefined) return;
-    notify(await serial(() => sheetApi.setFilter(sheet, col, shown ?? [], shown === null)));
+    notify(await serial(() => sheetApi.setFilter(sheet, col, shown ?? [], shown === null,row)));
     focus();
   }
 
   async function sortByFilter(desc: boolean): Promise<void> {
     const col = filterMenu?.col;
+    const row=filterMenu?.row ?? -1;
     filterMenu = null;
     if (col === undefined) return;
-    notify(await serial(() => sheetApi.sortFilter(sheet, col, desc)));
+    notify(await serial(() => sheetApi.sortFilter(sheet, col, desc,row)));
     focus();
   }
 

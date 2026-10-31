@@ -97,3 +97,14 @@ describe('imported chart axes', () => {
     expect(segments.filter(([x1,,x2])=>x1===x2)).toHaveLength(1);
   });
 });
+
+it('uses manual pie bounds, gradient stops and scaled shadows without adding outlines',()=>{
+ const arcs:number[][]=[],stops:unknown[][]=[],fills:unknown[][]=[];let strokes=0;
+ const gradient={addColorStop:(...args:unknown[])=>stops.push(args)};
+ const target={fillStyle:undefined as unknown,shadowBlur:0,shadowOffsetY:0,arc:(...args:number[])=>arcs.push(args),createLinearGradient:()=>gradient,getTransform:()=>({a:2,b:0}),fill(){fills.push([this.fillStyle,this.shadowBlur,this.shadowOffsetY])},stroke:()=>strokes++,measureText:()=>({width:10})};
+ const ctx=new Proxy(target,{get(t,k){return k in t?t[k as keyof typeof t]:()=>{}}}) as unknown as CanvasRenderingContext2D;
+ drawChart(ctx,300,240,{type:'pie',title:'',legend:'none',xTitle:'',yTitle:'',stacked:false,plotArea:{x:.1,y:.05,w:.8,h:.9},series:[{pointStyles:{0:{lineHidden:true,gradient:{angle:90,stops:[{position:0,color:'A5C55E'},{position:1,color:'709621'}]},shadow:{color:'000000',opacity:.63,blur:6,x:0,y:2}}}}]}, {categories:['a'],series:[{name:'',values:[1],x:[]}]});
+ expect(arcs[0].slice(0,3)).toEqual([150,120,108]);
+ expect(stops).toEqual([[0,'#A5C55E'],[1,'#709621']]);
+ expect(fills[0].slice(1)).toEqual([12,4]);expect(fills[1][0]).toBe(gradient);expect(strokes).toBe(0);
+});

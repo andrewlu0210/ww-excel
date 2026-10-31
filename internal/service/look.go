@@ -3,6 +3,7 @@ package service
 import (
 	"ww-excel/internal/document"
 	"ww-excel/internal/model"
+	"ww-excel/internal/numfmt"
 )
 
 // sheetLook renders cells with what lies on top of their own style:
@@ -79,7 +80,7 @@ func (l *sheetLook) areas() []model.Range {
 }
 
 // style returns the style ID to show at a cell, with a data bar.
-func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, bar float64, barColor string, any bool) {
+func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, bar float64, barColor string, any bool, visual *document.CFResult) {
 	var over model.CFFormat
 	head := false
 	for _, t := range l.tables {
@@ -87,7 +88,26 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 			continue
 		}
 		if _, known := tablePalettes[t.Style]; !known {
-			// Preserve direct formatting for imported custom styles.
+			// Apply only properties supplied by the custom table style.
+			if a := t.Appearance; a != nil {
+				st := l.wb.StyleTable().Get(base)
+				st.Font = a.Whole.Resolve(st.Font)
+				if t.FirstColumn && col == t.Range.C0 {
+					st.Font = a.First.Resolve(st.Font)
+				}
+				if t.LastColumn && col == t.Range.C1 {
+					st.Font = a.Last.Resolve(st.Font)
+				}
+				if row == t.Range.R0 {
+					st.Font = a.Header.Resolve(st.Font)
+					if st.Border.Bottom.Style == "" && a.HeaderBorder.Style != "" {
+						st.Border.Bottom = a.HeaderBorder
+					}
+				} else if t.TotalsRow && row == t.Range.R1 {
+					st.Font = a.Totals.Resolve(st.Font)
+				}
+				base = l.wb.StyleTable().Intern(st)
+			}
 			if t.RowBorder.Style != "" && row > t.Range.R0 && row < t.DataRows().R1 {
 				st := l.wb.StyleTable().Get(base)
 				if st.Border.Bottom.Style == "" {
@@ -115,6 +135,7 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 	if l.cf != nil {
 		if res, ok := l.cf.At(row, col, c); ok {
 			any = true
+			visual = &res
 			cf := res.Format
 			if res.ScaleFill != "" {
 				cf.Fill = res.ScaleFill
@@ -134,11 +155,11 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 		}
 	}
 	if !any || over == (model.CFFormat{}) {
-		return base, bar, barColor, any
+		return base, bar, barColor, any, visual
 	}
 	key := lookKey{base: base, over: over, head: head}
 	if id, ok := l.cache[key]; ok {
-		return id, bar, barColor, true
+		return id, bar, barColor, true, visual
 	}
 	s := l.wb.StyleTable().Get(base)
 	// Table styles sit under direct formatting; conditional formats
@@ -155,16 +176,22 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 	s.Font.Strike = s.Font.Strike || over.Strike
 	id := l.wb.StyleTable().Intern(s)
 	l.cache[key] = id
-	return id, bar, barColor, true
+	return id, bar, barColor, true, visual
 }
 
 // view renders a cell like cellView, plus conditional formats and table
 // styles when look is not nil.
 func (l *sheetLook) view(row, col int, c model.Cell) (dto CellDTO, show bool) {
 	v, n, x, st, fc := cellView(l.wb, l.sh, row, col, c)
-	dto = CellDTO{V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(c.Rich, l.wb.StyleTable().Get(st).Font)}
+	dto = CellDTO{TextOnly: c.Kind == model.KindNumber && numfmt.IsLiteral(c.Num, l.wb.StyleTable().Get(st).NumFmt), V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(c.Rich, l.wb.StyleTable().Get(st).Font)}
 	show = c.HasContent() || st != 0
-	st2, bar, bc, any := l.style(row, col, c, st)
+	st2, bar, bc, any, visual := l.style(row, col, c, st)
+	if visual != nil {
+		dto.Icon = visual.Icon
+		dto.HideValue = visual.HideValue
+		dto.BarSolid = visual.BarSolid
+		dto.BarBorderColor = visual.BarBorderColor
+	}
 	if any {
 		dto.St = st2
 		if bar >= 0 && c.Kind == model.KindNumber {

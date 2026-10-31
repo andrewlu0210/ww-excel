@@ -1,5 +1,8 @@
 // Read-only display checks for the user-supplied workbook (WW_XLSX_FIXTURE).
 import { benchApi, documentApi, settingsApi, sheetApi } from '../bridge/sheet';
+import { listWorkbookSelfTest } from './listWorkbookSelfTest';
+import { financeWorkbookSelfTest } from './financeWorkbookSelfTest';
+import { taskWorkbookSelfTest } from './taskWorkbookSelfTest';
 import { budgetWorkbookSelfTest } from './budgetWorkbookSelfTest';
 import type Sheet from '../components/Sheet.svelte';
 
@@ -12,6 +15,9 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.[0] === '清單') return listWorkbookSelfTest(driver);
+  if (state.sheets?.[0] === '管理財務') return financeWorkbookSelfTest(driver);
+  if (state.sheets?.[0] === '工作') return taskWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '目前月份') return budgetWorkbookSelfTest(driver);
   check('活頁簿讀取八張工作表', state.sheets?.length === 8, JSON.stringify(state.sheets));
 

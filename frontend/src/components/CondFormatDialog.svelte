@@ -81,7 +81,7 @@
   let usesFormat = $derived(!['3_color_scale', '2_color_scale', 'data_bar'].includes(rule.type));
 
   function describe(r: CFRuleDTO): string {
-    const kind = kinds.find((k) => k.value === r.type)?.label ?? r.type;
+    const kind = r.type === 'icon_set' ? t('圖示集') : kinds.find((k) => k.value === r.type)?.label ?? r.type;
     const op = [...ops, ...textOps].find((o) => o.value === r.op)?.label ?? '';
     const where = (r.ranges ?? []).map((g) => `${colName(g.c0)}${g.r0 + 1}:${colName(g.c1)}${g.r1 + 1}`).join(' ');
     let what = kind;

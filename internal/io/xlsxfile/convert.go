@@ -19,9 +19,22 @@ import (
 // default font (7px for Calibri 11); row heights are points.
 const digitPx = 7
 
+func columnWidthToPx(w, mdw float64) float64 {
+	if mdw <= 0 {
+		mdw = digitPx
+	}
+	return math.Round(w * mdw)
+}
+func columnPxToWidth(px, mdw float64) float64 {
+	if mdw <= 0 {
+		mdw = digitPx
+	}
+	return px / mdw
+}
+
 func widthToPx(w float64) float64  { return math.Round(w * digitPx) }
 func pxToWidth(px float64) float64 { return px / digitPx }
-func ptToPx(pt float64) float64    { return math.Round(pt * 4 / 3) }
+func ptToPx(pt float64) float64    { return pt * 4 / 3 }
 func pxToPt(px float64) float64    { return px * 3 / 4 }
 
 var borderStyles = []string{

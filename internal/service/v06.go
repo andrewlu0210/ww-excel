@@ -144,24 +144,26 @@ func (s *SheetService) SetValidation(ctx context.Context, sheet int, ranges []Ra
 // ---- Conditional formatting ----
 
 type CFRuleDTO struct {
-	Ranges     []RangeDTO `json:"ranges"`
-	Type       string     `json:"type"`
-	Op         string     `json:"op"`
-	Value1     string     `json:"value1"`
-	Value2     string     `json:"value2"`
-	Percent    bool       `json:"percent"`
-	Below      bool       `json:"below"`
-	Color      string     `json:"color"`
-	Fill       string     `json:"fill"`
-	Bold       bool       `json:"bold"`
-	Italic     bool       `json:"italic"`
-	Colors     []string   `json:"colors"`
-	StopIfTrue bool       `json:"stopIfTrue"`
+	DataBar    *model.CFDataBar `json:"dataBar,omitempty"`
+	IconSet    *model.CFIconSet `json:"iconSet,omitempty"`
+	Ranges     []RangeDTO       `json:"ranges"`
+	Type       string           `json:"type"`
+	Op         string           `json:"op"`
+	Value1     string           `json:"value1"`
+	Value2     string           `json:"value2"`
+	Percent    bool             `json:"percent"`
+	Below      bool             `json:"below"`
+	Color      string           `json:"color"`
+	Fill       string           `json:"fill"`
+	Bold       bool             `json:"bold"`
+	Italic     bool             `json:"italic"`
+	Colors     []string         `json:"colors"`
+	StopIfTrue bool             `json:"stopIfTrue"`
 }
 
 func (r CFRuleDTO) model() model.CFRule {
 	return model.CFRule{
-		Type: r.Type, Op: r.Op, Value1: r.Value1, Value2: r.Value2, Percent: r.Percent, Below: r.Below,
+		DataBar: r.DataBar, IconSet: r.IconSet, Type: r.Type, Op: r.Op, Value1: r.Value1, Value2: r.Value2, Percent: r.Percent, Below: r.Below,
 		Format: model.CFFormat{Color: r.Color, Fill: r.Fill, Bold: r.Bold, Italic: r.Italic},
 		Colors: r.Colors, StopIfTrue: r.StopIfTrue,
 	}
@@ -176,7 +178,7 @@ func (s *SheetService) CondFormats(ctx context.Context, sheet int) []CFRuleDTO {
 			return
 		}
 		for _, r := range sh.Layout.CondFormats {
-			dto := CFRuleDTO{Type: r.Type, Op: r.Op, Value1: r.Value1, Value2: r.Value2, Percent: r.Percent, Below: r.Below,
+			dto := CFRuleDTO{DataBar: r.DataBar, IconSet: r.IconSet, Type: r.Type, Op: r.Op, Value1: r.Value1, Value2: r.Value2, Percent: r.Percent, Below: r.Below,
 				Color: r.Format.Color, Fill: r.Format.Fill, Bold: r.Format.Bold, Italic: r.Format.Italic,
 				Colors: append([]string{}, r.Colors...), StopIfTrue: r.StopIfTrue, Ranges: []RangeDTO{}}
 			for _, rg := range r.Ranges {

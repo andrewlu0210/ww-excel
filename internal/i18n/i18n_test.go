@@ -66,7 +66,8 @@ func TestCoverage(t *testing.T) {
 	goDirs := []string{".", "internal/document", "internal/command", "internal/service", "internal/formula",
 		"internal/formula/parser", "internal/formula/lexer", "internal/formula/ast", "internal/formula/functions",
 		"internal/io/xlsxfile", "internal/printing"}
-	skip := map[string]bool{"fill.go": true, "benchservice.go": true}
+	// Font family identifiers are document metadata, not interface strings.
+	skip := map[string]bool{"fill.go": true, "benchservice.go": true, "fontmetrics_darwin.go": true}
 	goString := regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
 	for _, dir := range goDirs {
 		files, _ := filepath.Glob(filepath.Join(root, dir, "*.go"))

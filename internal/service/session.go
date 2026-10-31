@@ -9,6 +9,7 @@ import (
 	"ww-excel/internal/document"
 	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
+	"ww-excel/internal/numfmt"
 	"ww-excel/internal/recovery"
 )
 
@@ -36,6 +37,12 @@ type RangeDTO struct {
 func (r RangeDTO) model() model.Range { return model.Range{R0: r.R0, C0: r.C0, R1: r.R1, C1: r.C1} }
 
 type ChangedCell struct {
+	TextOnly       bool          `json:"textOnly,omitempty"`
+	HideValue      bool          `json:"hideValue,omitempty"`
+	Icon           *model.CFIcon `json:"icon,omitempty"`
+	BarSolid       bool          `json:"barSolid,omitempty"`
+	BarBorderColor string        `json:"barBorderColor,omitempty"`
+
 	Runs []TextRunDTO `json:"runs,omitempty"`
 	Row  int          `json:"row"`
 	Col  int          `json:"col"`
@@ -263,10 +270,11 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 			for _, p := range cells {
 				cell := sh.Get(p.row, p.col)
 				v, n, x, st, fc := cellView(wb, sh, p.row, p.col, cell)
-				cc := ChangedCell{Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)}
+				cc := ChangedCell{TextOnly: cell.Kind == model.KindNumber && numfmt.IsLiteral(cell.Num, wb.StyleTable().Get(st).NumFmt), Row: p.row, Col: p.col, V: v, N: n, X: x, St: st, Fc: fc, Runs: richTextDTO(cell.Rich, wb.StyleTable().Get(st).Font)}
 				if look != nil {
 					dto, _ := look.view(p.row, p.col, cell)
 					cc.St, cc.Bar, cc.Bc = dto.St, dto.Bar, dto.Bc
+					cc.TextOnly, cc.HideValue, cc.Icon, cc.BarSolid, cc.BarBorderColor = dto.TextOnly, dto.HideValue, dto.Icon, dto.BarSolid, dto.BarBorderColor
 				}
 				diff.Cells = append(diff.Cells, cc)
 			}

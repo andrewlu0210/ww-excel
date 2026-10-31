@@ -19,10 +19,38 @@ type Validation struct {
 	PromptTitle, Prompt string
 }
 
+// CFThreshold is a numeric, percentage, percentile or formula boundary.
+type CFThreshold struct {
+	Type   string `json:"type"`
+	Value  string `json:"value"`
+	Strict bool   `json:"strict,omitempty"`
+}
+type CFDataBar struct {
+	Minimum     CFThreshold `json:"minimum"`
+	Maximum     CFThreshold `json:"maximum"`
+	Solid       bool        `json:"solid"`
+	BorderColor string      `json:"borderColor,omitempty"`
+	HideValue   bool        `json:"hideValue,omitempty"`
+}
+type CFIcon struct {
+	Set   string `json:"set"`
+	Index int    `json:"index"`
+}
+type CFIconSet struct {
+	Set        string        `json:"set"`
+	Reverse    bool          `json:"reverse,omitempty"`
+	HideValue  bool          `json:"hideValue,omitempty"`
+	Thresholds []CFThreshold `json:"thresholds"`
+	Icons      []CFIcon      `json:"icons,omitempty"`
+}
+
 // CFRule is one conditional formatting rule. Rules are kept in
 // priority order; the first matching rule wins for each property.
 type CFRule struct {
-	Ranges []Range
+	Priority int
+	DataBar  *CFDataBar
+	IconSet  *CFIconSet
+	Ranges   []Range
 	// Type: cell, formula, top, bottom, average, duplicate, unique, text,
 	// blanks, no_blanks, errors, no_errors, 2_color_scale,
 	// 3_color_scale, data_bar.
@@ -90,6 +118,16 @@ func cloneCF(rs []CFRule) []CFRule {
 	for i, r := range rs {
 		r.Ranges = append([]Range(nil), r.Ranges...)
 		r.Colors = append([]string(nil), r.Colors...)
+		if r.DataBar != nil {
+			bar := *r.DataBar
+			r.DataBar = &bar
+		}
+		if r.IconSet != nil {
+			icons := *r.IconSet
+			icons.Thresholds = append([]CFThreshold(nil), icons.Thresholds...)
+			icons.Icons = append([]CFIcon(nil), icons.Icons...)
+			r.IconSet = &icons
+		}
 		out[i] = r
 	}
 	return out

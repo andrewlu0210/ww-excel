@@ -54,18 +54,20 @@ type fileStyleRef struct {
 }
 
 type fileLayout struct {
-	HideGridLines bool           `json:"hideGridLines,omitempty"`
-	DefaultRow    float64        `json:"defaultRow"`
-	DefaultCol    float64        `json:"defaultCol"`
-	Rows          []fileSize     `json:"rows,omitempty"`
-	Cols          []fileSize     `json:"cols,omitempty"`
-	RowStyles     []fileStyleRef `json:"rowStyles,omitempty"`
-	ColStyles     []fileStyleRef `json:"colStyles,omitempty"`
-	Merges        [][4]int       `json:"merges,omitempty"`
-	FreezeRows    int            `json:"freezeRows,omitempty"`
-	FreezeCols    int            `json:"freezeCols,omitempty"`
-	Filter        *fileFilter    `json:"filter,omitempty"`
-	Notes         []fileNote     `json:"notes,omitempty"`
+	Zoom             int            `json:"zoom,omitempty"`
+	ColumnDigitWidth float64        `json:"columnDigitWidth,omitempty"`
+	HideGridLines    bool           `json:"hideGridLines,omitempty"`
+	DefaultRow       float64        `json:"defaultRow"`
+	DefaultCol       float64        `json:"defaultCol"`
+	Rows             []fileSize     `json:"rows,omitempty"`
+	Cols             []fileSize     `json:"cols,omitempty"`
+	RowStyles        []fileStyleRef `json:"rowStyles,omitempty"`
+	ColStyles        []fileStyleRef `json:"colStyles,omitempty"`
+	Merges           [][4]int       `json:"merges,omitempty"`
+	FreezeRows       int            `json:"freezeRows,omitempty"`
+	FreezeCols       int            `json:"freezeCols,omitempty"`
+	Filter           *fileFilter    `json:"filter,omitempty"`
+	Notes            []fileNote     `json:"notes,omitempty"`
 	// Rules are stored as the model structs.
 	Validations []model.Validation `json:"validations,omitempty"`
 	CondFormats []model.CFRule     `json:"condFormats,omitempty"`
@@ -219,7 +221,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 }
 
 func writeLayout(l model.Layout) *fileLayout {
-	fl := &fileLayout{HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
+	fl := &fileLayout{Zoom: l.Zoom, ColumnDigitWidth: l.ColumnDigitWidth, HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
 	if f := l.Filter; f != nil {
 		fl.Filter = &fileFilter{Range: [4]int{f.Range.R0, f.Range.C0, f.Range.R1, f.Range.C1}, Cols: f.Cols}
 	}
@@ -257,6 +259,8 @@ func writeLayout(l model.Layout) *fileLayout {
 
 func readLayout(fl *fileLayout) model.Layout {
 	l := model.NewLayout()
+	l.Zoom = fl.Zoom
+	l.ColumnDigitWidth = fl.ColumnDigitWidth
 	if fl.DefaultRow > 0 {
 		l.DefaultRow = fl.DefaultRow
 	}

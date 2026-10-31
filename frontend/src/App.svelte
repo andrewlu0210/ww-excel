@@ -130,7 +130,7 @@
     if (i < 0) return;
     info = await sheetApi.info(i);
     active = i;
-    zoom = zooms.get(sheets[i]);
+    zoom = zooms.get(sheets[i], info.zoom || 100);
     generation++;
   }
 

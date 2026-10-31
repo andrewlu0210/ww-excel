@@ -43,7 +43,7 @@
     copyRange?: Range | null;
     fillPreview?: Range | null;
     // A filter button was clicked: its column and where to open the menu.
-    onfilterbutton?: (e: { col: number; x: number; y: number }) => void;
+    onfilterbutton?: (e: { row:number; col: number; x: number; y: number }) => void;
     oncontext?: (e: ContextRequest) => void;
     // The cell under the idle pointer (null outside cells), with its
     // rectangle in host coordinates.
@@ -352,7 +352,7 @@
       if (btn) {
         scroller.releasePointerCapture(e.pointerId);
         const rect = host.getBoundingClientRect();
-        onfilterbutton?.({ col: btn.col, x: rect.left + transform.toScreen(btn.x), y: rect.top + transform.toScreen(btn.y) });
+        onfilterbutton?.({ row:btn.row,col: btn.col, x: rect.left + transform.toScreen(btn.x), y: rect.top + transform.toScreen(btn.y) });
         return;
       }
     }
@@ -366,14 +366,14 @@
   }
 
   // The filter dropdown button under a point, if any.
-  function filterButtonAt(x: number, y: number): { col: number; x: number; y: number } | null {
+  function filterButtonAt(x: number, y: number): { row:number; col: number; x: number; y: number } | null {
     const pos = posAt(x, y);
     const f=[...(look.tableFilters ?? []),...(look.filter ? [look.filter] : [])].find(r=>pos.row===r.r0 && pos.col>=r.c0 && pos.col<=r.c1);
     if (!f) return null;
     if (pos.row !== f.r0 || pos.col < f.c0 || pos.col > f.c1) return null;
     const b = filterButton(frozenRect(rows, cols, { r0: pos.row, c0: pos.col, r1: pos.row, c1: pos.col }, look.freeze, sx, sy));
     if (x < b.x || x > b.x + b.w || y < b.y || y > b.y + b.h) return null;
-    return { col: pos.col, x: b.x, y: b.y + b.h };
+    return { row:pos.row,col: pos.col, x: b.x, y: b.y + b.h };
   }
 
   function onContextMenu(e: MouseEvent): void {

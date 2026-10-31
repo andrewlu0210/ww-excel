@@ -76,3 +76,11 @@ describe('fit selection', () => {
     expect(fitZoom(1200, 800, 0, 0)).toBe(100);
   });
 });
+
+it('uses workbook zoom until a user chooses a worksheet zoom',()=>{
+ const zooms=new SheetZooms();
+ expect(zooms.get('Imported',125)).toBe(125);
+ zooms.set('Imported',70);
+ expect(zooms.get('Imported',125)).toBe(70);
+ zooms.clear();expect(zooms.get('Imported',125)).toBe(125);
+});

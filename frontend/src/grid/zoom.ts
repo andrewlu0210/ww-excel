@@ -35,7 +35,7 @@ export class ZoomTransform {
 export class SheetZooms {
   private values = new Map<string, number>();
 
-  get(name: string): number { return this.values.get(name) ?? 100; }
+  get(name: string, initial=100): number { return this.values.get(name) ?? normalizeZoom(initial); }
   set(name: string, value: number): void { this.values.set(name, normalizeZoom(value)); }
   clear(): void { this.values.clear(); }
 

@@ -38,13 +38,15 @@ func Read(path string) (*model.Workbook, *excelize.File, error) {
 }
 
 type reader struct {
-	tableBorders map[string]model.BorderLine
-	f            *excelize.File
-	parts        map[string]*zip.File
-	wb           *model.Workbook
-	styles       map[int]uint32
-	sst          []string
-	richSST      map[int]*model.RichText
+	digitWidth       float64
+	tableBorders     map[string]model.BorderLine
+	tableAppearances map[string]*model.TableAppearance
+	f                *excelize.File
+	parts            map[string]*zip.File
+	wb               *model.Workbook
+	styles           map[int]uint32
+	sst              []string
+	richSST          map[int]*model.RichText
 }
 
 func load(f *excelize.File, file string) (*model.Workbook, error) {
@@ -63,6 +65,7 @@ func load(f *excelize.File, file string) (*model.Workbook, error) {
 		defStyle.Font = model.DefaultFont
 	}
 	r := &reader{f: f, parts: parts, wb: &model.Workbook{Styles: model.NewStyleTable(defStyle)}, styles: map[int]uint32{0: 0}}
+	r.digitWidth = fontDigitWidth(normalColumnFont(parts, defStyle.Font))
 	if r.sst, r.richSST, err = readSharedStrings(parts, f); err != nil {
 		return nil, err
 	}
@@ -254,11 +257,13 @@ type sheetState struct {
 }
 
 type rawRule struct {
+	bar      *rawCFDataBar
 	rule     model.CFRule
 	priority int
 	dxf      int
 	formulas []string
 	colors   []string
+	id       string
 }
 
 // shared is a shared formula's master: its position and parsed text.
@@ -271,6 +276,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 	sh := model.NewSheet(name)
 	sh.SourceName = name
 	l := &sh.Layout
+	l.ColumnDigitWidth = r.digitWidth
 	p, ok := r.parts[part]
 	if !ok {
 		return sh, nil
@@ -315,16 +321,19 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 				}
 				if v := attr(t, "defaultColWidth"); v != "" {
 					if w, err := strconv.ParseFloat(v, 64); err == nil && w > 0 {
-						l.DefaultCol = widthToPx(w)
+						l.DefaultCol = columnWidthToPx(w, r.digitWidth)
 					}
 				} else if v := attr(t, "baseColWidth"); v != "" {
 					// Excel's default width is the base width plus padding.
 					if w, err := strconv.ParseFloat(v, 64); err == nil && w > 0 {
-						l.DefaultCol = widthToPx(w + 0.71)
+						l.DefaultCol = columnWidthToPx(w+0.71, r.digitWidth)
 					}
 				}
 			case "sheetView":
 				if attr(t, "workbookViewId") == "0" || attr(t, "workbookViewId") == "" {
+					if zoom := atoi(attr(t, "zoomScale")); zoom >= 10 && zoom <= 400 {
+						l.Zoom = zoom
+					}
 					l.HideGridLines = attr(t, "showGridLines") == "0" || attr(t, "showGridLines") == "false"
 				}
 			case "pane":
@@ -340,12 +349,12 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 				width, _ := strconv.ParseFloat(attr(t, "width"), 64)
 				hidden := attr(t, "hidden") == "1" || attr(t, "hidden") == "true"
 				styleID := atoi(attr(t, "style"))
-				custom := width > 0 && widthToPx(width) != l.DefaultCol
+				custom := width > 0 && columnWidthToPx(width, r.digitWidth) != l.DefaultCol
 				for c := lo; c <= hi; c++ {
 					if custom || hidden {
 						px := l.DefaultCol
 						if width > 0 {
-							px = widthToPx(width)
+							px = columnWidthToPx(width, r.digitWidth)
 						}
 						l.Cols[c] = model.Size{Px: px, Hidden: hidden}
 					}
@@ -435,7 +444,11 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 				text.Reset()
 				collect = true
 			case "conditionalFormatting":
-				st.cfRanges = parseSqref(attr(t, "sqref"))
+				var group rawConditionalGroup
+				if err := decodeRawElement(dec, t, &group); err != nil {
+					return nil, err
+				}
+				st.cfs = append(st.cfs, r.readConditionalGroup(group)...)
 			case "cfRule":
 				if inExt > 0 {
 					continue
@@ -595,7 +608,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 		l.FreezeRows, l.FreezeCols = max(st.ySplit, 0), max(st.xSplit, 0)
 	}
 	l.Validations = st.dvs
-	l.CondFormats = r.condFormats(st.cfs)
+	l.CondFormats = r.condFormats(mergeExtendedConditions(st.cfs))
 	r.readNotes(sh, name)
 	for _, dn := range names {
 		if dn.Scope != name {
@@ -627,6 +640,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 	for _, rid := range st.tableRIDs {
 		if t, ok := readTable(r.parts, relTarget(r.parts, part, rid)); ok {
 			t.RowBorder = r.tableRowBorder(t.Style)
+			t.Appearance = r.tableAppearance(t.Style)
 			l.Tables = append(l.Tables, t)
 		}
 	}
@@ -774,6 +788,8 @@ func readTable(parts map[string]*zip.File, name string) (model.Table, bool) {
 		Info       struct {
 			Name    string `xml:"name,attr"`
 			Stripes string `xml:"showRowStripes,attr"`
+			First   string `xml:"showFirstColumn,attr"`
+			Last    string `xml:"showLastColumn,attr"`
 		} `xml:"tableStyleInfo"`
 	}
 	if name == "" || decodePart(parts, name, &t) != nil || t.Name == "" {
@@ -783,7 +799,7 @@ func readTable(parts map[string]*zip.File, name string) (model.Table, bool) {
 	if len(rs) != 1 {
 		return model.Table{}, false
 	}
-	return model.Table{Name: t.Name, Range: rs[0], Style: t.Info.Name, TotalsRow: t.Totals > 0, NoBands: t.Info.Stripes == "0", NoFilter: t.AutoFilter == nil}, true
+	return model.Table{Name: t.Name, Range: rs[0], Style: t.Info.Name, TotalsRow: t.Totals > 0, NoBands: t.Info.Stripes == "0", NoFilter: t.AutoFilter == nil, FirstColumn: t.Info.First == "1" || t.Info.First == "true", LastColumn: t.Info.Last == "1" || t.Info.Last == "true"}, true
 }
 
 // cfRuleFromAttrs maps an OOXML cfRule to our rule (without formulas).
@@ -831,9 +847,10 @@ func (r *reader) condFormats(raw []rawRule) []model.CFRule {
 	var out []model.CFRule
 	for _, rr := range raw {
 		rule := rr.rule
+		rule.Priority = rr.priority
 		switch rule.Type {
 		case "":
-			continue // icon sets, time periods: not supported
+			continue // Unsupported rule types.
 		case "cell":
 			if len(rr.formulas) > 0 {
 				rule.Value1 = rr.formulas[0]

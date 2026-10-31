@@ -122,16 +122,20 @@ type FilterValue struct {
 }
 
 // FilterForColumn also exposes a table's filter before criteria are applied.
-func (d *Document) FilterForColumn(sheet, col int) *model.AutoFilter {
+func (d *Document) FilterForColumn(sheet, col int, headerRows ...int) *model.AutoFilter {
+	headerRow := -1
+	if len(headerRows) > 0 {
+		headerRow = headerRows[0]
+	}
 	if sheet < 0 || sheet >= len(d.wb.Sheets) {
 		return nil
 	}
 	l := &d.wb.Sheets[sheet].Layout
-	if f := l.Filter; f != nil && col >= f.Range.C0 && col <= f.Range.C1 {
+	if f := l.Filter; f != nil && col >= f.Range.C0 && col <= f.Range.C1 && (headerRow < 0 || headerRow == f.Range.R0) {
 		return f
 	}
 	for _, t := range l.Tables {
-		if !t.NoFilter && col >= t.Range.C0 && col <= t.Range.C1 {
+		if !t.NoFilter && col >= t.Range.C0 && col <= t.Range.C1 && (headerRow < 0 || headerRow == t.Range.R0) {
 			rg := t.Range
 			rg.R1 = t.DataRows().R1
 			return &model.AutoFilter{Range: rg, Cols: map[int][]string{}}
@@ -142,12 +146,12 @@ func (d *Document) FilterForColumn(sheet, col int) *model.AutoFilter {
 
 // FilterValues lists the distinct display values of a filter column
 // (data rows only), sorted like an ascending sort; "" stands for blanks.
-func (d *Document) FilterValues(sheet, col int, display DisplayFunc) []FilterValue {
+func (d *Document) FilterValues(sheet, col int, display DisplayFunc, headerRows ...int) []FilterValue {
 	if sheet < 0 || sheet >= len(d.wb.Sheets) {
 		return nil
 	}
 	sh := d.wb.Sheets[sheet]
-	f := d.FilterForColumn(sheet, col)
+	f := d.FilterForColumn(sheet, col, headerRows...)
 	if f == nil || col < f.Range.C0 || col > f.Range.C1 {
 		return nil
 	}
@@ -187,12 +191,12 @@ func (d *Document) FilterValues(sheet, col int, display DisplayFunc) []FilterVal
 
 // FilterCommand sets the values a filter column shows (nil = all) and
 // hides the data rows that fail any column's criteria.
-func (d *Document) FilterCommand(sheet, col int, shown []string, display DisplayFunc) (command.Command, error) {
+func (d *Document) FilterCommand(sheet, col int, shown []string, display DisplayFunc, headerRows ...int) (command.Command, error) {
 	if sheet < 0 || sheet >= len(d.wb.Sheets) {
 		return nil, errors.New("無效的工作表")
 	}
 	sh := d.wb.Sheets[sheet]
-	f := d.FilterForColumn(sheet, col)
+	f := d.FilterForColumn(sheet, col, headerRows...)
 	if f == nil || col < f.Range.C0 || col > f.Range.C1 {
 		return nil, errors.New("這一欄沒有篩選")
 	}

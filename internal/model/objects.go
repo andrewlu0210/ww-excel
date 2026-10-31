@@ -38,6 +38,7 @@ type Image struct {
 // Chart is a chart linked to cells. Series references are formulas
 // without "=", usually absolute references with the sheet name.
 type Chart struct {
+	PlotArea *ChartPlotArea
 	// Type: column, bar, line, pie, doughnut, scatter, area.
 	Type         string
 	ValueAxis    *ChartAxis
@@ -50,6 +51,33 @@ type Chart struct {
 	XTitle       string
 	YTitle       string
 	Stacked      bool
+}
+
+type ChartPlotArea struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+type ChartGradientStop struct {
+	Position float64 `json:"position"`
+	Color    string  `json:"color"`
+}
+type ChartGradient struct {
+	Angle float64             `json:"angle"`
+	Stops []ChartGradientStop `json:"stops"`
+}
+type ChartShadow struct {
+	Color   string  `json:"color"`
+	Opacity float64 `json:"opacity"`
+	Blur    float64 `json:"blur"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+}
+type ChartPointStyle struct {
+	Gradient   *ChartGradient `json:"gradient,omitempty"`
+	Shadow     *ChartShadow   `json:"shadow,omitempty"`
+	LineHidden bool           `json:"lineHidden,omitempty"`
 }
 
 type ChartAxis struct {
@@ -81,12 +109,13 @@ type ChartLabelPoint struct {
 }
 
 type ChartSeries struct {
-	CategoryLabels []string       `json:"categoryLabels,omitempty"`
-	Color          string         `json:"color,omitempty"`
-	PointColors    map[int]string `json:"pointColors,omitempty"`
-	Labels         *ChartLabels   `json:"labels,omitempty"`
-	Name           string         // a reference to the name cell, or "" (or a quoted literal)
-	Categories     string         // x labels (scatter: x values)
+	PointStyles    map[int]ChartPointStyle `json:"pointStyles,omitempty"`
+	CategoryLabels []string                `json:"categoryLabels,omitempty"`
+	Color          string                  `json:"color,omitempty"`
+	PointColors    map[int]string          `json:"pointColors,omitempty"`
+	Labels         *ChartLabels            `json:"labels,omitempty"`
+	Name           string                  // a reference to the name cell, or "" (or a quoted literal)
+	Categories     string                  // x labels (scatter: x values)
 	Values         string
 }
 
@@ -95,6 +124,10 @@ func (c *Chart) clone() *Chart {
 		return nil
 	}
 	out := *c
+	if c.PlotArea != nil {
+		layout := *c.PlotArea
+		out.PlotArea = &layout
+	}
 	cloneAxis := func(a *ChartAxis) *ChartAxis {
 		if a == nil {
 			return nil
@@ -114,6 +147,21 @@ func (c *Chart) clone() *Chart {
 	out.CategoryAxis = cloneAxis(c.CategoryAxis)
 	out.Series = append([]ChartSeries(nil), c.Series...)
 	for i, s := range c.Series {
+		if s.PointStyles != nil {
+			out.Series[i].PointStyles = make(map[int]ChartPointStyle, len(s.PointStyles))
+			for k, style := range s.PointStyles {
+				if style.Gradient != nil {
+					g := *style.Gradient
+					g.Stops = append([]ChartGradientStop(nil), g.Stops...)
+					style.Gradient = &g
+				}
+				if style.Shadow != nil {
+					sh := *style.Shadow
+					style.Shadow = &sh
+				}
+				out.Series[i].PointStyles[k] = style
+			}
+		}
 		if s.CategoryLabels != nil {
 			out.Series[i].CategoryLabels = append([]string{}, s.CategoryLabels...)
 		}

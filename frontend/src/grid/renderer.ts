@@ -5,6 +5,7 @@ import { AxisLayout, colName } from './layout';
 import { current, isFullCols, isFullRows, isSingleCell, type Range, type Selection } from './selection';
 import { LINE_HEIGHT, TextCache } from './text';
 import { drawRichLines, layoutRichText, styledRuns, type RichLine } from './richtext';
+import { drawConditionalIcon, drawDataBar } from './conditional';
 import { fontEpoch } from '../stores/fontLoader';
 
 export const HEADER_H = 22;
@@ -473,15 +474,7 @@ export class GridRenderer extends Layer {
           this.fillBackground(left, top, right - left, bottom - top);
         }
         const bar = this.cache.cell(r, c)?.bar;
-        if (bar && right > left) {
-          // Data bar: a gradient from the bar color to transparent.
-          const w = Math.max(0, (right - left - 4) * bar.len);
-          const g = ctx.createLinearGradient(left + 2, 0, left + 2 + Math.max(w, 1), 0);
-          g.addColorStop(0, bar.color);
-          g.addColorStop(1, bar.color + '33');
-          ctx.fillStyle = g;
-          ctx.fillRect(left + 2, top + 2, w, bottom - top - 5);
-        }
+        if (bar && right > left) drawDataBar(ctx, bar, left, top, right - left, bottom - top);
       }
     }
     for (const m of merges) {
@@ -563,7 +556,7 @@ export class GridRenderer extends Layer {
       for (let c = vr.c0; c <= vr.c1; c++) {
         if (covered.has(r * 16384 + c)) continue;
         const cell = this.cache.cell(r, c);
-        if (!cell || cell.text === '') continue;
+        if (!cell || (cell.text === '' && !cell.icon)) continue;
         const left = xs[c - vr.c0];
         const right = xs[c - vr.c0 + 1];
         if (right === left) continue;
@@ -574,7 +567,7 @@ export class GridRenderer extends Layer {
     }
     for (const m of merges) {
       const cell = this.cache.cell(m.r0, m.c0);
-      if (!cell || cell.text === '') continue;
+      if (!cell || (cell.text === '' && !cell.icon)) continue;
       const rc = rangeRect(this.rows, this.cols, m, sx, sy);
       this.cellText(cell, styleStore.get(this.styleAt(m.r0, m.c0, cell)), rc.x, rc.y, rc.x + rc.w, rc.y + rc.h, null);
     }
@@ -607,7 +600,21 @@ export class GridRenderer extends Layer {
     const px = st?.fontPx ?? 14.67;
     const indent = (d?.indent ?? 0) * INDENT_PX;
     const pad = CELL_PAD + indent;
-    const cellW = right - left;
+    let cellW = right - left;
+    let iconDrawn = false;
+    if (cell.icon) {
+      const size = Math.max(1, Math.min(10, cellW - 4, bottom - top - 4));
+      iconDrawn = drawConditionalIcon(ctx, cell.icon, left + 3, top + (bottom - top - size) / 2, size);
+      if (iconDrawn) {
+        left += size + 5;
+        cellW = right - left;
+        // In a narrow status column the icon occupies all available space.
+        if (this.text.width(font, cell.text) > cellW - pad * 2) return;
+      }
+    }
+    // Unsupported icons fall back to text; bars and supported icon-only
+    // rules keep their intentional value hiding.
+    if (cell.hideValue && (!cell.icon || iconDrawn)) return;
     let align = d?.alignH ?? '';
     if (align === '' || align === 'general') align = cell.numeric ? 'right' : cell.center ? 'center' : 'left';
     if (align === 'justify' || align === 'distributed' || align === 'fill') align = 'left';
@@ -650,7 +657,7 @@ export class GridRenderer extends Layer {
       const text = cell.text.replace(/\n/g, ' ');
       const tw = this.text.width(font, text);
       if (tw > cellW - pad * 2) {
-        if (cell.numeric) {
+        if (cell.numeric && !cell.textOnly) {
           // Numbers never overflow: Excel shows #### instead.
           const hashW = this.text.width(font, '#');
           lines = ['#'.repeat(Math.max(1, Math.floor((cellW - 2) / hashW)))];
