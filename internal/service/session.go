@@ -101,10 +101,11 @@ type Emitter func(name string, data any)
 
 // Session owns the open document. Both services share it.
 type Session struct {
-	mu           sync.RWMutex
-	formatSample *document.FormatSample
-	doc          *document.Document
-	emit         Emitter
+	confirmedSaveRisks map[string]bool
+	mu                 sync.RWMutex
+	formatSample       *document.FormatSample
+	doc                *document.Document
+	emit               Emitter
 
 	// OnState is called after every state change, e.g. to update the
 	// window title and menu labels. Optional.
@@ -306,6 +307,7 @@ func (s *Session) replace(doc *document.Document) {
 	s.mu.Lock()
 	old := s.doc
 	s.doc = doc
+	s.confirmedSaveRisks = nil
 	s.formatSample = nil
 	s.stylesSent = doc.Workbook().StyleTable().Len()
 	state := s.stateLocked()

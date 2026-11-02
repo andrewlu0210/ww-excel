@@ -848,5 +848,22 @@
  "（空格）": "(Blanks)",
  "（空白）": "(Blank)",
  "＋ 新增層級": "+ Add Level",
- "＋ 新增數列": "+ Add Series"
+ "＋ 新增數列": "+ Add Series",
+ "CSV 只保存第一張工作表「%s」；其餘 %d 張工作表不會寫入檔案。": "CSV saves only the first sheet, \"%s\"; the other %d sheets will not be written.",
+ "工作表「%s」的公式只會保存目前計算結果，公式本身不會保留。": "Formulas on sheet \"%s\" will be saved as their current results; the formulas will not be retained.",
+ "工作表「%s」的字型、色彩、數值格式、合併儲存格與欄寬列高不會保留；日期與百分比會輸出為底層數值。": "Fonts, colors, number formats, merged cells and row/column sizes on sheet \"%s\" will not be retained; dates and percentages will be exported as underlying numeric values.",
+ "工作表「%s」的圖表、圖片與圖形不會寫入 CSV。": "Charts, pictures and shapes on sheet \"%s\" will not be written to CSV.",
+ "工作表「%s」的註解、資料規則、表格、篩選、凍結窗格、列印設定與具名範圍不會保留。": "Notes, data rules, tables, filters, frozen panes, print settings and defined names on sheet \"%s\" will not be retained.",
+ "未命名圖表": "Untitled chart",
+ "工作表「%s」的圖表「%s」（物件 %d）會重新寫入，原檔中尚未支援的進階格式可能簡化。": "On sheet \"%s\", chart \"%s\" (object %d) will be rewritten; unsupported advanced formatting from the source may be simplified.",
+ "無法另存副本": "Cannot save a copy",
+ "副本必須使用不同的檔名或位置，才能保留原始檔案。": "Choose a different file name or location for the copy to preserve the original file.",
+ " 副本": " Copy",
+ "這次儲存有以下相容性影響：": "This save has the following compatibility impacts:",
+ "另有 %d 項相同類型的影響。": "There are %d additional impacts of the same types.",
+ "另存副本可保留原始檔案，但副本仍可能有上述影響。": "Saving a copy preserves the original file, but the copy may still have the impacts listed above.",
+ "本次開啟期間，相同儲存位置及相同影響不再重複提醒。": "During this session, the same impacts at the same save location will not be shown again after a successful save.",
+ "儲存「%s」的相容性提示": "Compatibility notice for saving \"%s\"",
+ "繼續儲存": "Save Anyway",
+ "另存副本…": "Save a Copy…"
 }

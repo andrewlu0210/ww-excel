@@ -57,10 +57,11 @@ type Document struct {
 
 	// The xlsx file the workbook came from (or was last saved to), kept
 	// for in-place saves; with what changed since.
-	xlsx         *excelize.File
-	changedCells map[*model.Sheet]map[[2]int]bool
-	layoutBase   map[*model.Sheet]model.Layout
-	layoutDirty  map[*model.Sheet]bool
+	xlsx           *excelize.File
+	importedCharts map[*model.Sheet]map[int]bool
+	changedCells   map[*model.Sheet]map[[2]int]bool
+	layoutBase     map[*model.Sheet]model.Layout
+	layoutDirty    map[*model.Sheet]bool
 	// Row/column insertions and deletions since the last save, replayed
 	// on the source file before writing changes.
 	shifts map[*model.Sheet][]xlsxfile.Shift
@@ -104,6 +105,17 @@ func Load(path string) (*Document, error) {
 		}
 		d := FromWorkbook(wb, path)
 		d.xlsx = src
+		d.importedCharts = map[*model.Sheet]map[int]bool{}
+		for _, sh := range wb.Sheets {
+			for _, obj := range sh.Layout.Objects {
+				if obj.Chart != nil {
+					if d.importedCharts[sh] == nil {
+						d.importedCharts[sh] = map[int]bool{}
+					}
+					d.importedCharts[sh][obj.ID] = true
+				}
+			}
+		}
 		return d, nil
 	case FormatCSV:
 		return loadCSV(path)
@@ -194,6 +206,14 @@ func (d *Document) saveXLSX(path string) error {
 		d.xlsx.Close()
 	}
 	d.xlsx = f
+	// Drop identities of deleted imported charts before IDs can be reused.
+	for sh, ids := range d.importedCharts {
+		for id := range ids {
+			if obj := sh.Layout.ObjectByID(id); obj == nil || obj.Chart == nil {
+				delete(ids, id)
+			}
+		}
+	}
 	d.resetChanges()
 	return nil
 }

@@ -313,6 +313,10 @@ type fakeDialogs struct {
 	errors   []string
 }
 
+func (f *fakeDialogs) AskCompatibility(string, string) CompatibilityChoice {
+	return CompatibilityCancel
+}
+
 func (f *fakeDialogs) AskSave(string) SaveChoice         { f.asked++; return f.choice }
 func (f *fakeDialogs) PickOpen() (string, error)         { return f.openPath, nil }
 func (f *fakeDialogs) PickSave(string) (string, error)   { return f.savePath, nil }

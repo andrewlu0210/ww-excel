@@ -191,16 +191,20 @@ tasks:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
   generate:icons:
-    summary: Generates Windows and macOS icons while preserving the PNG alpha channel.
+    summary: Generates rounded desktop icons from the full-bleed artwork.
     run: once
     dir: build
     sources:
-      - "appicon.png"
+      - "appicon.icon/Assets/appicon.png"
+      - "../scripts/round-icon.swift"
     generates:
+      - "appicon.png"
       - "darwin/icons.icns"
       - "windows/icon.ico"
     cmds:
-      # Icon Composer adds an opaque backing plate; use the PNG for transparent icons.
+      # Apply the corner mask without adding padding around the artwork.
+      - cmd: swift -module-cache-path /private/tmp/ww-excel-swift-cache ../scripts/round-icon.swift appicon.icon/Assets/appicon.png appicon.png
+        platforms: [darwin]
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico
 
   dev:frontend:

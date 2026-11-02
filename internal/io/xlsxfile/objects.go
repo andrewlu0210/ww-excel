@@ -27,25 +27,7 @@ func (w *writer) objects(sh *model.Sheet, old, cur []model.Object) error {
 	for _, o := range old {
 		byID[o.ID] = o
 	}
-	dirty := map[string]bool{}
-	for _, o := range cur {
-		if prev, ok := byID[o.ID]; ok && reflect.DeepEqual(prev, o) {
-			continue
-		}
-		dirty[cellOf(o.Anchor)] = true
-		if prev, ok := byID[o.ID]; ok {
-			dirty[cellOf(prev.Anchor)] = true
-		}
-	}
-	curIDs := map[int]bool{}
-	for _, o := range cur {
-		curIDs[o.ID] = true
-	}
-	for _, o := range old {
-		if !curIDs[o.ID] {
-			dirty[cellOf(o.Anchor)] = true
-		}
-	}
+	dirty := changedObjectAnchors(old, cur)
 	for cell := range dirty {
 		if err := w.f.DeleteChart(sh.Name, cell); err != nil {
 			return err
@@ -68,6 +50,48 @@ func (w *writer) objects(sh *model.Sheet, old, cur []model.Object) error {
 		}
 	}
 	return nil
+}
+
+// RewrittenCharts shares the writer's anchor-based replacement rules with
+// the save compatibility check, including unchanged charts sharing an anchor.
+func RewrittenCharts(old, cur []model.Object) []model.Object {
+	dirty := changedObjectAnchors(old, cur)
+	var charts []model.Object
+	for _, o := range cur {
+		cell, _ := excelize.CoordinatesToCellName(o.Anchor.Col+1, o.Anchor.Row+1)
+		if o.Chart != nil && dirty[cell] {
+			charts = append(charts, o)
+		}
+	}
+	return charts
+}
+
+func changedObjectAnchors(old, cur []model.Object) map[string]bool {
+	cellOf := func(a model.Anchor) string { n, _ := excelize.CoordinatesToCellName(a.Col+1, a.Row+1); return n }
+	byID := map[int]model.Object{}
+	for _, o := range old {
+		byID[o.ID] = o
+	}
+	dirty := map[string]bool{}
+	for _, o := range cur {
+		if prev, ok := byID[o.ID]; ok && reflect.DeepEqual(prev, o) {
+			continue
+		}
+		dirty[cellOf(o.Anchor)] = true
+		if prev, ok := byID[o.ID]; ok {
+			dirty[cellOf(prev.Anchor)] = true
+		}
+	}
+	curIDs := map[int]bool{}
+	for _, o := range cur {
+		curIDs[o.ID] = true
+	}
+	for _, o := range old {
+		if !curIDs[o.ID] {
+			dirty[cellOf(o.Anchor)] = true
+		}
+	}
+	return dirty
 }
 
 func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {

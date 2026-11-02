@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -21,8 +23,17 @@ const (
 	ChoiceCancel
 )
 
+type CompatibilityChoice int
+
+const (
+	CompatibilityCancel CompatibilityChoice = iota
+	CompatibilitySave
+	CompatibilityCopy
+)
+
 // Dialogs abstracts native dialogs so the service can be tested.
 type Dialogs interface {
+	AskCompatibility(docName, message string) CompatibilityChoice
 	// AskSave asks whether to save changes before discarding them.
 	AskSave(docName string) SaveChoice
 	// PickOpen returns "" when cancelled.
@@ -157,6 +168,10 @@ func (ds *DocumentService) SaveAs(ctx context.Context) bool {
 	if name == document.UntitledName {
 		name += ".xlsx"
 	}
+	return ds.saveAs(ctx, name, "")
+}
+
+func (ds *DocumentService) saveAs(ctx context.Context, name, protectedPath string) bool {
 	path, err := ds.dialogs.PickSave(name)
 	if err != nil {
 		ds.dialogs.ShowError("無法儲存檔案", err.Error())
@@ -168,24 +183,112 @@ func (ds *DocumentService) SaveAs(ctx context.Context) bool {
 	if filepath.Ext(path) == "" {
 		path += ".xlsx"
 	}
+	if protectedPath != "" && sameSavePath(path, protectedPath) {
+		ds.dialogs.ShowError("無法另存副本", "副本必須使用不同的檔名或位置，才能保留原始檔案。")
+		return false
+	}
 	return ds.saveTo(ctx, path)
 }
 
 func (ds *DocumentService) saveTo(ctx context.Context, path string) bool {
-	// Saving only reads the workbook, but it marks the history saved and
-	// may change the path, so take the write lock.
-	ds.at(ctx).mu.Lock()
-	err := ds.at(ctx).doc.SaveAs(path)
-	ds.at(ctx).mu.Unlock()
-	if err != nil {
-		ds.dialogs.ShowError(fmt.Sprintf("無法儲存「%s」", filepath.Base(path)), err.Error())
-		return false
+	s := ds.at(ctx)
+	for {
+		s.mu.RLock()
+		doc, version := s.doc, s.doc.Version()
+		risks := doc.SaveRisks(path)
+		encoded, _ := json.Marshal(risks)
+		absolute, _ := filepath.Abs(path)
+		key := absolute + "\n" + string(encoded)
+		confirmed := s.confirmedSaveRisks[key]
+		sourcePath, name := doc.Path(), doc.Name()
+		s.mu.RUnlock()
+
+		if len(risks) > 0 && !confirmed {
+			choice := ds.dialogs.AskCompatibility(filepath.Base(path), compatibilityMessage(risks))
+			if choice != CompatibilitySave && choice != CompatibilityCopy {
+				return false
+			}
+			s.mu.RLock()
+			sameDoc, sameVersion := s.doc == doc, s.doc.Version() == version
+			s.mu.RUnlock()
+			if !sameDoc {
+				return false
+			}
+			if !sameVersion {
+				continue
+			}
+			switch choice {
+			case CompatibilitySave:
+			case CompatibilityCopy:
+				// Prefer XLSX for a CSV copy so formulas and formatting can be kept.
+				ext := filepath.Ext(path)
+				if document.FormatForPath(path) == document.FormatCSV {
+					ext = ".xlsx"
+				}
+				name = strings.TrimSuffix(name, filepath.Ext(name)) + i18n.T(" 副本") + ext
+				if sourcePath == "" {
+					sourcePath = path
+				}
+				return ds.saveAs(ctx, name, sourcePath)
+			default:
+				return false
+			}
+		}
+
+		// Native dialogs must run without the document lock. Recheck the
+		// document and edits before writing the state the user approved.
+		s.mu.Lock()
+		if s.doc != doc {
+			s.mu.Unlock()
+			return false
+		}
+		if s.doc.Version() != version {
+			s.mu.Unlock()
+			continue
+		}
+		err := doc.SaveAs(path)
+		if err == nil && len(risks) > 0 {
+			if s.confirmedSaveRisks == nil {
+				s.confirmedSaveRisks = map[string]bool{}
+			}
+			s.confirmedSaveRisks[key] = true
+		}
+		s.mu.Unlock()
+		if err != nil {
+			ds.dialogs.ShowError(fmt.Sprintf("無法儲存「%s」", filepath.Base(path)), err.Error())
+			return false
+		}
+		break
 	}
 	ds.at(ctx).PublishState()
 	if ds.Opened != nil {
 		ds.Opened(path)
 	}
 	return true
+}
+
+func compatibilityMessage(risks []document.SaveRisk) string {
+	lines := []string{i18n.T("這次儲存有以下相容性影響："), ""}
+	for i, risk := range risks {
+		if i == 6 {
+			lines = append(lines, fmt.Sprintf(i18n.T("另有 %d 項相同類型的影響。"), len(risks)-i))
+			break
+		}
+		lines = append(lines, "• "+risk.Message)
+	}
+	lines = append(lines, "", i18n.T("另存副本可保留原始檔案，但副本仍可能有上述影響。"), i18n.T("本次開啟期間，相同儲存位置及相同影響不再重複提醒。"))
+	return strings.Join(lines, "\n")
+}
+
+func sameSavePath(a, b string) bool {
+	aa, _ := filepath.Abs(a)
+	bb, _ := filepath.Abs(b)
+	if aa == bb {
+		return true
+	}
+	ai, ae := os.Stat(a)
+	bi, be := os.Stat(b)
+	return ae == nil && be == nil && os.SameFile(ai, bi)
 }
 
 // RequestClose is called by the frontend after it has committed any

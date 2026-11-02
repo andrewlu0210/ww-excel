@@ -16,6 +16,23 @@ type WailsDialogs struct {
 	Icon   []byte
 }
 
+func (w WailsDialogs) AskCompatibility(docName, message string) CompatibilityChoice {
+	answer := make(chan CompatibilityChoice, 1)
+	d := application.Get().Dialog.Warning().
+		SetIcon(w.Icon).
+		SetTitle(fmt.Sprintf(i18n.T("儲存「%s」的相容性提示"), docName)).
+		SetMessage(message)
+	d.AddButton(i18n.T("繼續儲存")).OnClick(func() { answer <- CompatibilitySave })
+	d.AddButton(i18n.T("另存副本…")).OnClick(func() { answer <- CompatibilityCopy })
+	cancel := d.AddButton(i18n.T("取消")).OnClick(func() { answer <- CompatibilityCancel })
+	d.SetDefaultButton(cancel).SetCancelButton(cancel)
+	if win := w.window(); win != nil {
+		d.AttachToWindow(win)
+	}
+	d.Show()
+	return <-answer
+}
+
 func (w WailsDialogs) AskSave(docName string) SaveChoice {
 	// Button callbacks may run on another thread after Show returns.
 	choice := make(chan SaveChoice, 1)
