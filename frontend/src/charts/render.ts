@@ -33,6 +33,9 @@ export interface ChartSpec {
   holeSize?: number;
   type: string; // column, bar, line, area, pie, doughnut, scatter
   title: string;
+  autoTitle?: boolean; // show the series name when there is no title text
+  titleSize?: number; // points; 0 or unset uses the default
+  border?: string; // chart area outline color (RGB hex)
   legend: string; // right, bottom, top, none
   xTitle: string;
   yTitle: string;
@@ -84,8 +87,9 @@ function pointColor(spec:ChartSpec, i:number):string {
   return color ? `#${color}` : seriesColor(i);
 }
 
-// "Nice" axis: rounded bounds and a step of 1, 2 or 5 × 10^n.
-export function niceScale(min: number, max: number, ticks = 5): { min: number; max: number; step: number } {
+// "Nice" axis like Excel: 5% headroom past the data, then the smallest step of
+// 1, 2 or 5 x 10^n that needs at most maxIntervals gridline intervals.
+export function niceScale(min: number, max: number, maxIntervals = 10): { min: number; max: number; step: number } {
   if (!isFinite(min) || !isFinite(max)) return { min: 0, max: 1, step: 0.2 };
   if (min > 0 && min < max * 0.6) min = 0; // start bars at 0, like Excel
   if (max < 0 && max > min * 0.6) max = 0;
@@ -94,17 +98,25 @@ export function niceScale(min: number, max: number, ticks = 5): { min: number; m
     min = Math.min(0, min);
     max = Math.max(0, max);
   }
-  const raw = (max - min) / ticks;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const headroom = (max - min) * 0.05;
+  if (max > 0) max += headroom;
+  if (min < 0) min -= headroom;
+  const range = max - min;
+  const mag = Math.pow(10, Math.floor(Math.log10(range / maxIntervals)));
+  let step = mag * 10;
+  for (const m of [1, 2, 5, 10]) {
+    if (Math.ceil(range / (m * mag) - 1e-9) <= maxIntervals) {
+      step = m * mag;
+      break;
+    }
+  }
   return { min: Math.floor(min / step) * step, max: Math.ceil(max / step) * step, step };
 }
 
 // Bars encode magnitude as length, so their automatic axis must include zero.
-export function categoryScale(type: string, min: number, max: number) {
+export function categoryScale(type: string, min: number, max: number, maxIntervals = 10) {
   return ['column', 'bar', 'area'].includes(type)
-    ? niceScale(Math.min(0, min), Math.max(0, max)) : niceScale(min, max);
+    ? niceScale(Math.min(0, min), Math.max(0, max), maxIntervals) : niceScale(min, max, maxIntervals);
 }
 
 export function formatTick(v: number, step: number): string {
@@ -131,15 +143,24 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, w, h);
   }
+  if (spec.border) {
+    ctx.strokeStyle = `#${spec.border}`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  }
   ctx.textBaseline = 'middle';
   let box: Box = { x: 10, y: 10, w: w - 20, h: h - 20 };
 
-  if (spec.title) {
-    ctx.font = `600 14px ${theme.font}`;
-    ctx.fillStyle = theme.text;
+  const title = spec.title || (spec.autoTitle && data.series.length === 1 ? data.series[0].name : '');
+  if (title) {
+    // Titles with an explicit size come from Excel and are not bold.
+    const px = spec.titleSize ? (spec.titleSize * 96) / 72 : 14;
+    ctx.font = `${spec.titleSize ? 400 : 600} ${px}px ${theme.font}`;
+    ctx.fillStyle = spec.titleSize ? theme.muted : theme.text;
     ctx.textAlign = 'center';
-    ctx.fillText(spec.title, w / 2, 20, w - 20);
-    box = { ...box, y: box.y + 26, h: box.h - 26 };
+    const band = Math.round(px + 12);
+    ctx.fillText(title, w / 2, 8 + band / 2, w - 20);
+    box = { ...box, y: box.y + band, h: box.h - band };
   }
 
   const pie = spec.type === 'pie' || spec.type === 'doughnut';
@@ -230,7 +251,9 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     lo = 0;
     hi = 1;
   }
-  const scale = data.valueScale ?? categoryScale(spec.type, lo, hi);
+  // Fewer gridlines in short charts, as Excel does.
+  const intervals = Math.max(3, Math.min(10, Math.floor((horizontal ? box.w : box.h - 30) / 32)));
+  const scale = data.valueScale ?? categoryScale(spec.type, lo, hi, intervals);
   ctx.font = `11px ${theme.font}`;
   const tickLabels: string[] = [];
   for (let i=0; i<=200 && scale.min+i*scale.step<=scale.max+scale.step*1e-8; i++) {

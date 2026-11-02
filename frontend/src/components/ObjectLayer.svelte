@@ -45,7 +45,7 @@
   }
 
   function onDown(e: PointerEvent, o: ObjectDTO, edges: string): void {
-    if (e.button !== 0 || o.shape) return;
+    if (e.button !== 0 || o.shape || o.readonly) return;
     e.preventDefault();
     e.stopPropagation();
     onselect(o.id);
@@ -137,7 +137,7 @@
       class="object"
       data-object-id={o.id}
       class:selected={selected === o.id}
-      class:readonly={!!o.shape}
+      class:readonly={!!o.shape || !!o.readonly}
       style:left="{r.x - left}px"
       style:top="{r.y - top}px"
       style:width="{r.w}px"
@@ -155,7 +155,7 @@
       {:else if images.get(o.imageKey)}
         <img src={images.get(o.imageKey)} alt="" draggable="false" />
       {/if}
-      {#if selected === o.id && !o.shape}
+      {#if selected === o.id && !o.shape && !o.readonly}
         {#each handles as hd (hd)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div

@@ -166,6 +166,9 @@ export interface ChartDTO {
     "holeSize"?: number;
     "type": string;
     "title": string;
+    "autoTitle"?: boolean;
+    "titleSize"?: number;
+    "border"?: string;
     "series": ChartSeriesDTO[] | null;
     "legend": string;
     "xTitle": string;
@@ -379,6 +382,7 @@ export interface ObjectDTO {
     "h": number;
     "chart": ChartDTO | null;
     "imageKey": string;
+    "readonly"?: boolean;
 }
 
 export interface PageSetupDTO {
@@ -461,6 +465,19 @@ export interface ShapeDTO {
     "right": number;
     "top": number;
     "bottom": number;
+    "w": number;
+    "h": number;
+    "rot": number;
+    "flipH": boolean;
+    "flipV": boolean;
+
+    /**
+     * Adjust holds preset geometry adjust values (e.g. adj1) in DrawingML units.
+     */
+    "adjust"?: { [_ in string]?: number } | null;
+    "path"?: model$0.PathCmd[] | null;
+    "headArrow"?: boolean;
+    "tailArrow"?: boolean;
 }
 
 export interface SheetInfo {

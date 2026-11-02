@@ -2,7 +2,9 @@ package xlsxfile
 
 import (
 	"archive/zip"
+	"encoding/xml"
 	"io"
+	"math"
 	"path"
 	"strings"
 
@@ -15,6 +17,8 @@ const emuPerPx = 9525
 // rawAnchor is where a drawing object sits, from the drawing XML.
 type rawAnchor struct {
 	Shape   *drawingShape `xml:"sp"`
+	Conn    *drawingShape `xml:"cxnSp"`
+	Group   *rawGroup     `xml:"grpSp"`
 	FromCol int           `xml:"from>col"`
 	FromCX  int64         `xml:"from>colOff"`
 	FromRow int           `xml:"from>row"`
@@ -36,26 +40,92 @@ type rawAnchor struct {
 	twoCell bool
 }
 
-// readDrawing reads the charts and pictures of a sheet's drawing part
+// rawGroup is a DrawingML group: children are laid out in the group's own
+// child coordinate space (chOff/chExt) and mapped onto the group's frame.
+type rawGroup struct {
+	Transform drawingTransform `xml:"grpSpPr>xfrm"`
+	Items     []rawItem        `xml:",any"`
+}
+
+// rawPicture is a picture inside a group.
+type rawPicture struct {
+	Transform drawingTransform `xml:"spPr>xfrm"`
+	Blip      struct {
+		RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships embed,attr"`
+	} `xml:"blipFill>blip"`
+}
+
+// rawItem is one child of a group, in document (z) order.
+type rawItem struct {
+	Shape   *drawingShape
+	Picture *rawPicture
+	Group   *rawGroup
+}
+
+func (item *rawItem) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	switch start.Name.Local {
+	case "sp", "cxnSp":
+		item.Shape = &drawingShape{}
+		return d.DecodeElement(item.Shape, &start)
+	case "pic":
+		item.Picture = &rawPicture{}
+		return d.DecodeElement(item.Picture, &start)
+	case "grpSp":
+		item.Group = &rawGroup{}
+		return d.DecodeElement(item.Group, &start)
+	}
+	return d.Skip()
+}
+
+// pxRect is a rectangle in pixels relative to the top-level anchor's corner.
+type pxRect struct{ x, y, w, h float64 }
+
+// childRect maps a child frame (EMU in the group's child space) into the
+// group's pixel frame.
+func (g *rawGroup) childRect(t drawingTransform, frame pxRect) pxRect {
+	sx, sy := 1.0/emuPerPx, 1.0/emuPerPx
+	if t0 := g.Transform; t0.ChildExt.CX > 0 && t0.ChildExt.CY > 0 {
+		sx, sy = frame.w/t0.ChildExt.CX, frame.h/t0.ChildExt.CY
+	}
+	return pxRect{frame.x + (t.Off.X-g.Transform.ChildOff.X)*sx, frame.y + (t.Off.Y-g.Transform.ChildOff.Y)*sy, t.Ext.CX * sx, t.Ext.CY * sy}
+}
+
+// readDrawing reads the charts, pictures and shapes of a sheet's drawing part
 // (excelize cannot read charts back).
 func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
 	if drawing == "" {
 		return
 	}
 	theme := drawingTheme(parts)
+	add := func(obj model.Object) {
+		obj.ID = sh.Layout.NextObjectID()
+		sh.Layout.Objects = append(sh.Layout.Objects, obj)
+	}
 	for _, a := range readAnchors(parts, drawing) {
-		obj := model.Object{Anchor: model.Anchor{Row: a.FromRow, Col: a.FromCol, DX: float64(a.FromCX) / emuPerPx, DY: float64(a.FromRY) / emuPerPx}}
+		origin := model.Anchor{Row: a.FromRow, Col: a.FromCol, DX: float64(a.FromCX) / emuPerPx, DY: float64(a.FromRY) / emuPerPx}
+		obj := model.Object{Anchor: origin}
 		obj.W, obj.H = anchorSize(&sh.Layout, a)
 		switch {
-		case a.Shape != nil:
-			if ext := a.Shape.Properties.Transform.Ext; ext.CX > 0 && ext.CY > 0 {
-				obj.W, obj.H = ext.CX/emuPerPx, ext.CY/emuPerPx
+		case a.Group != nil:
+			readGroup(parts, drawing, &sh.Layout, theme, a.Group, origin, pxRect{0, 0, obj.W, obj.H}, add)
+			continue
+		case a.Shape != nil || a.Conn != nil:
+			raw := a.Shape
+			if raw == nil {
+				raw = a.Conn
 			}
-			obj.Shape = a.Shape.model(theme, obj.W, obj.H)
-			if obj.Shape == nil {
-				continue
+			w, h := obj.W, obj.H
+			if ext := raw.Properties.Transform.Ext; ext.CX > 0 && ext.CY > 0 {
+				w, h = ext.CX/emuPerPx, ext.CY/emuPerPx
 			}
-			obj.Kind = model.ObjectShape
+			frame := pxRect{0, 0, w, h}
+			if raw.Properties.Transform.Rot != 0 {
+				// A rotated shape's anchor spans its rotated bounding box, so the
+				// unrotated frame is centered in it.
+				frame.x, frame.y = (obj.W-w)/2, (obj.H-h)/2
+			}
+			addShape(&sh.Layout, theme, raw, origin, frame, false, add)
+			continue
 		case a.Chart.RID != "":
 			c := readChart(parts, relTarget(parts, drawing, a.Chart.RID))
 			if c == nil {
@@ -73,9 +143,76 @@ func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
 		default:
 			continue
 		}
-		obj.ID = sh.Layout.NextObjectID()
-		sh.Layout.Objects = append(sh.Layout.Objects, obj)
+		add(obj)
 	}
+}
+
+// readGroup flattens a group into separate read-only objects (children keep
+// their z order). frame is the group's pixel frame relative to origin.
+func readGroup(parts map[string]*zip.File, drawing string, l *model.Layout, theme map[string]string, g *rawGroup, origin model.Anchor, frame pxRect, add func(model.Object)) {
+	for _, item := range g.Items {
+		switch {
+		case item.Group != nil:
+			readGroup(parts, drawing, l, theme, item.Group, origin, g.childRect(item.Group.Transform, frame), add)
+		case item.Shape != nil:
+			addShape(l, theme, item.Shape, origin, g.childRect(item.Shape.Properties.Transform, frame), true, add)
+		case item.Picture != nil:
+			media := relTarget(parts, drawing, item.Picture.Blip.RID)
+			data := readPart(parts, media)
+			if data == nil {
+				continue
+			}
+			r := g.childRect(item.Picture.Transform, frame)
+			add(model.Object{Kind: model.ObjectImage, Anchor: shiftAnchor(l, origin, r.x, r.y), W: r.w, H: r.h, ReadOnly: true,
+				Image: &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media))}})
+		}
+	}
+}
+
+// addShape converts one DrawingML shape placed at r (relative to origin).
+func addShape(l *model.Layout, theme map[string]string, raw *drawingShape, origin model.Anchor, r pxRect, readOnly bool, add func(model.Object)) bool {
+	shape := raw.model(theme, r.w, r.h)
+	if shape == nil {
+		return false
+	}
+	t := raw.Properties.Transform
+	shape.Rot, shape.FlipH, shape.FlipV = math.Mod(t.Rot/60000, 360), t.flipH(), t.flipV()
+	box := r
+	if shape.Rot != 0 || r.w < 1 || r.h < 1 {
+		// The object box is the rotated bounding box (lines may have no extent).
+		rad := shape.Rot * math.Pi / 180
+		sin, cos := math.Abs(math.Sin(rad)), math.Abs(math.Cos(rad))
+		pad := shape.LineWidth + 2
+		box.w, box.h = r.w*cos+r.h*sin+pad, r.w*sin+r.h*cos+pad
+		box.x, box.y = r.x+r.w/2-box.w/2, r.y+r.h/2-box.h/2
+		shape.W, shape.H = r.w, r.h
+	}
+	add(model.Object{Kind: model.ObjectShape, Anchor: shiftAnchor(l, origin, box.x, box.y), W: box.w, H: box.h, Shape: shape, ReadOnly: readOnly})
+	return true
+}
+
+// shiftAnchor moves an anchor by (dx, dy) pixels, normalizing the offsets
+// into the cell that contains the point.
+func shiftAnchor(l *model.Layout, a model.Anchor, dx, dy float64) model.Anchor {
+	a.DX, a.DY = a.DX+dx, a.DY+dy
+	for i := 0; i < model.MaxCols && a.DX >= l.ColWidth(a.Col); i++ {
+		w := l.ColWidth(a.Col)
+		a.DX -= w
+		a.Col++
+	}
+	for a.DX < 0 && a.Col > 0 {
+		a.Col--
+		a.DX += l.ColWidth(a.Col)
+	}
+	for i := 0; i < 100000 && a.DY >= l.RowHeight(a.Row); i++ {
+		a.DY -= l.RowHeight(a.Row)
+		a.Row++
+	}
+	for a.DY < 0 && a.Row > 0 {
+		a.Row--
+		a.DY += l.RowHeight(a.Row)
+	}
+	return a
 }
 
 // relTarget resolves a relationship of part (by its .rels file).
@@ -280,10 +417,19 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 		Properties struct {
 			NoFill *struct{}   `xml:"noFill"`
 			Fill   drawingFill `xml:"solidFill"`
+			Line   struct {
+				NoFill *struct{}   `xml:"noFill"`
+				Fill   drawingFill `xml:"solidFill"`
+			} `xml:"ln"`
 		} `xml:"spPr"`
 		Chart struct {
-			Title []string `xml:"title>tx>rich>p>r>t"`
-			Plot  struct {
+			TitleEl *struct {
+				Text *struct {
+					Runs []string `xml:"rich>p>r>t"`
+				} `xml:"tx"`
+				Font drawingFont `xml:"txPr>p>pPr>defRPr"`
+			} `xml:"title"`
+			Plot struct {
 				Manual       *rawChartLayout `xml:"layout>manualLayout"`
 				ValueAxis    *rawChartAxis   `xml:"valAx"`
 				CategoryAxis *rawChartAxis   `xml:"catAx"`
@@ -310,8 +456,19 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	p := doc.Chart.Plot
 	theme := drawingTheme(parts)
-	c := &model.Chart{ValueAxis: p.ValueAxis.model(theme), CategoryAxis: p.CategoryAxis.model(theme), Title: strings.Join(doc.Chart.Title, ""), Legend: "none"}
+	c := &model.Chart{ValueAxis: p.ValueAxis.model(theme), CategoryAxis: p.CategoryAxis.model(theme), Legend: "none"}
 	c.PlotArea = p.Manual.model()
+	if t := doc.Chart.TitleEl; t != nil {
+		// A title without its own text shows the series name (single series).
+		c.AutoTitle = t.Text == nil
+		c.TitleSize = xmlFloat(t.Font.Size) / 100
+		if t.Text != nil {
+			c.Title = strings.Join(t.Text.Runs, "")
+		}
+	}
+	if doc.Properties.Line.NoFill == nil {
+		c.Border = doc.Properties.Line.Fill.color(theme)
+	}
 	if doc.Properties.NoFill != nil {
 		c.Background = "transparent"
 	} else {

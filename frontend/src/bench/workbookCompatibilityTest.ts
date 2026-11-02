@@ -4,6 +4,7 @@ import { listWorkbookSelfTest } from './listWorkbookSelfTest';
 import { financeWorkbookSelfTest } from './financeWorkbookSelfTest';
 import { taskWorkbookSelfTest } from './taskWorkbookSelfTest';
 import { budgetWorkbookSelfTest } from './budgetWorkbookSelfTest';
+import { richTextWorkbookSelfTest } from './richTextWorkbookSelfTest';
 import type Sheet from '../components/Sheet.svelte';
 
 export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>, path: string): Promise<{ markdown: string; failed: number }> {
@@ -15,6 +16,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.[0] === '富文字編輯驗收') return richTextWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '清單') return listWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '管理財務') return financeWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '工作') return taskWorkbookSelfTest(driver);

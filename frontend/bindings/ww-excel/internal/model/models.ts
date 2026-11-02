@@ -89,3 +89,12 @@ export interface ChartShadow {
     "x": number;
     "y": number;
 }
+
+/**
+ * PathCmd is a custom geometry path command: moveTo, lnTo, cubicBezTo,
+ * quadBezTo or close, with its points as x,y pairs.
+ */
+export interface PathCmd {
+    "op": string;
+    "pts": number[] | null;
+}

@@ -3,15 +3,20 @@ import { categoryScale, drawChart, formatTick, niceScale } from './render';
 
 describe('niceScale', () => {
   it('rounds bounds to a 1-2-2.5-5 step and starts at zero', () => {
-    expect(niceScale(70, 150)).toEqual({ min: 0, max: 150, step: 50 });
-    expect(niceScale(0, 1)).toEqual({ min: 0, max: 1, step: 0.2 });
-    expect(niceScale(-30, 80)).toEqual({ min: -50, max: 100, step: 25 });
-    expect(niceScale(5, 5)).toEqual({ min: 0, max: 5, step: 1 });
+    expect(niceScale(70, 150)).toEqual({ min: 0, max: 160, step: 20 });
+    expect(niceScale(0, 1).max).toBeCloseTo(1.2);
+    expect(niceScale(0, 0)).toEqual({ min: 0, max: 1, step: 0.2 });
+    expect(niceScale(-30, 80)).toEqual({ min: -40, max: 100, step: 20 });
+    expect(niceScale(5, 5)).toEqual({ min: 0, max: 6, step: 1 });
+  });
+  it('leaves 5% headroom like Excel', () => {
+    expect(niceScale(0, 20000, 6)).toEqual({ min: 0, max: 25000, step: 5000 });
+    expect(niceScale(0, 100)).toEqual({ min: 0, max: 120, step: 20 });
   });
   it('keeps a raised baseline for clustered values', () => {
     const s = niceScale(1000, 1100);
     expect(s.min).toBe(1000);
-    expect(s.max).toBe(1100);
+    expect(s.max).toBe(1120);
   });
 });
 

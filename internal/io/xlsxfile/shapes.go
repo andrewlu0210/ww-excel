@@ -44,26 +44,106 @@ type drawingFont struct {
 		Name string `xml:"typeface,attr"`
 	} `xml:"ea"`
 }
+
+// drawingTransform is a DrawingML a:xfrm (position, size, rotation, flips)
+// and, for groups, the child coordinate space.
+type drawingTransform struct {
+	Rot   float64 `xml:"rot,attr"`
+	FlipH string  `xml:"flipH,attr"`
+	FlipV string  `xml:"flipV,attr"`
+	Off   struct {
+		X float64 `xml:"x,attr"`
+		Y float64 `xml:"y,attr"`
+	} `xml:"off"`
+	Ext struct {
+		CX float64 `xml:"cx,attr"`
+		CY float64 `xml:"cy,attr"`
+	} `xml:"ext"`
+	ChildOff struct {
+		X float64 `xml:"x,attr"`
+		Y float64 `xml:"y,attr"`
+	} `xml:"chOff"`
+	ChildExt struct {
+		CX float64 `xml:"cx,attr"`
+		CY float64 `xml:"cy,attr"`
+	} `xml:"chExt"`
+}
+
+func (t drawingTransform) flipH() bool { return t.FlipH == "1" || t.FlipH == "true" }
+func (t drawingTransform) flipV() bool { return t.FlipV == "1" || t.FlipV == "true" }
+
+// drawingPath is one a:path of a custom geometry (points are in path units).
+type drawingPath struct {
+	Raw   []drawingCmd `xml:",any"`
+	WAttr float64      `xml:"w,attr"`
+	HAttr float64      `xml:"h,attr"`
+}
+
+type drawingCmd struct {
+	Op  string
+	Pts []float64
+}
+
+func (c *drawingCmd) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var raw struct {
+		Points []struct {
+			X float64 `xml:"x,attr"`
+			Y float64 `xml:"y,attr"`
+		} `xml:"pt"`
+	}
+	if err := d.DecodeElement(&raw, &start); err != nil {
+		return err
+	}
+	c.Op = start.Name.Local
+	for _, p := range raw.Points {
+		c.Pts = append(c.Pts, p.X, p.Y)
+	}
+	return nil
+}
+
+// model converts the path to commands normalized to the shape's size.
+func (p *drawingPath) model() []model.PathCmd {
+	if p == nil || p.WAttr <= 0 || p.HAttr <= 0 {
+		return nil
+	}
+	var out []model.PathCmd
+	for _, c := range p.Raw {
+		switch c.Op {
+		case "moveTo", "lnTo", "cubicBezTo", "quadBezTo", "close":
+		default:
+			continue
+		}
+		cmd := model.PathCmd{Op: c.Op}
+		for i := 0; i+1 < len(c.Pts); i += 2 {
+			cmd.Pts = append(cmd.Pts, c.Pts[i]/p.WAttr, c.Pts[i+1]/p.HAttr)
+		}
+		out = append(out, cmd)
+	}
+	return out
+}
+
 type drawingShape struct {
 	Properties struct {
-		Transform struct {
-			Ext struct {
-				CX float64 `xml:"cx,attr"`
-				CY float64 `xml:"cy,attr"`
-			} `xml:"ext"`
-		} `xml:"xfrm"`
-		Geometry struct {
+		Transform drawingTransform `xml:"xfrm"`
+		Geometry  struct {
 			Type        string `xml:"prst,attr"`
 			Adjustments []struct {
 				Name    string `xml:"name,attr"`
 				Formula string `xml:"fmla,attr"`
 			} `xml:"avLst>gd"`
 		} `xml:"prstGeom"`
-		Fill drawingFill `xml:"solidFill"`
-		Line struct {
-			Width  float64     `xml:"w,attr"`
-			NoFill *struct{}   `xml:"noFill"`
-			Fill   drawingFill `xml:"solidFill"`
+		Custom *drawingPath `xml:"custGeom>pathLst>path"`
+		Fill   drawingFill  `xml:"solidFill"`
+		Line   struct {
+			Width   float64     `xml:"w,attr"`
+			NoFill  *struct{}   `xml:"noFill"`
+			Fill    drawingFill `xml:"solidFill"`
+			HeadEnd *struct {
+				Type string `xml:"type,attr"`
+			} `xml:"headEnd"`
+			TailEnd *struct {
+				Type string `xml:"type,attr"`
+			} `xml:"tailEnd"`
 		} `xml:"ln"`
 	} `xml:"spPr"`
 	Body struct {
@@ -220,7 +300,10 @@ func (f drawingFont) rich(theme map[string]string) *model.RichFont {
 
 func (raw *drawingShape) model(theme map[string]string, width, height float64) *model.Shape {
 	kind := raw.Properties.Geometry.Type
-	if kind != "" && kind != "rect" && kind != "roundRect" {
+	custom := raw.Properties.Custom.model()
+	if custom != nil {
+		kind = "custom"
+	} else if kind != "" && !drawableGeometry[kind] {
 		return nil
 	}
 	body := raw.Body.Properties
@@ -270,10 +353,33 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 			shape.Text.Runs = append(shape.Text.Runs, model.TextRun{Text: run.Text, Font: model.RichFontOf(run.Font.rich(theme).Resolve(base))})
 		}
 	}
-	if len(shape.Text.Runs) == 0 && shape.Fill == "" {
+	if len(shape.Text.Runs) == 0 && shape.Fill == "" && shape.LineColor == "" {
 		return nil
 	}
+	if len(raw.Properties.Geometry.Adjustments) > 0 {
+		shape.Adjust = map[string]float64{}
+		for _, item := range raw.Properties.Geometry.Adjustments {
+			shape.Adjust[item.Name] = xmlFloat(strings.TrimPrefix(item.Formula, "val "))
+		}
+	}
+	shape.Path = custom
+	if raw.Properties.Line.HeadEnd != nil && raw.Properties.Line.HeadEnd.Type != "none" && shape.LineColor != "" {
+		shape.HeadArrow = true
+	}
+	if raw.Properties.Line.TailEnd != nil && raw.Properties.Line.TailEnd.Type != "none" && shape.LineColor != "" {
+		shape.TailArrow = true
+	}
+	if kind == "line" || kind == "straightConnector1" || kind == "custom" {
+		shape.Fill = ""
+	}
 	return shape
+}
+
+// drawableGeometry lists the preset geometries the canvas renderer can draw.
+var drawableGeometry = map[string]bool{
+	"rect": true, "roundRect": true, "ellipse": true, "line": true, "straightConnector1": true,
+	"arc": true, "custom": true, "leftBrace": true, "rightBrace": true,
+	"downArrowCallout": true, "upArrowCallout": true, "rightArrowCallout": true, "leftArrowCallout": true,
 }
 
 func colorRGB(r, g, b float64) string {

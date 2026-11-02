@@ -13,5 +13,6 @@ export type {
     ChartLabels,
     ChartPlotArea,
     ChartPointStyle,
-    ChartShadow
+    ChartShadow,
+    PathCmd
 } from "./models.js";

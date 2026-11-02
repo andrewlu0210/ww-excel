@@ -15,6 +15,9 @@ type Object struct {
 	Chart  *Chart
 	Shape  *Shape
 	Image  *Image
+	// ReadOnly marks drawing parts imported from a group; they are shown but
+	// never edited or rewritten, so the original XLSX markup stays intact.
+	ReadOnly bool
 }
 
 const (
@@ -46,6 +49,9 @@ type Chart struct {
 	Background   string // Empty uses the default; transparent or an RGB hex color.
 	HoleSize     int    // Doughnut inner diameter as a percentage (0 uses 50).
 	Title        string
+	AutoTitle    bool    // The title shows the series name when Title is empty.
+	TitleSize    float64 // Title font size in points; 0 uses the default.
+	Border       string  // Chart area outline as an RGB hex color; empty for none.
 	Series       []ChartSeries
 	Legend       string // right, bottom, top, none
 	XTitle       string

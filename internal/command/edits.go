@@ -20,8 +20,9 @@ var ErrFillTooLarge = errors.New("selection too large to fill")
 func SetCell(wb *model.Workbook, sheet, row, col int, cell model.Cell, numFmt string, wrap bool) Command {
 	sh := wb.Sheets[sheet]
 	old := sh.Get(row, col)
+	cell = model.PreserveRichText(old, cell)
 	cell.S = inputStyle(wb, sh, row, col, numFmt, wrap)
-	if old.SameInput(cell) && old.S == cell.S {
+	if old.SameInput(cell) && old.S == cell.S && old.Rich == cell.Rich {
 		return nil
 	}
 	return &SetCells{

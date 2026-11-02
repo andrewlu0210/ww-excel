@@ -43,6 +43,9 @@ type ChartDTO struct {
 	HoleSize     int                  `json:"holeSize,omitempty"`
 	Type         string               `json:"type"`
 	Title        string               `json:"title"`
+	AutoTitle    bool                 `json:"autoTitle,omitempty"`
+	TitleSize    float64              `json:"titleSize,omitempty"`
+	Border       string               `json:"border,omitempty"`
 	Series       []ChartSeriesDTO     `json:"series"`
 	Legend       string               `json:"legend"`
 	XTitle       string               `json:"xTitle"`
@@ -65,6 +68,16 @@ type ShapeDTO struct {
 	Right     float64      `json:"right"`
 	Top       float64      `json:"top"`
 	Bottom    float64      `json:"bottom"`
+	W         float64      `json:"w"`
+	H         float64      `json:"h"`
+	Rot       float64      `json:"rot"`
+	FlipH     bool         `json:"flipH"`
+	FlipV     bool         `json:"flipV"`
+	// Adjust holds preset geometry adjust values (e.g. adj1) in DrawingML units.
+	Adjust    map[string]float64 `json:"adjust,omitempty"`
+	Path      []model.PathCmd    `json:"path,omitempty"`
+	HeadArrow bool               `json:"headArrow,omitempty"`
+	TailArrow bool               `json:"tailArrow,omitempty"`
 }
 
 type ObjectDTO struct {
@@ -79,13 +92,14 @@ type ObjectDTO struct {
 	H        float64   `json:"h"`
 	Chart    *ChartDTO `json:"chart"`
 	ImageKey string    `json:"imageKey"`
+	ReadOnly bool      `json:"readonly,omitempty"`
 }
 
 func chartDTO(c *model.Chart) *ChartDTO {
 	if c == nil {
 		return nil
 	}
-	out := &ChartDTO{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
+	out := &ChartDTO{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
 	for _, s := range c.Series {
 		out.Series = append(out.Series, ChartSeriesDTO{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
 	}
@@ -104,7 +118,7 @@ func (c *ChartDTO) model() *model.Chart {
 	if c == nil {
 		return nil
 	}
-	out := &model.Chart{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
+	out := &model.Chart{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
 	strip := func(f string) string { return strings.TrimPrefix(strings.TrimSpace(f), "=") }
 	for _, s := range c.Series {
 		out.Series = append(out.Series, model.ChartSeries{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
@@ -116,8 +130,10 @@ func objectDTO(o model.Object) ObjectDTO {
 	dto := ObjectDTO{ID: o.ID, Kind: o.Kind, Row: o.Anchor.Row, Col: o.Anchor.Col, DX: o.Anchor.DX, DY: o.Anchor.DY, W: o.W, H: o.H, Chart: chartDTO(o.Chart)}
 	if shape := o.Shape; shape != nil {
 		dto.Shape = &ShapeDTO{Geometry: shape.Geometry, Fill: shape.Fill, LineColor: shape.LineColor, LineWidth: shape.LineWidth, Radius: shape.Radius,
-			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom}
+			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom,
+			W: shape.W, H: shape.H, Rot: shape.Rot, FlipH: shape.FlipH, FlipV: shape.FlipV, Adjust: shape.Adjust, Path: shape.Path, HeadArrow: shape.HeadArrow, TailArrow: shape.TailArrow}
 	}
+	dto.ReadOnly = o.ReadOnly
 	if o.Image != nil {
 		h := fnv.New64a()
 		h.Write(o.Image.Data)
