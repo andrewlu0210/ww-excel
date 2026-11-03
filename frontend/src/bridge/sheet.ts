@@ -33,6 +33,7 @@ import type {
   SortInfo,
   SortKeyDTO,
   FormatPatch,
+  TextRunDTO,
   LayoutChanged,
   LayoutDTO,
   MemStats,
@@ -61,6 +62,7 @@ export type {
   ValidationDTO,
   FuncInfo,
   FormatPatch,
+  TextRunDTO,
   LayoutChanged,
   LayoutDTO,
   StyleDTO,
@@ -133,6 +135,10 @@ export const sheetApi = {
   async setCell(sheet: number, row: number, col: number, text: string): Promise<{ error: string | null; notice: string | null }> {
     const res = await failed(SheetService.SetCell(sheet, row, col, text));
     return { error: res.error, notice: res.value?.notice ? tr(res.value.notice) : null };
+  },
+  async setRichCell(sheet:number,row:number,col:number,text:string,runs:TextRunDTO[],rowHeight=0):Promise<{error:string|null;notice:string|null}>{
+    const res=await failed(SheetService.SetRichCell(sheet,row,col,text,runs,rowHeight));
+    return {error:res.error,notice:res.value?.notice?tr(res.value.notice):null};
   },
   fill: (sheet: number, ranges: RangeDTO[], text: string, activeRow: number, activeCol: number): Promise<string | null> =>
     rejected(SheetService.Fill(sheet, ranges, text, activeRow, activeCol)),
@@ -240,6 +246,7 @@ export const sheetApi = {
   chartFromSelection: (sheet: number, sel: RangeDTO, type: string) => failed(SheetService.ChartFromSelection(sheet, sel, type)),
   addChart: (sheet: number, row: number, col: number, w: number, h: number, chart: ChartDTO) =>
     failed(SheetService.AddChart(sheet, row, col, w, h, chart)),
+  updateShapeText: (sheet:number,id:number,runs:TextRunDTO[]):Promise<string|null> => rejected(SheetService.UpdateShapeText(sheet,id,runs)),
   updateObject: (sheet: number, o: ObjectDTO, label: string): Promise<string | null> =>
     rejected(SheetService.UpdateObject(sheet, o, label)),
   deleteObjects: (sheet: number, ids: number[]): Promise<string | null> => rejected(SheetService.DeleteObjects(sheet, ids)),
@@ -327,7 +334,7 @@ export const benchApi = {
   report: (markdown: string): Promise<void> => BenchService.ReportBench(markdown),
   snapshot: (name: string, dataURL: string): Promise<void> => BenchService.SaveSnapshot(name, dataURL),
   recalcChain: (n: number): Promise<number> => BenchService.RecalcChain(n),
-  saveCopy: (name: string): Promise<string> => BenchService.SaveCopy(name),
+  saveCopy: (name: string, allowChartRewrite = false): Promise<string> => BenchService.SaveCopy(name, allowChartRewrite),
 
   onBlockEvent(cb: (e: BenchEvent) => void): () => void {
     return Events.On('bench:block', (ev) => cb(ev.data));

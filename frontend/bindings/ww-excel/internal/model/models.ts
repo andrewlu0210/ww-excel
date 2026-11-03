@@ -32,6 +32,8 @@ export interface CFThreshold {
 }
 
 export interface ChartAxis {
+    "fontSize"?: number;
+    "fontName"?: string;
     "format": string;
     "minimum"?: number | null;
     "maximum"?: number | null;

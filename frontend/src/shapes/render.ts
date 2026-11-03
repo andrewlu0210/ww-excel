@@ -2,6 +2,12 @@ import type { ShapeDTO } from '../../bindings/ww-excel/internal/service/models';
 import { TextCache } from '../grid/text';
 import { drawRichLines, layoutRichText, styledRuns } from '../grid/richtext';
 
+const LINE_DASHES: Record<string, number[]> = {
+  dot:[1,3], sysDot:[1,1], dash:[4,3], sysDash:[3,1], lgDash:[8,3],
+  dashDot:[4,3,1,3], sysDashDot:[3,1,1,1], lgDashDot:[8,3,1,3],
+  lgDashDotDot:[8,3,1,3,1,3], sysDashDotDot:[3,1,1,1,1,1],
+};
+
 const pin = (lo: number, v: number, hi: number) => Math.max(lo, Math.min(v, hi));
 const rad = (deg: number) => (deg * Math.PI) / 180;
 
@@ -199,6 +205,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, width: number, height: 
   if (shape.lineColor && shape.lineWidth > 0) {
     ctx.strokeStyle = `#${shape.lineColor}`;
     ctx.lineWidth = shape.lineWidth;
+    ctx.setLineDash((LINE_DASHES[shape.lineDash ?? ''] ?? []).map(v => v * shape.lineWidth));
     ctx.lineJoin = 'round';
     ctx.stroke();
     if (shape.headArrow && geometry.start) arrowHead(ctx, geometry.start, false, shape.lineWidth, `#${shape.lineColor}`);
@@ -211,7 +218,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, width: number, height: 
     const box = geometry.text;
     const cache = new TextCache(ctx);
     const measure = (font: string, text: string) => cache.width(font, text);
-    const lines = layoutRichText(runs, Math.max(1, box.w - shape.left - shape.right), true, measure, Math.max(1, ...runs.map((r) => r.px)));
+    const lines = layoutRichText(runs, Math.max(1, box.w - shape.left - shape.right), true, measure, 0, { hangingPunctuation: true });
     drawRichLines(ctx, lines, measure, box, shape.alignH, shape.alignV,
       { left: shape.left, right: shape.right, top: shape.top, bottom: shape.bottom });
   }

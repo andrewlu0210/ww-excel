@@ -219,6 +219,7 @@
     cols.reset(l.defaultCol, (l.cols ?? []).map((s): [number, number] => [s.i, s.hidden ? 0 : s.px]));
     look = {
       hideGridLines:l.hideGridLines ?? false,
+      pivotHeaders: l.pivotHeaders ?? [],
       tableFilters:(l.tables ?? []).filter(t=>!t.noFilter).map(t=>({r0:t.range.r0,c0:t.range.c0,r1:t.range.r1,c1:t.range.c1})),
       rowStyles: new Map((l.rowStyles ?? []).map((s) => [s.i, s.s])),
       colStyles: new Map((l.colStyles ?? []).map((s) => [s.i, s.s])),

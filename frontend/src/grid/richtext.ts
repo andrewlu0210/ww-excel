@@ -25,7 +25,7 @@ export function styledRuns(runs: TextRunDTO[], fallback: string): StyledRun[] {
 }
 
 // Word wrapping retains run boundaries, explicit blank lines, and CJK breaks.
-export function layoutRichText(runs: StyledRun[], width: number, wrap: boolean, measure: RichMeasure, defaultPx = 14.67): RichLine[] {
+export function layoutRichText(runs: StyledRun[], width: number, wrap: boolean, measure: RichMeasure, defaultPx = 14.67, options: { hangingPunctuation?: boolean } = {}): RichLine[] {
   const compact = (glyphs: Glyph[]): RichLine => {
     const spans: StyledRun[] = [];
     let previous: StyledRun | undefined;
@@ -38,14 +38,22 @@ export function layoutRichText(runs: StyledRun[], width: number, wrap: boolean, 
   const out: RichLine[] = [];
   let line: Glyph[] = [];
   const cjk = (ch: string) => /[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/u.test(ch);
-  const push = (glyphs: Glyph[]) => out.push(compact(glyphs));
+  const push = (glyphs: Glyph[], emptyPx = defaultPx) => {
+    const line = compact(glyphs);
+    if (!glyphs.length) line.px = Math.max(defaultPx, emptyPx);
+    out.push(line);
+  };
   for (const run of runs) {
     for (let ch of run.text.replace(/\r\n?/g, '\n')) {
-      if (ch === '\n' && wrap) { push(line); line = []; continue; }
+      if (ch === '\n' && wrap) { push(line, run.px); line = []; continue; }
       if (ch === '\n') ch = ' ';
       const glyph = { text: ch, style: run };
       if (wrap && line.length && compact([...line, glyph]).width > width) {
-        if (ch === ' ') { push(line); line = []; continue; }
+        // DrawingML allows closing CJK punctuation to hang beyond the text edge.
+        if (options.hangingPunctuation && /[、。，．？！：；）〕］｝〉》」』】〙〗〟’”｠»]/u.test(ch)) {
+          line.push(glyph); continue;
+        }
+        if (ch === ' ') { line.push(glyph); continue; }
         let at = -1;
         for (let i = 0; i < line.length; i++) if (line[i].text === ' ' || cjk(line[i].text)) at = i + 1;
         if (at > 0 && !cjk(ch)) {
@@ -59,7 +67,7 @@ export function layoutRichText(runs: StyledRun[], width: number, wrap: boolean, 
       line.push(glyph);
     }
   }
-  push(line);
+  push(line, runs.at(-1)?.px ?? defaultPx);
   return out;
 }
 

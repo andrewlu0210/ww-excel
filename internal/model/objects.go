@@ -16,7 +16,7 @@ type Object struct {
 	Shape  *Shape
 	Image  *Image
 	// ReadOnly marks drawing parts imported from a group; they are shown but
-	// never edited or rewritten, so the original XLSX markup stays intact.
+	// geometry stays locked. Text is patched inside the original group markup.
 	ReadOnly bool
 }
 
@@ -41,22 +41,26 @@ type Image struct {
 // Chart is a chart linked to cells. Series references are formulas
 // without "=", usually absolute references with the sheet name.
 type Chart struct {
+	GapWidth *float64 // Gap between clusters as a percentage of a column width.
+	FontName string
 	PlotArea *ChartPlotArea
-	// Type: column, bar, line, pie, doughnut, scatter, area.
-	Type         string
-	ValueAxis    *ChartAxis
-	CategoryAxis *ChartAxis
-	Background   string // Empty uses the default; transparent or an RGB hex color.
-	HoleSize     int    // Doughnut inner diameter as a percentage (0 uses 50).
-	Title        string
-	AutoTitle    bool    // The title shows the series name when Title is empty.
-	TitleSize    float64 // Title font size in points; 0 uses the default.
-	Border       string  // Chart area outline as an RGB hex color; empty for none.
-	Series       []ChartSeries
-	Legend       string // right, bottom, top, none
-	XTitle       string
-	YTitle       string
-	Stacked      bool
+	// Type: column, bar, line, pie, doughnut, scatter, area, combo.
+	Type                  string
+	ValueAxis             *ChartAxis
+	SecondaryAxis         *ChartAxis
+	SecondaryCategoryAxis *ChartAxis
+	CategoryAxis          *ChartAxis
+	Background            string // Empty uses the default; transparent or an RGB hex color.
+	HoleSize              int    // Doughnut inner diameter as a percentage (0 uses 50).
+	Title                 string
+	AutoTitle             bool    // The title shows the series name when Title is empty.
+	TitleSize             float64 // Title font size in points; 0 uses the default.
+	Border                string  // Chart area outline as an RGB hex color; empty for none.
+	Series                []ChartSeries
+	Legend                string // right, bottom, top, none
+	XTitle                string
+	YTitle                string
+	Stacked               bool
 }
 
 type ChartPlotArea struct {
@@ -87,6 +91,8 @@ type ChartPointStyle struct {
 }
 
 type ChartAxis struct {
+	FontSize   float64  `json:"fontSize,omitempty"`
+	FontName   string   `json:"fontName,omitempty"`
 	Format     string   `json:"format"`
 	Minimum    *float64 `json:"minimum,omitempty"`
 	Maximum    *float64 `json:"maximum,omitempty"`
@@ -115,6 +121,10 @@ type ChartLabelPoint struct {
 }
 
 type ChartSeries struct {
+	Type           string                  `json:"type,omitempty"` // For combo charts: column or line.
+	Secondary      bool                    `json:"secondary,omitempty"`
+	LineWidth      float64                 `json:"lineWidth,omitempty"` // Pixels at 100% zoom.
+	Marker         string                  `json:"marker,omitempty"`
 	PointStyles    map[int]ChartPointStyle `json:"pointStyles,omitempty"`
 	CategoryLabels []string                `json:"categoryLabels,omitempty"`
 	Color          string                  `json:"color,omitempty"`
@@ -130,6 +140,10 @@ func (c *Chart) clone() *Chart {
 		return nil
 	}
 	out := *c
+	if c.GapWidth != nil {
+		v := *c.GapWidth
+		out.GapWidth = &v
+	}
 	if c.PlotArea != nil {
 		layout := *c.PlotArea
 		out.PlotArea = &layout
@@ -150,6 +164,8 @@ func (c *Chart) clone() *Chart {
 		return &b
 	}
 	out.ValueAxis = cloneAxis(c.ValueAxis)
+	out.SecondaryAxis = cloneAxis(c.SecondaryAxis)
+	out.SecondaryCategoryAxis = cloneAxis(c.SecondaryCategoryAxis)
 	out.CategoryAxis = cloneAxis(c.CategoryAxis)
 	out.Series = append([]ChartSeries(nil), c.Series...)
 	for i, s := range c.Series {

@@ -351,6 +351,13 @@ export function SetPageSetup(sheet: number, p: $models.PageSetupDTO): $Cancellab
 }
 
 /**
+ * SetRichCell commits text and its selected-character formatting as one edit.
+ */
+export function SetRichCell(sheet: number, row: number, col: number, text: string, runs: $models.TextRunDTO[] | null, rowHeight: number): $CancellablePromise<$models.SetCellResult> {
+    return $Call.ByID(3715331473, sheet, row, col, text, runs, rowHeight);
+}
+
+/**
  * SetSizes sets row heights (rows = true) or column widths in pixels;
  * px < 0 restores the default.
  */
@@ -444,6 +451,13 @@ export function Unmerge(sheet: number, ranges: $models.RangeDTO[] | null): $Canc
  */
 export function UpdateObject(sheet: number, o: $models.ObjectDTO, label: string): $CancellablePromise<void> {
     return $Call.ByID(4131350511, sheet, o, label);
+}
+
+/**
+ * UpdateShapeText replaces only text. Group children keep their geometry locks.
+ */
+export function UpdateShapeText(sheet: number, id: number, runs: $models.TextRunDTO[] | null): $CancellablePromise<void> {
+    return $Call.ByID(4199247606, sheet, id, runs);
 }
 
 /**

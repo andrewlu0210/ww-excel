@@ -56,7 +56,7 @@ func NewBenchService(sheets *SheetService, docs *DocumentService) *BenchService 
 
 // SaveCopy saves the document as name next to the self-test report,
 // without dialogs, and returns the full path (self-test only).
-func (b *BenchService) SaveCopy(ctx context.Context, name string) (string, error) {
+func (b *BenchService) SaveCopy(ctx context.Context, name string, allowChartRewrite bool) (string, error) {
 	if !b.SelfTestMode() {
 		return "", fmt.Errorf("SaveCopy is only available in self-test mode")
 	}
@@ -64,7 +64,18 @@ func (b *BenchService) SaveCopy(ctx context.Context, name string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if !b.docs.saveTo(ctx, path) {
+	if allowChartRewrite {
+		// Explicit opt-in for fixture round trips that intentionally rewrite charts.
+		// Keep native compatibility dialogs in the normal save path.
+		s := b.docs.at(ctx)
+		s.mu.Lock()
+		err = s.doc.SaveAs(path)
+		s.mu.Unlock()
+		if err != nil {
+			return "", err
+		}
+		s.PublishState()
+	} else if !b.docs.saveTo(ctx, path) {
 		return "", fmt.Errorf("save %s failed", path)
 	}
 	return path, nil

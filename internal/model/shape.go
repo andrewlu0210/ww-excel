@@ -1,11 +1,14 @@
 package model
 
 // Shape is an imported DrawingML preset shape (text box, ellipse, line, callout...). It is immutable;
-// shape editing is not exposed yet, so original XLSX drawing markup is preserved.
+// text edits replace the immutable shape while retaining original drawing markup.
 type Shape struct {
+	SourceID                 int    `json:",omitempty"`
+	RawXML                   string `json:",omitempty"`
 	Geometry                 string
 	Fill                     string
 	LineColor                string
+	LineDash                 string
 	LineWidth                float64
 	Radius                   float64
 	Font                     Font

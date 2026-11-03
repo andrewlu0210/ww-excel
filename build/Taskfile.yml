@@ -191,7 +191,7 @@ tasks:
       - wails3 generate bindings -f '{{.BUILD_FLAGS}}' -clean=true{{if eq .OBFUSCATED "true"}} -obfuscated{{end}} -ts -i
 
   generate:icons:
-    summary: Generates rounded desktop icons from the full-bleed artwork.
+    summary: Generates rounded desktop icons with transparent Dock margins.
     run: once
     dir: build
     sources:
@@ -202,7 +202,7 @@ tasks:
       - "darwin/icons.icns"
       - "windows/icon.ico"
     cmds:
-      # Apply the corner mask without adding padding around the artwork.
+      # Keep the artwork intact inside a rounded silhouette with Dock margins.
       - cmd: swift -module-cache-path /private/tmp/ww-excel-swift-cache ../scripts/round-icon.swift appicon.icon/Assets/appicon.png appicon.png
         platforms: [darwin]
       - wails3 generate icons -input appicon.png -macfilename darwin/icons.icns -windowsfilename windows/icon.ico

@@ -25,6 +25,10 @@ import (
 // ---- Floating objects ----
 
 type ChartSeriesDTO struct {
+	Type           string                        `json:"type,omitempty"`
+	Secondary      bool                          `json:"secondary,omitempty"`
+	LineWidth      float64                       `json:"lineWidth,omitempty"`
+	Marker         string                        `json:"marker,omitempty"`
 	PointStyles    map[int]model.ChartPointStyle `json:"pointStyles,omitempty"`
 	CategoryLabels []string                      `json:"categoryLabels,omitempty"`
 	Color          string                        `json:"color,omitempty"`
@@ -36,21 +40,25 @@ type ChartSeriesDTO struct {
 }
 
 type ChartDTO struct {
-	PlotArea     *model.ChartPlotArea `json:"plotArea,omitempty"`
-	ValueAxis    *model.ChartAxis     `json:"valueAxis,omitempty"`
-	CategoryAxis *model.ChartAxis     `json:"categoryAxis,omitempty"`
-	Background   string               `json:"background,omitempty"`
-	HoleSize     int                  `json:"holeSize,omitempty"`
-	Type         string               `json:"type"`
-	Title        string               `json:"title"`
-	AutoTitle    bool                 `json:"autoTitle,omitempty"`
-	TitleSize    float64              `json:"titleSize,omitempty"`
-	Border       string               `json:"border,omitempty"`
-	Series       []ChartSeriesDTO     `json:"series"`
-	Legend       string               `json:"legend"`
-	XTitle       string               `json:"xTitle"`
-	YTitle       string               `json:"yTitle"`
-	Stacked      bool                 `json:"stacked"`
+	SecondaryAxis         *model.ChartAxis     `json:"secondaryAxis,omitempty"`
+	SecondaryCategoryAxis *model.ChartAxis     `json:"secondaryCategoryAxis,omitempty"`
+	GapWidth              *float64             `json:"gapWidth,omitempty"`
+	FontName              string               `json:"fontName,omitempty"`
+	PlotArea              *model.ChartPlotArea `json:"plotArea,omitempty"`
+	ValueAxis             *model.ChartAxis     `json:"valueAxis,omitempty"`
+	CategoryAxis          *model.ChartAxis     `json:"categoryAxis,omitempty"`
+	Background            string               `json:"background,omitempty"`
+	HoleSize              int                  `json:"holeSize,omitempty"`
+	Type                  string               `json:"type"`
+	Title                 string               `json:"title"`
+	AutoTitle             bool                 `json:"autoTitle,omitempty"`
+	TitleSize             float64              `json:"titleSize,omitempty"`
+	Border                string               `json:"border,omitempty"`
+	Series                []ChartSeriesDTO     `json:"series"`
+	Legend                string               `json:"legend"`
+	XTitle                string               `json:"xTitle"`
+	YTitle                string               `json:"yTitle"`
+	Stacked               bool                 `json:"stacked"`
 }
 
 // ObjectDTO is a chart or picture. Pictures are fetched separately
@@ -59,6 +67,7 @@ type ShapeDTO struct {
 	Geometry  string       `json:"geometry"`
 	Fill      string       `json:"fill"`
 	LineColor string       `json:"lineColor"`
+	LineDash  string       `json:"lineDash,omitempty"`
 	LineWidth float64      `json:"lineWidth"`
 	Radius    float64      `json:"radius"`
 	Runs      []TextRunDTO `json:"runs"`
@@ -99,9 +108,9 @@ func chartDTO(c *model.Chart) *ChartDTO {
 	if c == nil {
 		return nil
 	}
-	out := &ChartDTO{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
+	out := &ChartDTO{SecondaryAxis: c.SecondaryAxis, SecondaryCategoryAxis: c.SecondaryCategoryAxis, GapWidth: c.GapWidth, FontName: c.FontName, PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked, Series: []ChartSeriesDTO{}}
 	for _, s := range c.Series {
-		out.Series = append(out.Series, ChartSeriesDTO{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
+		out.Series = append(out.Series, ChartSeriesDTO{Type: s.Type, Secondary: s.Secondary, LineWidth: s.LineWidth, Marker: s.Marker, PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: refText(s.Name), Categories: refText(s.Categories), Values: refText(s.Values)})
 	}
 	return out
 }
@@ -118,10 +127,10 @@ func (c *ChartDTO) model() *model.Chart {
 	if c == nil {
 		return nil
 	}
-	out := &model.Chart{PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
+	out := &model.Chart{SecondaryAxis: c.SecondaryAxis, SecondaryCategoryAxis: c.SecondaryCategoryAxis, GapWidth: c.GapWidth, FontName: c.FontName, PlotArea: c.PlotArea, ValueAxis: c.ValueAxis, CategoryAxis: c.CategoryAxis, Type: c.Type, HoleSize: c.HoleSize, Background: c.Background, Title: c.Title, AutoTitle: c.AutoTitle, TitleSize: c.TitleSize, Border: c.Border, Legend: c.Legend, XTitle: c.XTitle, YTitle: c.YTitle, Stacked: c.Stacked}
 	strip := func(f string) string { return strings.TrimPrefix(strings.TrimSpace(f), "=") }
 	for _, s := range c.Series {
-		out.Series = append(out.Series, model.ChartSeries{PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
+		out.Series = append(out.Series, model.ChartSeries{Type: s.Type, Secondary: s.Secondary, LineWidth: s.LineWidth, Marker: s.Marker, PointStyles: s.PointStyles, CategoryLabels: s.CategoryLabels, Color: s.Color, PointColors: s.PointColors, Labels: s.Labels, Name: strip(s.Name), Categories: strip(s.Categories), Values: strip(s.Values)})
 	}
 	return out
 }
@@ -129,7 +138,7 @@ func (c *ChartDTO) model() *model.Chart {
 func objectDTO(o model.Object) ObjectDTO {
 	dto := ObjectDTO{ID: o.ID, Kind: o.Kind, Row: o.Anchor.Row, Col: o.Anchor.Col, DX: o.Anchor.DX, DY: o.Anchor.DY, W: o.W, H: o.H, Chart: chartDTO(o.Chart)}
 	if shape := o.Shape; shape != nil {
-		dto.Shape = &ShapeDTO{Geometry: shape.Geometry, Fill: shape.Fill, LineColor: shape.LineColor, LineWidth: shape.LineWidth, Radius: shape.Radius,
+		dto.Shape = &ShapeDTO{Geometry: shape.Geometry, Fill: shape.Fill, LineColor: shape.LineColor, LineDash: shape.LineDash, LineWidth: shape.LineWidth, Radius: shape.Radius,
 			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom,
 			W: shape.W, H: shape.H, Rot: shape.Rot, FlipH: shape.FlipH, FlipV: shape.FlipV, Adjust: shape.Adjust, Path: shape.Path, HeadArrow: shape.HeadArrow, TailArrow: shape.TailArrow}
 	}
@@ -178,9 +187,18 @@ func (s *SheetService) UpdateObject(ctx context.Context, sheet int, o ObjectDTO,
 		if cur == nil {
 			return nil, errors.New("物件不存在")
 		}
+		if cur.ReadOnly {
+			return nil, errors.New("群組物件的位置與大小無法單獨修改")
+		}
 		next := *cur
 		next.Anchor = model.Anchor{Row: max(o.Row, 0), Col: max(o.Col, 0), DX: max(o.DX, 0), DY: max(o.DY, 0)}
 		next.W, next.H = max(o.W, 10), max(o.H, 10)
+		if cur.Shape != nil && cur.Shape.W > 0 && cur.W > 0 && cur.H > 0 {
+			shape := *cur.Shape
+			shape.W *= next.W / cur.W
+			shape.H *= next.H / cur.H
+			next.Shape = &shape
+		}
 		if o.Chart != nil {
 			next.Chart = o.Chart.model()
 		}
@@ -229,9 +247,10 @@ type SeriesDataDTO struct {
 }
 
 type ChartDataDTO struct {
-	ValueScale *ChartScaleDTO  `json:"valueScale,omitempty"`
-	Categories []string        `json:"categories"`
-	Series     []SeriesDataDTO `json:"series"`
+	SecondaryScale *ChartScaleDTO  `json:"secondaryScale,omitempty"`
+	ValueScale     *ChartScaleDTO  `json:"valueScale,omitempty"`
+	Categories     []string        `json:"categories"`
+	Series         []SeriesDataDTO `json:"series"`
 }
 
 // ChartData evaluates a chart's series for drawing.
@@ -248,6 +267,7 @@ func (s *SheetService) ChartData(ctx context.Context, sheet, id int) ChartDataDT
 		}
 		data := d.ChartData(sheet, o.Chart, shownText(d.Workbook()))
 		out.ValueScale = chartValueScale(o.Chart, data)
+		out.SecondaryScale = chartSecondaryScale(o.Chart, data)
 		out.Categories = append(out.Categories, data.Categories...)
 		for i, sd := range data.Series {
 			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(o.Chart.Series[i].Labels, sd.Values)})
@@ -265,6 +285,7 @@ func (s *SheetService) ChartPreview(ctx context.Context, sheet int, chart ChartD
 		}
 		data := d.ChartData(sheet, chart.model(), shownText(d.Workbook()))
 		out.ValueScale = chartValueScale(chart.model(), data)
+		out.SecondaryScale = chartSecondaryScale(chart.model(), data)
 		out.Categories = append(out.Categories, data.Categories...)
 		for i, sd := range data.Series {
 			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(chart.Series[i].Labels, sd.Values)})

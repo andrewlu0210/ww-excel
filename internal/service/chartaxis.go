@@ -17,6 +17,41 @@ type ChartScaleDTO struct {
 
 // Format ticks in Go so axes use the same Excel number formats as cells.
 func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
+	return chartAxisScale(c, data, false)
+}
+
+func chartSecondaryScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
+	if c.Type != "combo" {
+		return nil
+	}
+	return chartAxisScale(c, data, true)
+}
+
+func chartAxisScale(c *model.Chart, data document.ChartData, secondary bool) *ChartScaleDTO {
+	if c.Type == "combo" {
+		filtered := document.ChartData{}
+		copyChart := *c
+		copyChart.Type = "line"
+		copyChart.Series = nil
+		if secondary {
+			copyChart.ValueAxis = c.SecondaryAxis
+		}
+		for i, series := range c.Series {
+			if series.Secondary != secondary || i >= len(data.Series) {
+				continue
+			}
+			filtered.Series = append(filtered.Series, data.Series[i])
+			copyChart.Series = append(copyChart.Series, series)
+			if series.Type == "column" {
+				copyChart.Type = "column"
+			}
+		}
+		if len(filtered.Series) == 0 {
+			return nil
+		}
+		c, data = &copyChart, filtered
+	}
+
 	if c.ValueAxis == nil || c.Type == "pie" || c.Type == "doughnut" || c.Type == "scatter" {
 		return nil
 	}
@@ -28,7 +63,7 @@ func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
 	}
 	for i := 0; i < n; i++ {
 		pos, neg := 0.0, 0.0
-		for _, s := range data.Series {
+		for si, s := range data.Series {
 			if i >= len(s.Values) || s.Values[i] == nil {
 				continue
 			}
@@ -36,7 +71,7 @@ func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
 			if math.IsNaN(v) || math.IsInf(v, 0) {
 				continue
 			}
-			if c.Stacked && c.Type != "line" {
+			if c.Stacked && c.Type != "line" && (si >= len(c.Series) || c.Series[si].Type != "line") {
 				if v >= 0 {
 					pos += v
 				} else {
@@ -55,7 +90,7 @@ func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
 	if math.IsInf(lo, 0) || math.IsInf(hi, 0) {
 		lo, hi = 0, 1
 	}
-	if c.Type != "line" {
+	if c.Type != "line" || (lo > 0 && lo < hi*0.6) || (hi < 0 && hi > lo*0.6) {
 		lo = math.Min(lo, 0)
 		hi = math.Max(hi, 0)
 	}
@@ -75,7 +110,15 @@ func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
 	if math.IsNaN(lo) || math.IsNaN(hi) || math.IsInf(lo, 0) || math.IsInf(hi, 0) || hi <= lo {
 		return nil
 	}
+	// Automatic bounds leave room beyond the data, including exact tick multiples.
 	raw := (hi - lo) / 6
+	headroom := (hi - lo) * 0.05
+	if a.Maximum == nil && hi > 0 {
+		hi += headroom
+	}
+	if a.Minimum == nil && lo < 0 {
+		lo -= headroom
+	}
 	mag := math.Pow(10, math.Floor(math.Log10(raw)))
 	norm := raw / mag
 	unit := 10.0

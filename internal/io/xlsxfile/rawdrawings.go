@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"path"
+	"sort"
 	"strings"
 
 	"ww-excel/internal/model"
@@ -97,7 +98,11 @@ func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
 		return
 	}
 	theme := drawingTheme(parts)
+	sources := shapeSources(readPart(parts, drawing))
 	add := func(obj model.Object) {
+		if obj.Shape != nil {
+			obj.Shape.RawXML = sources[obj.Shape.SourceID]
+		}
 		obj.ID = sh.Layout.NextObjectID()
 		sh.Layout.Objects = append(sh.Layout.Objects, obj)
 	}
@@ -339,6 +344,16 @@ type rawChartCategories struct {
 }
 
 type rawSeries struct {
+	Index *struct {
+		Val int `xml:"val,attr"`
+	} `xml:"idx"`
+	Line struct {
+		Width float64     `xml:"w,attr"`
+		Fill  drawingFill `xml:"solidFill"`
+	} `xml:"spPr>ln"`
+	Marker struct {
+		Val string `xml:"val,attr"`
+	} `xml:"marker>symbol"`
 	Categories *rawChartCategories `xml:"cat>strLit"`
 	Fill       drawingFill         `xml:"spPr>solidFill"`
 	Points     []struct {
@@ -362,6 +377,16 @@ type rawAxisNumber struct {
 	Val float64 `xml:"val,attr"`
 }
 type rawChartAxis struct {
+	Position struct {
+		Val string `xml:"val,attr"`
+	} `xml:"axPos"`
+	Cross struct {
+		Val int `xml:"val,attr"`
+	} `xml:"crossAx"`
+	ID struct {
+		Val int `xml:"val,attr"`
+	} `xml:"axId"`
+	Font   drawingFont `xml:"txPr>p>pPr>defRPr"`
 	Format struct {
 		Code string `xml:"formatCode,attr"`
 	} `xml:"numFmt"`
@@ -388,7 +413,7 @@ func (a *rawChartAxis) model(theme map[string]string) *model.ChartAxis {
 	if a == nil {
 		return nil
 	}
-	out := &model.ChartAxis{Format: a.Format.Code, MajorUnit: a.MajorUnit.Val, LineColor: a.Line.Fill.color(theme), LineHidden: a.Line.NoFill != nil, Hidden: a.Delete.Val, MajorTick: a.MajorTick.Val, GridLines: a.GridLines != nil, HideLabels: a.TickLabels.Val == "none"}
+	out := &model.ChartAxis{FontSize: xmlFloat(a.Font.Size) / 100, FontName: a.Font.Latin.Name, Format: a.Format.Code, MajorUnit: a.MajorUnit.Val, LineColor: a.Line.Fill.color(theme), LineHidden: a.Line.NoFill != nil, Hidden: a.Delete.Val, MajorTick: a.MajorTick.Val, GridLines: a.GridLines != nil, HideLabels: a.TickLabels.Val == "none"}
 	if a.Scaling.Minimum != nil {
 		out.Minimum = &a.Scaling.Minimum.Val
 	}
@@ -399,6 +424,10 @@ func (a *rawChartAxis) model(theme map[string]string) *model.ChartAxis {
 }
 
 type rawPlot struct {
+	AxisIDs []struct {
+		Val int `xml:"val,attr"`
+	} `xml:"axId"`
+	GapWidth *rawAxisNumber `xml:"gapWidth"`
 	HoleSize struct {
 		Val int `xml:"val,attr"`
 	} `xml:"holeSize"`
@@ -414,6 +443,7 @@ type rawPlot struct {
 
 func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	var doc struct {
+		Font       drawingFont `xml:"txPr>p>pPr>defRPr"`
 		Properties struct {
 			NoFill *struct{}   `xml:"noFill"`
 			Fill   drawingFill `xml:"solidFill"`
@@ -431,8 +461,9 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 			} `xml:"title"`
 			Plot struct {
 				Manual       *rawChartLayout `xml:"layout>manualLayout"`
-				ValueAxis    *rawChartAxis   `xml:"valAx"`
-				CategoryAxis *rawChartAxis   `xml:"catAx"`
+				ValueAxis    []rawChartAxis  `xml:"valAx"`
+				CategoryAxis []rawChartAxis  `xml:"catAx"`
+				DateAxis     []rawChartAxis  `xml:"dateAx"`
 				Bar          []rawPlot       `xml:"barChart"`
 				Bar3D        []rawPlot       `xml:"bar3DChart"`
 				Line         []rawPlot       `xml:"lineChart"`
@@ -456,7 +487,17 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	p := doc.Chart.Plot
 	theme := drawingTheme(parts)
-	c := &model.Chart{ValueAxis: p.ValueAxis.model(theme), CategoryAxis: p.CategoryAxis.model(theme), Legend: "none"}
+	if len(p.CategoryAxis) == 0 {
+		p.CategoryAxis = p.DateAxis
+	}
+	var valueAxis, categoryAxis *model.ChartAxis
+	if len(p.ValueAxis) > 0 {
+		valueAxis = p.ValueAxis[0].model(theme)
+	}
+	if len(p.CategoryAxis) > 0 {
+		categoryAxis = p.CategoryAxis[0].model(theme)
+	}
+	c := &model.Chart{FontName: doc.Font.Latin.Name, ValueAxis: valueAxis, CategoryAxis: categoryAxis, Legend: "none"}
 	c.PlotArea = p.Manual.model()
 	if t := doc.Chart.TitleEl; t != nil {
 		// A title without its own text shows the series name (single series).
@@ -489,58 +530,138 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	if plot == nil {
 		return nil
 	}
+	if plot.GapWidth != nil {
+		c.GapWidth = &plot.GapWidth.Val
+	}
 	if c.Type == "column" && plot.BarDir.Val == "bar" {
 		c.Type = "bar"
 	}
 	if c.Type == "doughnut" {
 		c.HoleSize = plot.HoleSize.Val
 	}
+	combo := len(p.Bar) > 0 && p.Bar[0].BarDir.Val != "bar" && len(p.Line) > 0
+	primaryID := 0
+	axisFor := func(plot *rawPlot, axes []rawChartAxis) *rawChartAxis {
+		for _, id := range plot.AxisIDs {
+			for i := range axes {
+				if axes[i].ID.Val == id.Val {
+					return &axes[i]
+				}
+			}
+		}
+		return nil
+	}
+	if combo {
+		c.Type = "combo"
+		primary := axisFor(plot, p.ValueAxis)
+		for i := range p.ValueAxis {
+			if p.ValueAxis[i].Position.Val == "l" {
+				primary = &p.ValueAxis[i]
+				break
+			}
+		}
+		if primary != nil {
+			primaryID = primary.ID.Val
+			c.ValueAxis = primary.model(theme)
+			for i := range p.CategoryAxis {
+				if p.CategoryAxis[i].ID.Val == primary.Cross.Val {
+					c.CategoryAxis = p.CategoryAxis[i].model(theme)
+				}
+			}
+		}
+	}
+	var seriesOrder []int
+
 	c.Stacked = strings.HasPrefix(plot.Grouping.Val, "stacked") || plot.Grouping.Val == "percentStacked"
-	for _, s := range plot.Series {
-		cs := model.ChartSeries{Name: s.Name, Categories: s.CatStr, Values: s.Val, Color: s.Fill.color(theme), PointColors: map[int]string{}, PointStyles: map[int]model.ChartPointStyle{}}
-		if s.Categories != nil {
-			count := min(max(0, s.Categories.Count.Val), 100000)
-			cs.CategoryLabels = make([]string, count)
-			for _, p := range s.Categories.Points {
-				if p.Index >= 0 && p.Index < count {
-					cs.CategoryLabels[p.Index] = p.Value
+	plots := []*rawPlot{plot}
+	if combo {
+		for i := range p.Line {
+			plots = append(plots, &p.Line[i])
+		}
+	}
+	for pi, current := range plots {
+		seriesType, secondary := "", false
+		if combo {
+			seriesType = "column"
+			if pi > 0 {
+				seriesType = "line"
+			}
+			if axis := axisFor(current, p.ValueAxis); axis != nil && axis.ID.Val != primaryID {
+				secondary = true
+				c.SecondaryAxis = axis.model(theme)
+				if cat := axisFor(current, p.CategoryAxis); cat != nil {
+					c.SecondaryCategoryAxis = cat.model(theme)
 				}
 			}
 		}
-		for _, p := range s.Points {
-			if color := p.Appearance.Fill.color(theme); color != "" {
-				cs.PointColors[p.Index.Val] = color
-			}
-		}
-		for _, point := range s.Points {
-			if style, ok := point.Appearance.model(theme); ok {
-				cs.PointStyles[point.Index.Val] = style
-				if style.Gradient != nil && len(style.Gradient.Stops) > 0 {
-					cs.PointColors[point.Index.Val] = style.Gradient.Stops[len(style.Gradient.Stops)/2].Color
+		for _, s := range current.Series {
+			cs := model.ChartSeries{Type: seriesType, Secondary: secondary, LineWidth: s.Line.Width / emuPerPx, Marker: s.Marker.Val, Name: s.Name, Categories: s.CatStr, Values: s.Val, Color: s.Fill.color(theme), PointColors: map[int]string{}, PointStyles: map[int]model.ChartPointStyle{}}
+			if seriesType == "line" || c.Type == "line" {
+				if color := s.Line.Fill.color(theme); color != "" {
+					cs.Color = color
 				}
 			}
-		}
-		labels := s.Labels
-		if labels == nil {
-			labels = plot.Labels
-		}
-		cs.Labels = labels.model(theme)
-		if cs.Categories == "" {
-			cs.Categories = s.CatNum
-		}
-		if c.Type == "scatter" {
-			cs.Values, cs.Categories = s.Y, s.XNum
+			if s.Categories != nil {
+				count := min(max(0, s.Categories.Count.Val), 100000)
+				cs.CategoryLabels = make([]string, count)
+				for _, p := range s.Categories.Points {
+					if p.Index >= 0 && p.Index < count {
+						cs.CategoryLabels[p.Index] = p.Value
+					}
+				}
+			}
+			for _, p := range s.Points {
+				if color := p.Appearance.Fill.color(theme); color != "" {
+					cs.PointColors[p.Index.Val] = color
+				}
+			}
+			for _, point := range s.Points {
+				if style, ok := point.Appearance.model(theme); ok {
+					cs.PointStyles[point.Index.Val] = style
+					if style.Gradient != nil && len(style.Gradient.Stops) > 0 {
+						cs.PointColors[point.Index.Val] = style.Gradient.Stops[len(style.Gradient.Stops)/2].Color
+					}
+				}
+			}
+			labels := s.Labels
+			if labels == nil {
+				labels = current.Labels
+			}
+			cs.Labels = labels.model(theme)
 			if cs.Categories == "" {
-				cs.Categories = s.XStr
+				cs.Categories = s.CatNum
 			}
+			if c.Type == "scatter" {
+				cs.Values, cs.Categories = s.Y, s.XNum
+				if cs.Categories == "" {
+					cs.Categories = s.XStr
+				}
+			}
+			if cs.Name == "" && s.NameV != "" {
+				cs.Name = `"` + s.NameV + `"`
+			}
+			if cs.Values == "" {
+				continue
+			}
+			order := len(seriesOrder)
+			if s.Index != nil {
+				order = s.Index.Val
+			}
+			seriesOrder = append(seriesOrder, order)
+			c.Series = append(c.Series, cs)
 		}
-		if cs.Name == "" && s.NameV != "" {
-			cs.Name = `"` + s.NameV + `"`
+	}
+	if combo {
+		indices := make([]int, len(c.Series))
+		for i := range indices {
+			indices[i] = i
 		}
-		if cs.Values == "" {
-			continue
+		sort.SliceStable(indices, func(i, j int) bool { return seriesOrder[indices[i]] < seriesOrder[indices[j]] })
+		sorted := make([]model.ChartSeries, len(indices))
+		for i, index := range indices {
+			sorted[i] = c.Series[index]
 		}
-		c.Series = append(c.Series, cs)
+		c.Series = sorted
 	}
 	if len(c.Series) == 0 {
 		return nil

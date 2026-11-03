@@ -90,7 +90,7 @@ func (e *CFEval) prepare(r *model.CFRule) *cfPrepared {
 	switch r.Type {
 	case "top", "bottom", "average", "2_color_scale", "3_color_scale", "data_bar", "icon_set":
 		e.eachIn(r.Ranges, func(_, _ int, c model.Cell) {
-			if c.Kind == model.KindNumber {
+			if c.Kind == model.KindNumber && !math.IsNaN(c.Num) && !math.IsInf(c.Num, 0) {
 				p.nums = append(p.nums, c.Num)
 			}
 		})
@@ -188,7 +188,7 @@ func (e *CFEval) At(row, col int, c model.Cell) (CFResult, bool) {
 			}
 			continue
 		case "icon_set":
-			if c.Kind == model.KindNumber && r.IconSet != nil && len(r.IconSet.Thresholds) > 0 && !iconApplied {
+			if c.Kind == model.KindNumber && !math.IsNaN(c.Num) && !math.IsInf(c.Num, 0) && r.IconSet != nil && len(r.IconSet.Thresholds) > 0 && !iconApplied {
 				iconApplied = true
 				set := r.IconSet
 				index := 0
@@ -473,6 +473,9 @@ func (d *Document) ClearCFCommand(sheet int, ranges []model.Range) (command.Comm
 }
 
 func checkCFRule(r *model.CFRule) error {
+	if r.Type == "icon_set" {
+		return checkIconSet(r)
+	}
 	switch r.Type {
 	case "cell", "formula":
 		if strings.TrimSpace(r.Value1) == "" {

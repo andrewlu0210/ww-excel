@@ -69,11 +69,12 @@ type fileLayout struct {
 	Filter           *fileFilter    `json:"filter,omitempty"`
 	Notes            []fileNote     `json:"notes,omitempty"`
 	// Rules are stored as the model structs.
-	Validations []model.Validation `json:"validations,omitempty"`
-	CondFormats []model.CFRule     `json:"condFormats,omitempty"`
-	Tables      []model.Table      `json:"tables,omitempty"`
-	Objects     []model.Object     `json:"objects,omitempty"`
-	PageSetup   *model.PageSetup   `json:"pageSetup,omitempty"`
+	Validations  []model.Validation `json:"validations,omitempty"`
+	CondFormats  []model.CFRule     `json:"condFormats,omitempty"`
+	PivotHeaders []model.Range      `json:"pivotHeaders,omitempty"`
+	Tables       []model.Table      `json:"tables,omitempty"`
+	Objects      []model.Object     `json:"objects,omitempty"`
+	PageSetup    *model.PageSetup   `json:"pageSetup,omitempty"`
 }
 
 type fileNote struct {
@@ -241,6 +242,7 @@ func writeLayout(l model.Layout) *fileLayout {
 		fl.Merges = append(fl.Merges, [4]int{m.R0, m.C0, m.R1, m.C1})
 	}
 	fl.Validations, fl.CondFormats, fl.Tables = l.Validations, l.CondFormats, l.Tables
+	fl.PivotHeaders = l.PivotHeaders
 	fl.Objects, fl.PageSetup = l.Objects, l.PageSetup
 	for pos, n := range l.Notes {
 		fl.Notes = append(fl.Notes, fileNote{R: pos[0], C: pos[1], Author: n.Author, Text: n.Text})
@@ -285,6 +287,7 @@ func readLayout(fl *fileLayout) model.Layout {
 	l.HideGridLines = fl.HideGridLines
 	l.FreezeRows, l.FreezeCols = max(fl.FreezeRows, 0), max(fl.FreezeCols, 0)
 	l.Validations, l.CondFormats, l.Tables = fl.Validations, fl.CondFormats, fl.Tables
+	l.PivotHeaders = fl.PivotHeaders
 	l.Objects, l.PageSetup = fl.Objects, fl.PageSetup
 	for _, n := range fl.Notes {
 		if n.R >= 0 && n.R < model.MaxRows && n.C >= 0 && n.C < model.MaxCols {

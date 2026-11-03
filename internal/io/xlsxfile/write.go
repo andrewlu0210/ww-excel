@@ -95,6 +95,9 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	if err := preserveConditionalDetails(tmpName, wb); err != nil {
 		return nil, err
 	}
+	if err := w.preserveShapes(tmpName, ch.OldLayouts); err != nil {
+		return nil, err
+	}
 	mode := os.FileMode(0o644)
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
@@ -115,6 +118,7 @@ type writer struct {
 	digitWidth float64
 	f          *excelize.File
 	wb         *model.Workbook
+	shapeAdded map[*model.Sheet]map[int]int
 	styles     map[uint32]int
 }
 

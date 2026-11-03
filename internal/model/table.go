@@ -72,13 +72,51 @@ func (l *Layout) TableAt(row, col int) *Table {
 	return nil
 }
 
-// TableAppearance contains immutable partial font overrides from custom table styles.
+// TableAppearance contains immutable partial overrides from custom table styles.
 // Missing font properties inherit the cell font.
 type TableAppearance struct {
-	Whole        *RichFont `json:",omitempty"`
-	Header       *RichFont `json:",omitempty"`
-	First        *RichFont `json:",omitempty"`
-	Last         *RichFont `json:",omitempty"`
-	Totals       *RichFont `json:",omitempty"`
-	HeaderBorder BorderLine
+	WholeFill        *string   `json:",omitempty"`
+	HeaderFill       *string   `json:",omitempty"`
+	TotalsFill       *string   `json:",omitempty"`
+	FirstStripeFill  *string   `json:",omitempty"`
+	SecondStripeFill *string   `json:",omitempty"`
+	FirstStripeSize  int       `json:",omitempty"`
+	SecondStripeSize int       `json:",omitempty"`
+	Whole            *RichFont `json:",omitempty"`
+	Header           *RichFont `json:",omitempty"`
+	First            *RichFont `json:",omitempty"`
+	Last             *RichFont `json:",omitempty"`
+	Totals           *RichFont `json:",omitempty"`
+	HeaderBorder     BorderLine
+}
+
+// FillAt preserves direct cell fills and layers header, total and row stripe fills.
+func (a *TableAppearance) FillAt(t Table, row int, direct string) string {
+	if a == nil || direct != "" {
+		return direct
+	}
+	fill := a.WholeFill
+	switch {
+	case row == t.Range.R0:
+		if a.HeaderFill != nil {
+			fill = a.HeaderFill
+		}
+	case t.TotalsRow && row == t.Range.R1:
+		if a.TotalsFill != nil {
+			fill = a.TotalsFill
+		}
+	case !t.NoBands:
+		first, second := max(1, a.FirstStripeSize), max(1, a.SecondStripeSize)
+		if (row-t.Range.R0-1)%(first+second) < first {
+			if a.FirstStripeFill != nil {
+				fill = a.FirstStripeFill
+			}
+		} else if a.SecondStripeFill != nil {
+			fill = a.SecondStripeFill
+		}
+	}
+	if fill != nil {
+		return *fill
+	}
+	return direct
 }

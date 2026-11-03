@@ -2,13 +2,16 @@
   // Sheet controller: selection, keyboard, the cell editor, the formula
   // bar and the link to Go. Rendering lives in Grid.
   //
-  // The cell editor is a single <textarea> that always holds keyboard
-  // focus, invisible while idle and positioned on the active cell. Typing
-  // (or an IME composition) therefore starts in the textarea itself, so
+  // The cell editor keeps keyboard focus even while idle. Native DOM
+  // editing is invisible while idle and positioned on the active cell. Typing
+  // (or an IME composition) therefore starts in the editor itself, so
   // the first keystroke of 注音/倉頡 is captured and the candidate window
   // appears next to the cell. The formula bar is a second input showing
   // the same text; whichever one has focus is the "active input".
   import { t } from '../i18n';
+  import { RichDraft, type Run } from '../editor/draft';
+  import { RichEditor } from '../editor/editable';
+  import { layoutRichText, styledRuns } from '../grid/richtext';
   import { onMount, untrack } from 'svelte';
   import {
     documentApi,
@@ -71,8 +74,9 @@
   import type { ContextRequest, GridPointer, ResizeRequest } from '../input/pointer';
   import { drawChart, LIGHT_THEME } from '../charts/render';
   import FilterMenu from './FilterMenu.svelte';
-  import ObjectLayer, { toChartData } from './ObjectLayer.svelte';
+  import ObjectLayer, { toChartData, canEditShapeText } from './ObjectLayer.svelte';
   import Grid from './Grid.svelte';
+  import ShapeTextEditor from './ShapeTextEditor.svelte';
 
   interface Props {
     paintMode?: 'off' | 'once' | 'repeat';
@@ -134,8 +138,16 @@
 
   let grid = $state<ReturnType<typeof Grid>>();
   let root: HTMLDivElement;
-  let editor: HTMLTextAreaElement;
-  let bar: HTMLTextAreaElement;
+  let editor: RichEditor;
+  let bar: RichEditor;
+  let richTick = $state(0);
+  let draft: RichDraft | null = null;
+
+  function attachEditor(node: HTMLDivElement, kind: 'cell' | 'bar') {
+    const control = new RichEditor(node, () => onInput());
+    if (kind === 'cell') editor = control; else bar = control;
+    return { destroy: () => control.destroy() };
+  }
   let selection = $state<Selection>(untrack(() => initialSelection) ?? single({ row: 0, col: 0 }));
   let layout = $state<LayoutDTO | null>(null);
   let merges = $derived((layout?.merges ?? []).map((m) => ({ r0: m.r0, c0: m.c0, r1: m.r1, c1: m.c1 })));
@@ -180,6 +192,25 @@
   // ---- v0.7: floating objects ----
 
   let selectedObject = $state<number | null>(null);
+  let shapeEditing = $state<number | null>(null);
+  let shapeEditor = $state<ReturnType<typeof ShapeTextEditor>>();
+  let shapeFont = $state<StyleDTO['font'] | null>(null);
+
+  async function beginShapeEdit(id:number):Promise<void>{
+    if (editing) { commit('stay'); await queue; }
+    if (shapeEditing !== null && shapeEditing !== id) await commitShapeText();
+    if (!objects.some(o=>o.id===id && canEditShapeText(o))) return;
+    selectedObject=id;shapeEditing=id;
+  }
+  async function commitShapeText():Promise<void>{
+    if(shapeEditing===null || !shapeEditor || shapeEditor.composing())return;
+    const id=shapeEditing,runs=shapeEditor.runs();
+    const error=await serial(()=>sheetApi.updateShapeText(sheet,id,runs));
+    if(error){notify(error);return;}
+    if(shapeEditing===id){shapeEditing=null;shapeFont=null;focus();}
+  }
+  function cancelShapeText(){shapeEditing=null;shapeFont=null;focus();}
+
   // Bumped on every redraw so object positions follow scrolling.
   let viewTick = $state(0);
   let chartData = $state(new Map<number, ChartDataDTO>());
@@ -187,6 +218,7 @@
   let objects = $derived(layout?.objects ?? []);
 
   function objectRect(o: ObjectDTO): { x: number; y: number; w: number; h: number } {
+    void viewTick;
     const rc = grid?.areaRect({ r0: o.row, c0: o.col, r1: o.row, c1: o.col }) ?? { x: 0, y: 0, w: 0, h: 0 };
     return { x: rc.x + o.dx * scale, y: rc.y + o.dy * scale, w: o.w * scale, h: o.h * scale };
   }
@@ -242,6 +274,10 @@
   export function getObjects(): ObjectDTO[] {
     return objects;
   }
+
+  export async function finishShapeEditing():Promise<boolean> { await commitShapeText(); return shapeEditing === null; }
+  export function getShapeEditing() { return shapeEditing; }
+  export function selectShapeText(start:number,end:number) { shapeEditor?.selectText(start,end); }
 
   export function getSelectedObject(): number | null {
     return selectedObject;
@@ -307,7 +343,7 @@
   });
 
   $effect(() => {
-    mode = !editing ? 'ready' : point ? 'point' : editing.mode;
+    mode = shapeEditing !== null ? 'edit' : !editing ? 'ready' : point ? 'point' : editing.mode;
   });
 
   // The active cell's style, for the toolbar.
@@ -315,7 +351,10 @@
     void styleTick;
     const { row, col } = selection.active;
     const id = grid?.styleAt(row, col) ?? 0;
-    activeStyle = styleStore.get(id)?.dto ?? null;
+    void richTick;
+    const base = styleStore.get(id)?.dto ?? null;
+    activeStyle = base && shapeEditing !== null && shapeFont ? {...base,font:shapeFont} : base && editing && draft && !draft.text.startsWith('=')
+      ? { ...base, font: draft.selectionFont(input().selectionStart, input().selectionEnd) } : base;
     activeMerged = mergeAt(merges, selection.active) !== null;
   });
 
@@ -355,7 +394,7 @@
     editor?.focus({ preventScroll: true });
   }
 
-  function input(): HTMLTextAreaElement {
+  function input(): RichEditor {
     return activeInput === 'bar' ? bar : editor;
   }
 
@@ -537,13 +576,22 @@
     lastMenu = { action, at: now };
     contextMenu = null;
 
+    if(shapeEditing !== null && shapeEditor){
+      if(action==='undo' || action==='redo'){shapeEditor.history(action==='redo');return;}
+      if(action==='bold' || action==='italic' || action==='underline'){shapeEditor.format({[action]:!shapeFont?.[action]});return;}
+      if(action==='selectAll'){shapeEditor.selectAll();return;}
+      if(action==='copy' || action==='cut'){document.execCommand(action);return;}
+      if(action==='paste')return;
+      await commitShapeText();
+      if(shapeEditing !== null)return;
+    }
     if (await runEditingMenu(action, pasteText)) return;
 
     switch (action) {
       case 'undo':
       case 'redo':
         if (editing) {
-          document.execCommand(action);
+          input().history(action === 'redo');
         } else {
           await enqueue(async () => {
             await (action === 'undo' ? sheetApi.undo() : sheetApi.redo());
@@ -557,8 +605,7 @@
       case 'bold':
       case 'italic':
       case 'underline':
-        // Excel formats the cell; rich text inside the editor comes later.
-        if (!editing) await toggleFont(action);
+        await toggleFont(action);
         return;
       case 'autofitCols':
         await autofit(false);
@@ -611,6 +658,13 @@
     editing = { mode: m, pos };
     editError = null;
     point = null;
+    const value = text ?? input().value;
+    const cached = grid?.cache.cell(pos.row, pos.col);
+    const base = styleStore.get(grid?.styleAt(pos.row, pos.col) ?? 0)?.dto.font ?? { name: 'Calibri', size: 11 };
+    let runs: Run[] = m === 'edit' ? (cached?.runs ?? []) : [];
+    if (value.startsWith("'") && runs.map(r => r.text).join('') === value.slice(1)) runs = [{ text: "'", font: base }, ...runs];
+    draft = new RichDraft(value, base, runs);
+    editor.attach(draft); bar.attach(draft);
     if (text !== undefined) setText(text, caret ?? text.length);
     else syncFrom(input());
     if (!remote) grid?.scrollIntoView(pos);
@@ -622,8 +676,11 @@
     point = null;
     suggestions = [];
     hint = null;
-    editor.value = '';
+    draft = null;
+    editor.attach(new RichDraft('', { name: 'Calibri', size: 11 }));
+    bar.attach(new RichDraft(bar.value, { name: 'Calibri', size: 11 }));
     editText = '';
+    richTick++;
     if (activeInput === 'bar') {
       activeInput = 'cell';
       focus();
@@ -644,9 +701,10 @@
   }
 
   // Copies the active input's text to the other one.
-  function syncFrom(el: HTMLTextAreaElement): void {
+  function syncFrom(el: RichEditor): void {
     const other = el === editor ? bar : editor;
-    if (other.value !== el.value) other.value = el.value;
+    other.render();
+    richTick++;
     editText = el.value;
   }
 
@@ -666,16 +724,21 @@
     copyRange = null;
     const { pos } = editing;
     const text = input().value;
+    const runs = draft?.explicit && !text.startsWith('=') ? draft.runs : null;
+    const richHeight = runs ? richRowHeight(pos, runs) : 0;
     endEditing();
     const written = enqueue(async () => {
-      const res = await sheetApi.setCell(sheet, pos.row, pos.col, text);
-      if (res.error) restoreEdit(pos, text, res.error);
+      const res = await (runs ? sheetApi.setRichCell(sheet, pos.row, pos.col, text, runs, richHeight) : sheetApi.setCell(sheet, pos.row, pos.col, text));
+      if (res.error) {
+        restoreEdit(pos, text, res.error);
+        if (runs && draft) { draft.runs = runs; draft.explicit = true; editor.render(); bar.render(); }
+      }
       else notify(res.notice);
     });
     // Follow-ups run after the write, outside the queue (they enqueue
     // their own calls). A line break turns on wrapping: grow the row.
     // A number too wide for a default-width column widens it.
-    if (text.includes('\n')) {
+    if (!runs && text.includes('\n')) {
       const row = pos.row;
       void written.then(() => autofitRowsOf([{ r0: row, c0: 0, r1: row, c1: 0 }], true));
     } else if (text !== '' && !text.startsWith('=') && !text.startsWith("'")) {
@@ -718,6 +781,7 @@
 
   function commitFill(): void {
     if (!editing) return;
+    if (draft?.explicit && isSingleCell(selection)) return commit('stay');
     const { pos } = editing;
     const text = input().value;
     const ranges = selection.ranges.map(toDTO);
@@ -820,6 +884,7 @@
       return;
     }
     if (editing) {
+      if (input().isComposing) return;
       if (suggestions.length > 0 && handleSuggestionKey(e)) {
         e.preventDefault();
         return;
@@ -829,9 +894,11 @@
       return;
     }
     if (selectedObject !== null) {
+      if ((e.key === 'Enter' || e.key === 'F2') && objects.some(o=>o.id===selectedObject && canEditShapeText(o))) { e.preventDefault(); void beginShapeEdit(selectedObject); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         const id = selectedObject;
+        if (objects.find(o=>o.id===id)?.readonly) return;
         selectedObject = null;
         void serial(() => sheetApi.deleteObjects(sheet, [id])).then(notify);
         return;
@@ -874,7 +941,9 @@
 
   // Typing while idle starts Enter mode with the typed text, replacing
   // the cell content. Typing while pointing fixes the pointed reference.
-  function onInput(): void {
+  function onInput(event?: Event): void {
+    if (event) input().readInput();
+    if (input().isComposing) return;
     if (!editing) {
       startEditing('enter', selection.active);
       updateAssist();
@@ -889,6 +958,12 @@
 
   function onCompositionStart(): void {
     if (!editing) startEditing('enter', selection.active);
+    input().compositionStart();
+  }
+
+  function onCompositionEnd(): void {
+    input().compositionEnd();
+    onInput();
   }
 
   function onEditorFocus(): void {
@@ -897,6 +972,7 @@
 
   // Clicking the formula bar edits the active cell there (Edit mode).
   function onBarFocus(): void {
+    if (shapeEditing !== null) { void commitShapeText().then(()=>bar.focus()); return; }
     activeInput = 'bar';
     if (!editing) startEditing('edit', selection.active, bar.value, bar.selectionStart);
   }
@@ -912,6 +988,7 @@
     const el = input();
     const text = el.value;
     const caret = el.selectionStart;
+    richTick++;
     // Moving the caret away fixes the pointed reference.
     if (point && caret !== point.end) point = null;
 
@@ -986,11 +1063,33 @@
   function textWidth(text: string): number {
     measureCtx ??= document.createElement('canvas').getContext('2d');
     if (!measureCtx) return 0;
-    measureCtx.font = getComputedStyle(editor).font;
+    const runs = draft && !text.startsWith('=') ? styledRuns(draft.runs, '#000000') : [];
+    if (runs.length) {
+      let line = 0, widest = 0;
+      for (const run of runs) {
+        measureCtx.font = run.font;
+        for (const [i, part] of run.text.split('\n').entries()) {
+          if (i > 0) { widest = Math.max(widest, line); line = 0; }
+          line += measureCtx.measureText(part).width * scale;
+        }
+      }
+      return Math.max(widest, line);
+    }
+    measureCtx.font = getComputedStyle(editor.element).font;
     return Math.max(0, ...text.split('\n').map((line) => measureCtx!.measureText(line).width));
   }
 
-  // Positions the textarea on its cell. While editing it grows to the
+  function richRowHeight(pos: CellPos, runs: Run[]): number {
+    const st = styleStore.get(grid?.styleAt(pos.row, pos.col) ?? 0);
+    const area = areaOf(merges, pos);
+    if (area.r1 > area.r0) return 0;
+    const width = (grid?.areaRect(area).w ?? 64) / scale - 6;
+    const m = measurer();
+    const lines = layoutRichText(styledRuns(runs, '#000000'), Math.max(1, width), !!st?.dto.wrap || runs.some(r => r.text.includes('\n')), (font, text) => m.width(font, text), st?.fontPx);
+    return Math.min(546, Math.ceil(lines.reduce((height, line) => height + line.px * LINE_HEIGHT, 0) + 5));
+  }
+
+  // Positions the editor on its cell. While editing it grows to the
   // right to fit the text, then wraps and grows downward, like Excel.
   function layoutEditor(): void {
     if (!grid || !editor) return;
@@ -1003,6 +1102,7 @@
     const rc = grid.areaRect(areaOf(merges, pos));
     const vp = grid.viewport();
     const st = editor.style;
+    editor.scale(scale);
     // The editor uses the cell's font.
     const cellStyle = styleStore.get(grid.styleAt(pos.row, pos.col));
     if (cellStyle) {
@@ -1034,6 +1134,7 @@
   let pointDrag: CellPos | null = null;
 
   function onPointer(e: GridPointer): void {
+    if (e.kind === 'down' && shapeEditing !== null) void commitShapeText();
     // Clicking cells while editing a formula inserts references.
     if (editing && e.area === 'cell' && (pointDrag || (e.kind === 'down' && pointable()))) {
       if (e.kind === 'down') {
@@ -1135,6 +1236,7 @@
   }
 
   async function onReset(): Promise<void> {
+    if (shapeEditing !== null) cancelShapeText();
     if (editing) endEditing();
     const fresh = await sheetApi.info(sheet);
     used = { rows: fresh.usedRows, cols: fresh.usedCols };
@@ -1147,6 +1249,7 @@
     layout = await sheetApi.layout(sheet, styleStore.known);
     styleTick++;
     if (selectedObject !== null && !objects.some((o) => o.id === selectedObject)) selectedObject = null;
+    if (shapeEditing !== null && !objects.some(o=>o.id===shapeEditing)) cancelShapeText();
     void refreshObjects();
   }
 
@@ -1159,6 +1262,9 @@
       documentApi.onReset(() => void onReset()),
       styleStore.subscribe(() => styleTick++),
     ];
+    const selectionChanged = () => { if (editing && input().captureSelection()) richTick++; };
+    document.addEventListener('selectionchange', selectionChanged);
+    offs.push(() => document.removeEventListener('selectionchange', selectionChanged));
     for (const el of [editor, bar]) {
       for (const type of ['copy', 'cut', 'paste']) el.addEventListener(type, onClipboardEvent as EventListener);
       for (const type of ['beforecopy', 'beforecut']) el.addEventListener(type, onBeforeClipboard);
@@ -1723,6 +1829,21 @@
 
   // Applies a toolbar change to the selection.
   export async function applyFormat(patch: FormatPatch): Promise<string | null> {
+    if (shapeEditing !== null && shapeEditor) { shapeEditor.format(patch); return null; }
+    if (editing && input().isComposing) return null;
+    const fontKeys = ['fontName', 'fontSize', 'fontColor', 'bold', 'italic', 'underline', 'strike'];
+    const fontOnly = Object.keys(patch).every(key => key === 'label' || fontKeys.includes(key));
+    if (editing && draft && fontOnly && !input().isComposing && !draft.text.startsWith('=') &&
+        (draft.text.startsWith("'") || draft.explicit || !draft.text.trim() || !Number.isFinite(Number(draft.text))) && !grid?.cache.cell(editing.pos.row, editing.pos.col)?.numeric) {
+      const control = input();
+      control.format(patch);
+      (control === editor ? bar : editor).render();
+      richTick++;
+      control.focus({ preventScroll: true });
+      control.setSelectionRange(draft.start, draft.end);
+      layoutEditor();
+      return null;
+    }
     if (editing) commit('stay');
     const ranges = selection.ranges.map(toDTO);
     let err: string | null = null;
@@ -1895,6 +2016,10 @@
     onPointer({ kind, area: 'cell', pos, shift: false, meta: false });
   }
 
+  export function selectEditText(start: number, end: number): void {
+    input().focus(); input().setSelectionRange(start, end); richTick++;
+  }
+
   export function focusBar(): void {
     bar.focus();
   }
@@ -1950,12 +2075,14 @@
       {#each names as n (n)}<option value={n}></option>{/each}
     </datalist>
     <div class="fx">fx</div>
-    <textarea
-      bind:this={bar}
+    <div
+      use:attachEditor={'bar'}
+      contenteditable="true"
+      role="textbox"
+      tabindex="0"
+      aria-multiline="true"
       class="formula"
-      rows="1"
       spellcheck="false"
-      autocomplete="off"
       autocapitalize="off"
       aria-label={t('公式列')}
       onfocus={onBarFocus}
@@ -1963,7 +2090,9 @@
       oninput={onInput}
       onkeyup={updateAssist}
       onpointerup={updateAssist}
-    ></textarea>
+      oncompositionstart={onCompositionStart}
+      oncompositionend={onCompositionEnd}
+    ></div>
   </header>
 
   <Grid
@@ -1997,9 +2126,11 @@
         left={metrics.headerW * scale}
         top={HEADER_H * scale}
         selected={selectedObject}
+        editing={shapeEditing}
         {chartData}
         {images}
         onselect={(id) => {
+          if (shapeEditing !== null && shapeEditing !== id) void commitShapeText();
           if (editing) commit('stay');
           selectedObject = id;
           focus();
@@ -2007,16 +2138,27 @@
         oncommit={commitObject}
         onedit={(id) => {
           selectedObject = id;
-          onappaction?.('editChart');
+          if (objects.some(o=>o.id===id && canEditShapeText(o))) void beginShapeEdit(id);
+          else onappaction?.('editChart');
         }}
       />
     {/if}
-    <textarea
-      bind:this={editor}
+    {#if shapeEditing !== null}
+      {@const editedShape = objects.find(o=>o.id===shapeEditing)}
+      {#if editedShape?.shape}
+        {#key shapeEditing}<ShapeTextEditor bind:this={shapeEditor} object={editedShape} rect={objectRect(editedShape)} {scale}
+          onfont={(font)=>shapeFont=font} oncommit={()=>void commitShapeText()} oncancel={cancelShapeText}/>{/key}
+      {/if}
+    {/if}
+    <div
+      use:attachEditor={'cell'}
+      contenteditable="true"
+      role="textbox"
+      tabindex="0"
+      aria-multiline="true"
       class="cell-editor"
       class:active={editing !== null}
       spellcheck="false"
-      autocomplete="off"
       autocapitalize="off"
       aria-label={t('儲存格編輯器')}
       onfocus={onEditorFocus}
@@ -2025,8 +2167,16 @@
       onkeyup={updateAssist}
       onpointerup={updateAssist}
       oncompositionstart={onCompositionStart}
-    ></textarea>
+      oncompositionend={onCompositionEnd}
+    ></div>
   </Grid>
+  {#if shapeEditing !== null}
+    <div class="shape-edit-actions">
+      <span>{t('文字方塊')}</span>
+      <button onpointerdown={(e)=>e.preventDefault()} onclick={()=>void commitShapeText()}>{t('完成')} (⌘Enter)</button>
+      <button onpointerdown={(e)=>e.preventDefault()} onclick={cancelShapeText}>{t('取消')} (Esc)</button>
+    </div>
+  {/if}
   <div class="sr-only" role="status" aria-live="polite">{announcement}</div>
 
   {#if contextMenu}
@@ -2208,6 +2358,7 @@
     flex: 1;
     min-height: 0;
   }
+  .shape-edit-actions {position:absolute;right:16px;top:40px;z-index:8;display:flex;gap:8px;align-items:center;background:var(--chrome-bg);padding:6px 10px;border:1px solid var(--chrome-border);border-radius:6px;}
   .formula-bar {
     display: flex;
     align-items: center;
@@ -2231,6 +2382,7 @@
   }
   .formula {
     flex: 1;
+    min-width: 0;
     height: 22px;
     resize: none;
     overflow: hidden;
@@ -2265,6 +2417,8 @@
     line-height: 17px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    -webkit-user-select: text;
+    user-select: text;
     /* Idle: invisible but focused, so typing and IME start here. */
     opacity: 0;
     caret-color: transparent;

@@ -2,7 +2,11 @@
 // scatter, in Excel's default look. Pure apart from the canvas, so the
 // same code draws on screen and the pictures sent to the PDF renderer.
 
+import { fontFamilies } from '../stores/fonts';
+
 interface ChartAxis {
+  fontSize?: number;
+  fontName?: string;
   lineColor: string;
   lineHidden: boolean;
   hidden: boolean;
@@ -12,10 +16,17 @@ interface ChartAxis {
 }
 
 export interface ChartSpec {
+  gapWidth?: number | null;
+  fontName?: string;
   plotArea?: {x:number;y:number;w:number;h:number} | null;
   valueAxis?: ChartAxis | null;
+  secondaryAxis?: ChartAxis | null;
   categoryAxis?: ChartAxis | null;
   series?: {
+    type?: string;
+    secondary?: boolean;
+    lineWidth?: number;
+    marker?: string;
     color?: string;
     pointStyles?: {[key:string]: {
       gradient?: {angle:number;stops:{position:number;color:string}[] | null} | null;
@@ -50,6 +61,7 @@ export interface ChartSeriesData {
 }
 
 export interface ChartData {
+  secondaryScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
   valueScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
   categories: string[];
   series: ChartSeriesData[];
@@ -76,6 +88,10 @@ export const PALETTE = ['#4472C4', '#ED7D31', '#A5A5A5', '#FFC000', '#5B9BD5', '
 
 export function seriesColor(i: number): string {
   return PALETTE[i % PALETTE.length];
+}
+
+function chartFont(name: string): string {
+  return fontFamilies(name).map(f => `"${f.replace(/"/g, '')}"`).join(', ') + ', sans-serif';
 }
 
 function chartColor(spec:ChartSpec, i:number):string {
@@ -137,7 +153,7 @@ interface Box {
 export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, spec: ChartSpec, data: ChartData, theme: ChartTheme = LIGHT_THEME): void {
   ctx.save();
   const background = spec.background === 'transparent' ? 'transparent' : spec.background ? `#${spec.background}` : theme.bg;
-  theme = { ...theme, bg: background };
+  theme = { ...theme, bg: background, font: spec.fontName ? chartFont(spec.fontName) : theme.font };
   if (background === 'transparent') ctx.clearRect(0, 0, w, h);
   else {
     ctx.fillStyle = background;
@@ -166,7 +182,7 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
   const pie = spec.type === 'pie' || spec.type === 'doughnut';
   const labels = pie ? data.categories : data.series.map((s) => s.name);
   const colors = pie ? data.categories.map((_, i) => pointColor(spec, i)) : data.series.map((_, i) => chartColor(spec, i));
-  box = drawLegend(ctx, box, spec.legend, labels, colors, theme);
+  box = drawLegend(ctx, box, spec.legend, labels, colors, theme, pie ? [] : data.series.map((_,i)=>spec.series?.[i]?.type || spec.type));
 
   if (data.series.length === 0) {
     ctx.restore();
@@ -182,10 +198,16 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
   ctx.restore();
 }
 
-function drawLegend(ctx: CanvasRenderingContext2D, box: Box, pos: string, labels: string[], colors: string[], theme: ChartTheme): Box {
+function drawLegend(ctx: CanvasRenderingContext2D, box: Box, pos: string, labels: string[], colors: string[], theme: ChartTheme, kinds: string[] = []): Box {
   if (pos === 'none' || labels.length === 0) return box;
   ctx.font = `11px ${theme.font}`;
   const key = 9;
+  const drawKey = (x:number,y:number,i:number) => {
+    if(kinds[i]==='line') {
+      ctx.strokeStyle=colors[i];ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+key,y);ctx.stroke();
+    } else {ctx.fillStyle=colors[i];ctx.fillRect(x,y-key/2,key,key);}
+  };
   const widths = labels.map((l) => ctx.measureText(l).width + key + 12);
   ctx.textAlign = 'left';
   if (pos === 'right' || pos === '') {
@@ -194,8 +216,7 @@ function drawLegend(ctx: CanvasRenderingContext2D, box: Box, pos: string, labels
     let y = box.y + box.h / 2 - (labels.length * lineH) / 2 + lineH / 2;
     const x = box.x + box.w - lw + 4;
     labels.forEach((l, i) => {
-      ctx.fillStyle = colors[i];
-      ctx.fillRect(x, y - key / 2, key, key);
+      drawKey(x,y,i);
       ctx.fillStyle = theme.text;
       ctx.fillText(l, x + key + 5, y, lw - key - 10);
       y += lineH;
@@ -207,8 +228,7 @@ function drawLegend(ctx: CanvasRenderingContext2D, box: Box, pos: string, labels
   let x = box.x + Math.max(0, (box.w - total) / 2);
   const y = pos === 'top' ? box.y + 8 : box.y + box.h - 8;
   labels.forEach((l, i) => {
-    ctx.fillStyle = colors[i];
-    ctx.fillRect(x, y - key / 2, key, key);
+    drawKey(x,y,i);
     ctx.fillStyle = theme.text;
     ctx.fillText(l, x + key + 4, y);
     x += widths[i];
@@ -222,6 +242,7 @@ function finite(v: number | null): v is number {
 
 // Column, bar, line and area charts share a category axis.
 function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, data: ChartData, theme: ChartTheme): void {
+  const combo = spec.type === 'combo';
   const horizontal = spec.type === 'bar';
   const stacked = spec.stacked && spec.type !== 'line';
   const n = Math.max(data.categories.length, ...data.series.map((s) => s.values.length));
@@ -231,7 +252,8 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   for (let i = 0; i < n; i++) {
     let pos = 0;
     let neg = 0;
-    for (const s of data.series) {
+    for (const [si,s] of data.series.entries()) {
+      if(combo && spec.series?.[si]?.secondary) continue;
       const v = s.values[i];
       if (!finite(v)) continue;
       if (stacked) {
@@ -253,13 +275,26 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   }
   // Fewer gridlines in short charts, as Excel does.
   const intervals = Math.max(3, Math.min(10, Math.floor((horizontal ? box.w : box.h - 30) / 32)));
-  const scale = data.valueScale ?? categoryScale(spec.type, lo, hi, intervals);
-  ctx.font = `11px ${theme.font}`;
+  const scale = data.valueScale ?? categoryScale(combo ? 'column' : spec.type, lo, hi, intervals);
+  const valueFontSize = spec.valueAxis?.fontSize ? spec.valueAxis.fontSize * 96 / 72 : 11;
+  let secondaryMin=Infinity,secondaryMax=-Infinity;
+  data.series.forEach((s,i)=>{if(spec.series?.[i]?.secondary)for(const v of s.values)if(finite(v)){secondaryMin=Math.min(secondaryMin,v);secondaryMax=Math.max(secondaryMax,v);}});
+  const hasSecondary=combo && data.series.some((_,i)=>spec.series?.[i]?.secondary);
+  const secondaryScale = hasSecondary ? data.secondaryScale ?? categoryScale('column',secondaryMin===Infinity?0:secondaryMin,secondaryMax===-Infinity?1:secondaryMax,intervals) : null;
+  const secondaryFontSize = spec.secondaryAxis?.fontSize ? spec.secondaryAxis.fontSize*96/72 : 11;
+  const secondaryLabels:string[]=[];
+  if(secondaryScale)for(let i=0;i<=200 && secondaryScale.min+i*secondaryScale.step<=secondaryScale.max+secondaryScale.step*1e-8;i++)secondaryLabels.push(data.secondaryScale?.labels?.[i] ?? formatTick(secondaryScale.min+i*secondaryScale.step,secondaryScale.step));
+  const categoryFontSize = spec.categoryAxis?.fontSize ? spec.categoryAxis.fontSize * 96 / 72 : 11;
+  const axisFont = (axis: ChartAxis | null | undefined, size: number) => `${size}px ${axis?.fontName ? chartFont(axis.fontName) : theme.font}`;
+  ctx.font = axisFont(spec.valueAxis, valueFontSize);
   const tickLabels: string[] = [];
   for (let i=0; i<=200 && scale.min+i*scale.step<=scale.max+scale.step*1e-8; i++) {
     tickLabels.push(data.valueScale?.labels?.[i] ?? formatTick(scale.min+i*scale.step,scale.step));
   }
   const valueLabelW = spec.valueAxis?.hidden || spec.valueAxis?.hideLabels ? 0 : Math.max(...tickLabels.map((t) => ctx.measureText(t).width)) + 8;
+  ctx.font = axisFont(spec.secondaryAxis, secondaryFontSize);
+  const secondaryLabelW = !secondaryScale || spec.secondaryAxis?.hidden || spec.secondaryAxis?.hideLabels ? 0 : Math.max(0,...secondaryLabels.map(t=>ctx.measureText(t).width))+8;
+  ctx.font = axisFont(spec.categoryAxis, categoryFontSize);
   const catLabelW = Math.max(0, ...data.categories.map((c) => ctx.measureText(c).width)) + 8;
 
   // Plot area inside the axes and axis titles.
@@ -267,14 +302,16 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   const xTitle = spec.xTitle ? 18 : 0;
   const plot: Box = horizontal
     ? { x: box.x + Math.min(catLabelW, box.w * 0.35) + yTitle, y: box.y + 4, w: 0, h: 0 }
-    : { x: box.x + valueLabelW + yTitle, y: box.y + 6, w: 0, h: 0 };
-  plot.w = box.x + box.w - plot.x - 8;
-  plot.h = box.y + box.h - plot.y - 20 - xTitle;
+    : { x: box.x + valueLabelW + yTitle, y: box.y + Math.max(6, valueFontSize / 2), w: 0, h: 0 };
+  plot.w = box.x + box.w - plot.x - 8 - secondaryLabelW;
+  const labelBand = Math.max(20, (horizontal ? valueFontSize : categoryFontSize) * 1.9);
+  plot.h = box.y + box.h - plot.y - labelBand - xTitle;
   if (plot.w < 20 || plot.h < 20) return;
 
   const toPx = (v: number) =>
     horizontal ? plot.x + ((v - scale.min) / (scale.max - scale.min)) * plot.w : plot.y + plot.h - ((v - scale.min) / (scale.max - scale.min)) * plot.h;
 
+  const toSecondaryPx=(v:number)=>secondaryScale ? plot.y+plot.h-(v-secondaryScale.min)/(secondaryScale.max-secondaryScale.min)*plot.h : toPx(v);
   // Gridlines, axis lines and tick marks are independent Excel settings.
   const axisLine = (axis:ChartAxis | null | undefined, x1:number,y1:number,x2:number,y2:number) => {
     if (axis?.hidden || axis?.lineHidden) return;
@@ -288,6 +325,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
   axisLine(valueAxis,plot.x,horizontal ? plot.y+plot.h : plot.y,horizontal ? plot.x+plot.w : plot.x,plot.y+plot.h);
   axisLine(categoryAxis,horizontal ? zero : plot.x,horizontal ? plot.y : zero,horizontal ? zero : plot.x+plot.w,horizontal ? plot.y+plot.h : zero);
   ctx.fillStyle = theme.muted;
+  ctx.font = axisFont(valueAxis, valueFontSize);
   tickLabels.forEach((label, i) => {
     const p = toPx(scale.min+i*scale.step);
     if (!valueAxis?.hidden && (valueAxis?.gridLines ?? true)) {
@@ -299,7 +337,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     }
     if (!valueAxis?.hidden && !valueAxis?.hideLabels) {
       ctx.textAlign=horizontal ? 'center' : 'right';
-      ctx.fillText(label,horizontal ? p : plot.x-8,horizontal ? plot.y+plot.h+10 : p);
+      ctx.fillText(label,horizontal ? p : plot.x-8,horizontal ? plot.y+plot.h+labelBand/2 : p);
     }
     if (valueAxis?.majorTick && valueAxis.majorTick!=='none') {
       const outside=valueAxis.majorTick==='out' || valueAxis.majorTick==='cross' ? 4 : 0;
@@ -308,6 +346,22 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     }
   });
 
+  if(secondaryScale) {
+    const axis=spec.secondaryAxis;
+    axisLine(axis,plot.x+plot.w,plot.y,plot.x+plot.w,plot.y+plot.h);
+    ctx.font=axisFont(axis,secondaryFontSize);
+    secondaryLabels.forEach((label,i)=>{
+      const y=toSecondaryPx(secondaryScale.min+i*secondaryScale.step);
+      if(axis?.hidden)return;
+      if(axis?.gridLines){ctx.strokeStyle=theme.grid;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(plot.x,y);ctx.lineTo(plot.x+plot.w,y);ctx.stroke();}
+      if(!axis?.hideLabels){ctx.textAlign='left';ctx.fillStyle=theme.muted;ctx.fillText(label,plot.x+plot.w+8,y);}
+      if(axis?.majorTick && axis.majorTick!=='none') {
+        const outside=['out','cross'].includes(axis.majorTick)?4:0,inside=['in','cross'].includes(axis.majorTick)?4:0;
+        axisLine(axis,plot.x+plot.w-inside,y,plot.x+plot.w+outside,y);
+      }
+    });
+  }
+  ctx.font = axisFont(categoryAxis, categoryFontSize);
   // Category labels (skip some when crowded).
   const band = (horizontal ? plot.h : plot.w) / Math.max(n, 1);
   const every = Math.max(1, Math.ceil((horizontal ? 14 : catLabelW * 0.8) / band));
@@ -326,7 +380,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
       ctx.fillText(label, plot.x - 6, plot.y + band * (i + 0.5), plot.x - box.x - 8);
     } else {
       ctx.textAlign = 'center';
-      ctx.fillText(label, plot.x + band * (i + 0.5), plot.y + plot.h + 10, band * every - 2);
+      ctx.fillText(label, plot.x + band * (i + 0.5), plot.y + plot.h + labelBand / 2, band * every - 2);
     }
   }
   // Axis titles.
@@ -344,14 +398,21 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     ctx.restore();
   }
 
-  const k = data.series.length;
-  if (spec.type === 'column' || spec.type === 'bar') {
-    const gap = band * 0.25;
-    const inner = band - 2 * gap;
-    const barW = stacked ? inner : inner / k;
+  const columns=data.series.map((_,i)=>i).filter(i=>!combo || spec.series?.[i]?.type==='column');
+  const k=columns.length;
+  ctx.save();ctx.beginPath();ctx.rect(plot.x,plot.y,plot.w,plot.h);ctx.clip();
+  if (spec.type === 'column' || spec.type === 'bar' || (combo && k>0)) {
+    // Excel's gap is measured in column widths, including a valid zero gap.
+    const gapRatio = Number.isFinite(spec.gapWidth) ? Math.max(0, Math.min(500, spec.gapWidth!)) / 100 : (stacked ? 1 : k);
+    const barW = band / ((stacked ? 1 : k) + gapRatio);
+    const inner = barW * (stacked ? 1 : k);
+    const gap = (band - inner) / 2;
     const pos = new Array<number>(n).fill(0);
     const neg = new Array<number>(n).fill(0);
-    data.series.forEach((s, si) => {
+    columns.forEach((si,columnIndex) => {
+      const s=data.series[si];
+      const mapValue=combo && spec.series?.[si]?.secondary ? toSecondaryPx : toPx;
+      const baseZero=combo && spec.series?.[si]?.secondary && secondaryScale ? toSecondaryPx(Math.max(secondaryScale.min,Math.min(0,secondaryScale.max))) : zero;
       ctx.fillStyle = chartColor(spec, si);
       for (let i = 0; i < n; i++) {
         const v = s.values[i];
@@ -364,19 +425,21 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
           if (v >= 0) pos[i] = b;
           else neg[i] = b;
         }
-        const p0 = stacked ? toPx(a) : zero;
-        const p1 = toPx(b);
-        const offset = band * i + gap + (stacked ? 0 : barW * si);
-        if (horizontal) ctx.fillRect(Math.min(p0, p1), plot.y + offset, Math.abs(p1 - p0), barW - 1);
-        else ctx.fillRect(plot.x + offset, Math.min(p0, p1), barW - 1, Math.abs(p1 - p0));
+        const p0 = stacked ? mapValue(a) : baseZero;
+        const p1 = mapValue(b);
+        const offset = band * i + gap + (stacked ? 0 : barW * columnIndex);
+        if (horizontal) ctx.fillRect(Math.min(p0, p1), plot.y + offset, Math.abs(p1 - p0), barW);
+        else ctx.fillRect(plot.x + offset, Math.min(p0, p1), barW, Math.abs(p1 - p0));
       }
     });
-    return;
+    if(!combo){ctx.restore();return;}
   }
   // Line and area: points at category centers.
   const stack = new Array<number>(n).fill(0);
   const series = spec.type === 'area' && stacked ? data.series : data.series;
   series.forEach((s, si) => {
+    if(combo && spec.series?.[si]?.type!=='line')return;
+    const mapValue=combo && spec.series?.[si]?.secondary ? toSecondaryPx : toPx;
     const color = chartColor(spec, si);
     const pts: ([number, number] | null)[] = [];
     for (let i = 0; i < n; i++) {
@@ -385,9 +448,9 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
         pts.push(null);
         continue;
       }
-      const base = stacked ? stack[i] : 0;
-      if (stacked) stack[i] += v;
-      pts.push([plot.x + band * (i + 0.5), toPx(base + v)]);
+      const base = stacked && !combo ? stack[i] : 0;
+      if (stacked && !combo) stack[i] += v;
+      pts.push([plot.x + band * (i + 0.5), mapValue(base + v)]);
     }
     if (spec.type === 'area') {
       ctx.globalAlpha = stacked ? 0.9 : 0.6;
@@ -415,7 +478,7 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
       return;
     }
     ctx.strokeStyle = color;
-    ctx.lineWidth = 2.25;
+    ctx.lineWidth = spec.series?.[si]?.lineWidth || 2.25;
     ctx.lineJoin = 'round';
     ctx.beginPath();
     let drawing = false;
@@ -431,13 +494,14 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     ctx.stroke();
     ctx.fillStyle = color;
     for (const p of pts) {
-      if (p) {
+      if (p && spec.series?.[si]?.marker!=='none') {
         ctx.beginPath();
         ctx.arc(p[0], p[1], 3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
   });
+  ctx.restore();
 }
 
 function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: ChartData, theme: ChartTheme, hole = 0): void {

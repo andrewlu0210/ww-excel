@@ -24,12 +24,12 @@ function renderCell(overrides:Partial<CellView>,merged=false,columnWidth=120) {
 afterEach(()=>vi.unstubAllGlobals());
 
 describe('conditional icon fallback in the grid',()=>{
- it.each(['3Arrows','3Flags','3Symbols','5Rating'])('shows the value when icon-only %s cannot be drawn',(set)=>{
+ it.each(['FutureArrows','FutureFlags','FutureSymbols','FutureRating'])('shows the value when icon-only %s cannot be drawn',(set)=>{
   const {texts}=renderCell({hideValue:true,icon:{set,index:1}});
   expect(texts.filter(s=>s==='42')).toHaveLength(1);
  });
  it('also shows the value in a merged cell with an unsupported icon',()=>{
-  expect(renderCell({hideValue:true,icon:{set:'3Arrows',index:0}},true).texts).toContain('42');
+  expect(renderCell({hideValue:true,icon:{set:'FutureArrows',index:0}},true).texts).toContain('42');
  });
  it('falls back for an invalid icon index',()=>{
   expect(renderCell({hideValue:true,icon:{set:'3TrafficLights1',index:99}}).texts).toContain('42');
@@ -44,7 +44,7 @@ describe('conditional icon fallback in the grid',()=>{
   expect(texts).toContain('42');expect(fills).toContain('#222222');
  });
  it('does not reserve icon space when falling back in a narrow cell',()=>{
-  expect(renderCell({hideValue:true,icon:{set:'3Arrows',index:0}},false,20).texts).toContain('42');
+  expect(renderCell({hideValue:true,icon:{set:'FutureArrows',index:0}},false,20).texts).toContain('42');
  });
  it('keeps a supported icon visible without numeric overflow hashes in a narrow status cell',()=>{
   const {texts,fills}=renderCell({hideValue:false,icon:{set:'4TrafficLights',index:0}},false,20);
@@ -54,4 +54,33 @@ describe('conditional icon fallback in the grid',()=>{
   const {texts,fills}=renderCell({hideValue:true,bar:{len:.5,color:'#F1C94D',solid:true}});
   expect(texts).not.toContain('42');expect(fills).toContain('#F1C94D');
  });
+});
+
+it('draws cached pivot dropdowns alongside table dropdowns without filtering their cells',()=>{
+ vi.stubGlobal('document',{documentElement:{}});
+ vi.stubGlobal('getComputedStyle',()=>({getPropertyValue:()=> '#202020'}));
+ const buttons:number[][]=[];
+ const target={measureText:(s:string)=>({width:s.length*7}),strokeStyle:'',strokeRect(...rect:number[]){if(this.strokeStyle==='#8a8a8a')buttons.push(rect)}};
+ const ctx=new Proxy(target,{get(t,k){return k in t ? t[k as keyof typeof t] : ()=>{}}}) as unknown as CanvasRenderingContext2D;
+ const canvas={getContext:()=>ctx,style:{}} as unknown as HTMLCanvasElement;
+ const cache={blockRows:32,blockCols:16,ensure(){},cell:()=>undefined} as unknown as BlockCache;
+ const renderer=new GridRenderer(canvas,new AxisLayout(4,30),new AxisLayout(2,100),cache);
+ renderer.look.tableFilters=[{r0:0,c0:0,r1:1,c1:1}];
+ renderer.look.pivotHeaders=[{r0:2,c0:0,r1:2,c1:0}];
+ renderer.resize(250,160,1);
+ renderer.draw(0,0,single({row:3,col:1}));
+ expect(buttons).toHaveLength(3);
+ expect(buttons[0][1]).toBe(buttons[1][1]);
+ expect(buttons[2][1]-buttons[0][1]).toBe(60);
+ expect(renderer.look.filter).toBeNull();
+ expect(renderer.look.filtered.size).toBe(0);
+});
+
+import {ICON_SETS} from './iconSets';
+it.each(ICON_SETS)('shows or hides values correctly for $id, including merged and narrow cells',({id})=>{
+ expect(renderCell({hideValue:false,icon:{set:id,index:0}}).texts).toContain('42');
+ expect(renderCell({hideValue:true,icon:{set:id,index:0}}).texts).not.toContain('42');
+ expect(renderCell({hideValue:true,icon:{set:id,index:0}},true).texts).not.toContain('42');
+ const narrow=renderCell({hideValue:false,icon:{set:id,index:0}},false,20).texts;
+ expect(narrow).not.toContain('42');expect(narrow.some(s=>s.includes('#'))).toBe(false);
 });

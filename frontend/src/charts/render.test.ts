@@ -113,3 +113,42 @@ it('uses manual pie bounds, gradient stops and scaled shadows without adding out
  expect(stops).toEqual([[0,'#A5C55E'],[1,'#709621']]);
  expect(fills[0].slice(1)).toEqual([12,4]);expect(fills[1][0]).toBe(gradient);expect(strokes).toBe(0);
 });
+
+it('uses Excel column gap percentages and date-axis fonts at their point sizes', () => {
+  for (const gapWidth of [0, 219]) {
+    const bars: number[][] = [];
+    const texts: { text: string; font: string }[] = [];
+    const target = {
+      font: '', fillStyle: '',
+      measureText: (s: string) => ({ width: s.length * 7 }),
+      fillRect(x: number, y: number, w: number, h: number) { if (this.fillStyle === '#5B9BD5') bars.push([x,y,w,h]); },
+      fillText(text: string) { texts.push({ text, font: this.font }); },
+    };
+    const ctx = new Proxy(target, { get(t,k) { return k in t ? t[k as keyof typeof t] : () => {}; } }) as unknown as CanvasRenderingContext2D;
+    const axis = { fontSize:11, fontName:'Microsoft JhengHei UI', lineColor:'D9D9D9', lineHidden:false, hidden:false, majorTick:'none', gridLines:false, hideLabels:false };
+    drawChart(ctx, 460, 270, {type:'column',title:'',legend:'none',xTitle:'',yTitle:'',stacked:false,gapWidth,categoryAxis:axis,valueAxis:axis,series:[{color:'5B9BD5'}]},
+      {categories:['2012','2013','2014'],series:[{name:'會議出席',values:[20000,15000,4000],x:[]}],valueScale:{min:0,max:25000,step:5000,labels:['0','5000','10000','15000','20000','25000']}});
+    expect(bars).toHaveLength(3);
+    const band = bars[1][0] - bars[0][0];
+    expect(bars[0][2] / band).toBeCloseTo(1 / (1 + gapWidth / 100));
+    expect(texts.find(t => t.text === '2012')?.font).toContain(`${11*96/72}px`);
+    expect(texts.find(t => t.text === '25000')?.font).toContain('"PingFang TC"');
+    expect(bars[0][1]).toBeGreaterThan(10);
+  }
+});
+
+it('renders columns and a line with independent scales, shared category centers and currency ticks',()=>{
+ const bars:number[][]=[],points:number[][]=[],texts:{text:string;x:number}[]=[],strokes:string[]=[];
+ let arcs=0;
+ const target={fillStyle:'',strokeStyle:'',font:'',measureText:(s:string)=>({width:s.length*6}),fillRect(x:number,y:number,w:number,h:number){if(this.fillStyle==='#5B9BD5')bars.push([x,y,w,h])},moveTo(x:number,y:number){if(this.strokeStyle==='#ED7D31')points.push([x,y])},lineTo(x:number,y:number){if(this.strokeStyle==='#ED7D31')points.push([x,y])},stroke(){strokes.push(this.strokeStyle)},fillText(text:string,x:number){texts.push({text,x})},arc(){arcs++}};
+ const ctx=new Proxy(target,{get(t,k){return k in t?t[k as keyof typeof t]:()=>{}}}) as unknown as CanvasRenderingContext2D;
+ const axis={lineColor:'',lineHidden:true,hidden:false,majorTick:'none',gridLines:false,hideLabels:false};
+ drawChart(ctx,500,300,{type:'combo',title:'',legend:'none',xTitle:'',yTitle:'',stacked:false,valueAxis:axis,secondaryAxis:axis,series:[{type:'column',color:'5B9BD5'},{type:'line',secondary:true,color:'ED7D31',marker:'none',lineWidth:3}]},
+ {categories:['2012','2013','2014'],series:[{name:'Attendance',values:[20,10,15],x:[]},{name:'Sales',values:[20000,null,10000],x:[]}],valueScale:{min:0,max:25,step:5,labels:['0','5','10','15','20','25']},secondaryScale:{min:0,max:25000,step:5000,labels:['NT$0','NT$5,000','NT$10,000','NT$15,000','NT$20,000','NT$25,000']}});
+ expect(bars).toHaveLength(3);expect(points).toHaveLength(2);
+ expect(points[0][0]).toBeCloseTo(bars[0][0]+bars[0][2]/2);
+ expect(points[1][0]).toBeCloseTo(bars[2][0]+bars[2][2]/2);
+ expect(points[0][1]).toBeCloseTo(bars[0][1]);
+ expect(strokes).toContain('#ED7D31');expect(arcs).toBe(0);
+ expect(texts.find(t=>t.text==='NT$25,000')!.x).toBeGreaterThan(bars[2][0]+bars[2][2]);
+});

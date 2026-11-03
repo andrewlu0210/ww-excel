@@ -1,5 +1,11 @@
 // Read-only display checks for the user-supplied workbook (WW_XLSX_FIXTURE).
 import { benchApi, documentApi, settingsApi, sheetApi } from '../bridge/sheet';
+import { shapeTest5SelfTest } from './shapeTest5SelfTest';
+import { shapeWorkbookSelfTest } from './shapeWorkbookSelfTest';
+import { iconWorkbookSelfTest } from './iconWorkbookSelfTest';
+import { learnWorkbookSelfTest } from './learnWorkbookSelfTest';
+import { pivotWorkbookSelfTest } from './pivotWorkbookSelfTest';
+import { chartWorkbookSelfTest } from './chartWorkbookSelfTest';
 import { listWorkbookSelfTest } from './listWorkbookSelfTest';
 import { financeWorkbookSelfTest } from './financeWorkbookSelfTest';
 import { taskWorkbookSelfTest } from './taskWorkbookSelfTest';
@@ -16,6 +22,18 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.[0] === '文字方塊編輯驗收') return shapeWorkbookSelfTest(driver);
+  if (state.sheets?.[0] === '條件格式圖示驗收') return iconWorkbookSelfTest(driver);
+  if (state.sheets?.includes('9.圖表')) {
+    const chart = await chartWorkbookSelfTest(driver);
+    await documentApi.openPath(path);await step();await step();
+    const pivot = await pivotWorkbookSelfTest(driver);
+    await documentApi.openPath(path);await step();await step();
+    const learn = await learnWorkbookSelfTest(driver);
+    await documentApi.openPath(path);await step();await step();
+    const shape = await shapeTest5SelfTest(driver);
+    return {failed: chart.failed + pivot.failed + learn.failed + shape.failed, markdown: chart.markdown + '\n' + pivot.markdown + '\n' + learn.markdown + '\n' + shape.markdown};
+  }
   if (state.sheets?.[0] === '富文字編輯驗收') return richTextWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '清單') return listWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '管理財務') return financeWorkbookSelfTest(driver);
@@ -44,7 +62,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   driver.getGrid()?.scrollToOrigin();
   await step();
   await benchApi.snapshot('xlsx-compatible-sheet4', driver.snapshotWithObjects());
-  const shapeCanvas = document.querySelector<HTMLCanvasElement>('.object.readonly canvas');
+  const shapeCanvas = document.querySelector<HTMLCanvasElement>('.object canvas');
   const ctx = shapeCanvas?.getContext('2d');
   if (ctx && shapeCanvas) {
     const pixels = ctx.getImageData(0, 0, shapeCanvas.width, shapeCanvas.height).data;

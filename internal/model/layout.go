@@ -42,6 +42,8 @@ type Layout struct {
 	Validations []Validation
 	CondFormats []CFRule
 	Tables      []Table
+	// PivotHeaders are display-only dropdowns from cached imported pivot results.
+	PivotHeaders []Range
 	// Charts and pictures, and the print settings (nil = defaults).
 	Objects   []Object
 	PageSetup *PageSetup
@@ -97,6 +99,7 @@ func (l Layout) Clone() Layout {
 	out.Validations = cloneValidations(l.Validations)
 	out.CondFormats = cloneCF(l.CondFormats)
 	out.Tables = append([]Table(nil), l.Tables...)
+	out.PivotHeaders = append([]Range(nil), l.PivotHeaders...)
 	out.Objects = cloneObjects(l.Objects)
 	if l.PageSetup != nil {
 		ps := *l.PageSetup

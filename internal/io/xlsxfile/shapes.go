@@ -25,10 +25,21 @@ type drawingColor struct {
 	SatMod *drawingPercent `xml:"satMod"`
 	Alpha  *drawingPercent `xml:"alpha"`
 }
+
+// Common DrawingML preset colors; unresolved presets inherit the surrounding font.
+var drawingPresetColors = map[string]string{
+	"white": "FFFFFF", "black": "000000", "red": "FF0000", "green": "008000", "blue": "0000FF",
+	"yellow": "FFFF00", "cyan": "00FFFF", "aqua": "00FFFF", "magenta": "FF00FF", "fuchsia": "FF00FF",
+	"gray": "808080", "grey": "808080", "dkgray": "A9A9A9", "ltgray": "D3D3D3", "orange": "FFA500",
+	"purple": "800080", "brown": "A52A2A", "pink": "FFC0CB", "navy": "000080", "lime": "00FF00",
+}
+
 type drawingFill struct {
+	Index  string        `xml:"idx,attr"`
 	RGB    *drawingColor `xml:"srgbClr"`
 	Scheme *drawingColor `xml:"schemeClr"`
 	System *drawingColor `xml:"sysClr"`
+	Preset *drawingColor `xml:"prstClr"`
 }
 type drawingFont struct {
 	Size      string      `xml:"sz,attr"`
@@ -123,6 +134,12 @@ func (p *drawingPath) model() []model.PathCmd {
 }
 
 type drawingShape struct {
+	NonVisual struct {
+		ID int `xml:"id,attr"`
+	} `xml:"nvSpPr>cNvPr"`
+	FontRef    drawingFill `xml:"style>fontRef"`
+	FillRef    drawingFill `xml:"style>fillRef"`
+	LineRef    drawingFill `xml:"style>lnRef"`
 	Properties struct {
 		Transform drawingTransform `xml:"xfrm"`
 		Geometry  struct {
@@ -134,10 +151,14 @@ type drawingShape struct {
 		} `xml:"prstGeom"`
 		Custom *drawingPath `xml:"custGeom>pathLst>path"`
 		Fill   drawingFill  `xml:"solidFill"`
+		NoFill *struct{}    `xml:"noFill"`
 		Line   struct {
-			Width   float64     `xml:"w,attr"`
-			NoFill  *struct{}   `xml:"noFill"`
-			Fill    drawingFill `xml:"solidFill"`
+			Width  float64     `xml:"w,attr"`
+			NoFill *struct{}   `xml:"noFill"`
+			Fill   drawingFill `xml:"solidFill"`
+			Dash   struct {
+				Val string `xml:"val,attr"`
+			} `xml:"prstDash"`
 			HeadEnd *struct {
 				Type string `xml:"type,attr"`
 			} `xml:"headEnd"`
@@ -159,10 +180,12 @@ type drawingShape struct {
 				Align string      `xml:"algn,attr"`
 				Font  drawingFont `xml:"defRPr"`
 			} `xml:"pPr"`
-			Runs []struct {
-				Font drawingFont `xml:"rPr"`
-				Text string      `xml:"t"`
-			} `xml:"r"`
+			EndFont drawingFont `xml:"endParaRPr"`
+			Runs    []struct {
+				XMLName xml.Name
+				Font    drawingFont `xml:"rPr"`
+				Text    string      `xml:"t"`
+			} `xml:",any"`
 		} `xml:"p"`
 	} `xml:"txBody"`
 }
@@ -205,6 +228,8 @@ func (fill drawingFill) color(theme map[string]string) string {
 		base = theme[c.Val]
 	} else if c = fill.System; c != nil {
 		base = c.Last
+	} else if c = fill.Preset; c != nil {
+		base = drawingPresetColors[strings.ToLower(c.Val)]
 	}
 	base = normalizeHex(base)
 	if c == nil || len(base) != 6 {
@@ -313,8 +338,14 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 		}
 		return xmlFloat(value) / emuPerPx
 	}
-	shape := &model.Shape{Geometry: kind, Fill: raw.Properties.Fill.color(theme), Font: model.DefaultFont, Text: &model.RichText{}, AlignH: "left", AlignV: "top",
+	shape := &model.Shape{SourceID: raw.NonVisual.ID, Geometry: kind, Fill: raw.Properties.Fill.color(theme), Font: model.DefaultFont, Text: &model.RichText{}, AlignH: "left", AlignV: "top",
 		Left: pad(body.Left, 9.6), Right: pad(body.Right, 9.6), Top: pad(body.Top, 4.8), Bottom: pad(body.Bottom, 4.8)}
+	if shape.Fill == "" && raw.Properties.NoFill == nil && raw.FillRef.Index != "" && raw.FillRef.Index != "0" {
+		shape.Fill = raw.FillRef.color(theme)
+	}
+	if color := raw.FontRef.color(theme); color != "" {
+		shape.Font.Color = color
+	}
 	if body.Anchor == "ctr" {
 		shape.AlignV = "center"
 	}
@@ -323,6 +354,10 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 	}
 	if raw.Properties.Line.NoFill == nil {
 		shape.LineColor = raw.Properties.Line.Fill.color(theme)
+		if shape.LineColor == "" && raw.LineRef.Index != "" && raw.LineRef.Index != "0" {
+			shape.LineColor = raw.LineRef.color(theme)
+		}
+		shape.LineDash = raw.Properties.Line.Dash.Val
 		if shape.LineColor != "" {
 			shape.LineWidth = raw.Properties.Line.Width / emuPerPx
 			if shape.LineWidth == 0 {
@@ -340,20 +375,39 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 		shape.Radius = math.Min(width, height) * adj / 100000
 	}
 	for i, para := range raw.Body.Paragraphs {
-		if i > 0 {
-			shape.Text.Runs = append(shape.Text.Runs, model.TextRun{Text: "\n"})
-		}
 		if para.Properties.Align == "ctr" {
 			shape.AlignH = "center"
 		} else if para.Properties.Align == "r" {
 			shape.AlignH = "right"
 		}
 		base := para.Properties.Font.rich(theme).Resolve(shape.Font)
+		start := len(shape.Text.Runs)
 		for _, run := range para.Runs {
+			switch run.XMLName.Local {
+			case "br":
+				run.Text = "\n"
+			case "r", "fld":
+			default:
+				continue
+			}
 			shape.Text.Runs = append(shape.Text.Runs, model.TextRun{Text: run.Text, Font: model.RichFontOf(run.Font.rich(theme).Resolve(base))})
 		}
+		endFont := model.RichFontOf(para.EndFont.rich(theme).Resolve(base))
+		if i < len(raw.Body.Paragraphs)-1 {
+			// A blank paragraph's end properties determine its height.
+			shape.Text.Runs = append(shape.Text.Runs, model.TextRun{Text: "\n", Font: endFont})
+		} else if len(shape.Text.Runs) == start {
+			shape.Text.Runs = append(shape.Text.Runs, model.TextRun{Font: endFont})
+		}
 	}
-	if len(shape.Text.Runs) == 0 && shape.Fill == "" && shape.LineColor == "" {
+	hasText := false
+	for _, run := range shape.Text.Runs {
+		if strings.TrimSpace(run.Text) != "" {
+			hasText = true
+			break
+		}
+	}
+	if !hasText && shape.Fill == "" && shape.LineColor == "" && kind != "rect" && kind != "roundRect" {
 		return nil
 	}
 	if len(raw.Properties.Geometry.Adjustments) > 0 {

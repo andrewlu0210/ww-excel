@@ -5,6 +5,7 @@ import { AxisLayout, colName } from './layout';
 import { current, isFullCols, isFullRows, isSingleCell, type Range, type Selection } from './selection';
 import { LINE_HEIGHT, TextCache } from './text';
 import { drawRichLines, layoutRichText, styledRuns, type RichLine } from './richtext';
+import { iconSetCount } from './iconSets';
 import { drawConditionalIcon, drawDataBar } from './conditional';
 import { fontEpoch } from '../stores/fontLoader';
 
@@ -42,6 +43,7 @@ export interface SheetLook {
   // AutoFilter range (buttons on its first row) and filtered columns.
   filter: Range | null;
   tableFilters?: Range[];
+  pivotHeaders?: Range[];
   filtered: Set<number>;
   // Cells with notes, as row * 16384 + col.
   notes: Set<number>;
@@ -376,7 +378,7 @@ export class GridRenderer extends Layer {
   }
 
   private drawFilterButtons(vr: VisibleRange, sx: number, sy: number): void {
-    const ranges = [...(this.look.tableFilters ?? [])];
+    const ranges = [...(this.look.tableFilters ?? []), ...(this.look.pivotHeaders ?? [])];
     if (this.look.filter && !ranges.some(f=>f.r0===this.look.filter!.r0 && f.c0===this.look.filter!.c0 && f.c1===this.look.filter!.c1)) ranges.push(this.look.filter);
     const { ctx, theme: th } = this;
     for (const f of ranges) {
@@ -603,8 +605,12 @@ export class GridRenderer extends Layer {
     let cellW = right - left;
     let iconDrawn = false;
     if (cell.icon) {
-      const size = Math.max(1, Math.min(10, cellW - 4, bottom - top - 4));
+      const size = Math.min(10, cellW - 4, bottom - top - 4);
+      const count=iconSetCount(cell.icon.set);
+      if(size<=0 && Number.isInteger(cell.icon.index) && cell.icon.index>=0 && cell.icon.index<count)return;
+      ctx.save();ctx.beginPath();ctx.rect(left,top,cellW,bottom-top);ctx.clip();
       iconDrawn = drawConditionalIcon(ctx, cell.icon, left + 3, top + (bottom - top - size) / 2, size);
+      ctx.restore();
       if (iconDrawn) {
         left += size + 5;
         cellW = right - left;

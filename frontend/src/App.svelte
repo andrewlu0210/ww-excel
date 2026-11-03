@@ -544,8 +544,9 @@
           {sheets}
           hidden={hiddenSheets}
           {active}
-          onselect={(i) => {
+          onselect={async (i) => {
             if (i === active) return;
+            if (sheetView && !(await sheetView.finishShapeEditing())) return;
             // Editing a formula: keep editing it on the other sheet.
             crossEdit = sheetView?.formulaState() ?? null;
             void showSheet(i).then(handOff);

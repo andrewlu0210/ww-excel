@@ -91,6 +91,7 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 			// Apply only properties supplied by the custom table style.
 			if a := t.Appearance; a != nil {
 				st := l.wb.StyleTable().Get(base)
+				st.Fill = a.FillAt(t, row, st.Fill)
 				st.Font = a.Whole.Resolve(st.Font)
 				if t.FirstColumn && col == t.Range.C0 {
 					st.Font = a.First.Resolve(st.Font)

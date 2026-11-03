@@ -218,6 +218,7 @@ type StyleRefDTO struct {
 
 // LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
 type LayoutDTO struct {
+	PivotHeaders  []RangeDTO    `json:"pivotHeaders,omitempty"`
 	HideGridLines bool          `json:"hideGridLines,omitempty"`
 	DefaultRow    float64       `json:"defaultRow"`
 	DefaultCol    float64       `json:"defaultCol"`
@@ -258,6 +259,9 @@ func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 		a, b := out.Notes[i], out.Notes[j]
 		return a.Row < b.Row || a.Row == b.Row && a.Col < b.Col
 	})
+	for _, h := range l.PivotHeaders {
+		out.PivotHeaders = append(out.PivotHeaders, rangeDTO(h))
+	}
 	for _, t := range l.Tables {
 		out.Tables = append(out.Tables, tableDTO(t))
 	}

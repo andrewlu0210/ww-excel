@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Floating charts and pictures over the grid. Positions come from the
+  // Floating shapes, charts and pictures over the grid. Positions come from the
   // sheet (cell anchor + offset); dragging moves or resizes an object
   // locally and reports the final rectangle when the pointer is released.
   import { t } from '../i18n';
@@ -26,6 +26,7 @@
     left: number;
     top: number;
     selected: number | null;
+    editing?: number | null;
     chartData: Map<number, ChartDataDTO>;
     images: Map<string, string>;
     onselect: (id: number | null) => void;
@@ -33,7 +34,7 @@
     onedit: (id: number) => void;
   }
 
-  let { scale = 1, objects, rectOf, tick, left, top, selected, chartData, images, onselect, oncommit, onedit }: Props = $props();
+  let { scale = 1, objects, rectOf, tick, left, top, selected, editing = null, chartData, images, onselect, oncommit, onedit }: Props = $props();
 
   // An object being dragged: which edges move (move = all).
   let drag = $state<{ id: number; edges: string; x0: number; y0: number; start: Rect; now: Rect } | null>(null);
@@ -45,13 +46,14 @@
   }
 
   function onDown(e: PointerEvent, o: ObjectDTO, edges: string): void {
-    if (e.button !== 0 || o.shape || o.readonly) return;
+    if (e.button !== 0 || o.readonly && !o.shape) return;
     e.preventDefault();
     e.stopPropagation();
     onselect(o.id);
+    if (o.readonly || editing === o.id) return;
     const start = rectOf(o);
     drag = { id: o.id, edges, x0: e.clientX, y0: e.clientY, start, now: start };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    if (e.isTrusted) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function onMove(e: PointerEvent): void {
@@ -137,7 +139,7 @@
       class="object"
       data-object-id={o.id}
       class:selected={selected === o.id}
-      class:readonly={!!o.shape || !!o.readonly}
+      class:readonly={!!o.readonly && !o.shape}
       style:left="{r.x - left}px"
       style:top="{r.y - top}px"
       style:width="{r.w}px"
@@ -146,16 +148,16 @@
       onpointermove={onMove}
       onpointerup={onUp}
       onpointercancel={onUp}
-      ondblclick={() => o.kind === 'chart' && onedit(o.id)}
+      ondblclick={() => (o.kind === 'chart' || canEditShapeText(o)) && onedit(o.id)}
     >
       {#if o.shape}
-        <canvas use:shape={{ o, w: r.w, h: r.h, scale, tick: tick + fontEpoch }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
+        <canvas use:shape={{ o: editing === o.id ? {...o, shape:{...o.shape,runs:[]}} : o, w: r.w, h: r.h, scale, tick: tick + fontEpoch }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
       {:else if o.kind === 'chart'}
         <canvas use:chart={{ o, w: r.w, h: r.h, data: chartData.get(o.id), scale }} style:width="{r.w}px" style:height="{r.h}px"></canvas>
       {:else if images.get(o.imageKey)}
         <img src={images.get(o.imageKey)} alt="" draggable="false" />
       {/if}
-      {#if selected === o.id && !o.shape && !o.readonly}
+      {#if selected === o.id && editing !== o.id && !o.readonly}
         {#each handles as hd (hd)}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -172,6 +174,10 @@
 </div>
 
 <script module lang="ts">
+  import type { ObjectDTO as LayerObject } from '../bridge/sheet';
+  export function canEditShapeText(o:LayerObject):boolean {
+    return !!o.shape && (!['line','custom'].includes(o.shape.geometry) || (o.shape.runs??[]).some(r=>r.text.length>0));
+  }
   import type { ChartDataDTO as Data } from '../bridge/sheet';
   import type { ChartData as Drawn } from '../charts/render';
 
@@ -180,6 +186,7 @@
     return {
       categories: d.categories ?? [],
       valueScale:d.valueScale,
+      secondaryScale:d.secondaryScale,
       series: (d.series ?? []).map((s) => ({ name: s.name, labels:s.labels ?? undefined, values: s.values ?? [], x: s.x ?? [] })),
     };
   }

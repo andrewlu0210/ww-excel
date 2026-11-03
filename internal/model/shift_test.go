@@ -43,3 +43,17 @@ func TestShiftColsDropsCollapsedMerge(t *testing.T) {
 		t.Fatalf("column styles: %+v", s.Layout.ColStyles)
 	}
 }
+
+func TestShiftCachedPivotHeaderPositions(t *testing.T) {
+	s := NewSheet("Pivot")
+	s.Layout.PivotHeaders = []Range{{R0: 10, C0: 4, R1: 10, C1: 4}}
+	s.Shift(true, 5, 2)
+	s.Shift(false, 2, 1)
+	if got := s.Layout.PivotHeaders[0]; got != (Range{R0: 12, C0: 5, R1: 12, C1: 5}) {
+		t.Fatalf("header after insertion: %+v", got)
+	}
+	s.Shift(true, 12, -1)
+	if len(s.Layout.PivotHeaders) != 0 {
+		t.Fatal("deleted pivot header is still visible")
+	}
+}

@@ -11,6 +11,35 @@ type tableFontColor struct {
 	Tint  float64 `xml:"tint,attr"`
 	Auto  bool    `xml:"auto,attr"`
 }
+type rawTableFill struct {
+	Pattern *struct {
+		Type       string          `xml:"patternType,attr"`
+		Foreground *tableFontColor `xml:"fgColor"`
+		Background *tableFontColor `xml:"bgColor"`
+	} `xml:"patternFill"`
+}
+
+// Differential table styles may store a solid color in bgColor without patternType.
+func (r *reader) tableFill(fill *rawTableFill) *string {
+	if fill == nil || fill.Pattern == nil {
+		return nil
+	}
+	p := fill.Pattern
+	if p.Type == "none" {
+		value := ""
+		return &value
+	}
+	for _, color := range []*tableFontColor{p.Foreground, p.Background} {
+		if color == nil {
+			continue
+		}
+		if value := resolveColor(r.f, color.RGB, color.Theme, color.Tint); value != "" {
+			return &value
+		}
+	}
+	return nil
+}
+
 type rawTableFont struct {
 	Name *struct {
 		Val string `xml:"val,attr"`
@@ -77,10 +106,12 @@ func (r *reader) readTableStyles() {
 			Elements []struct {
 				Type string `xml:"type,attr"`
 				Dxf  int    `xml:"dxfId,attr"`
+				Size int    `xml:"size,attr"`
 			} `xml:"tableStyleElement"`
 		} `xml:"tableStyles>tableStyle"`
 		Formats []struct {
 			Font   *rawTableFont `xml:"font"`
+			Fill   *rawTableFill `xml:"fill"`
 			Border struct {
 				Horizontal rawBorder `xml:"horizontal"`
 				Bottom     rawBorder `xml:"bottom"`
@@ -101,12 +132,15 @@ func (r *reader) readTableStyles() {
 			}
 			format := styles.Formats[element.Dxf]
 			font := r.tableFont(format.Font)
+			fill := r.tableFill(format.Fill)
 			switch element.Type {
 			case "wholeTable":
 				appearance.Whole = font
+				appearance.WholeFill = fill
 				r.tableBorders[table.Name] = border(format.Border.Horizontal)
 			case "headerRow":
 				appearance.Header = font
+				appearance.HeaderFill = fill
 				appearance.HeaderBorder = border(format.Border.Bottom)
 			case "firstColumn":
 				appearance.First = font
@@ -114,6 +148,11 @@ func (r *reader) readTableStyles() {
 				appearance.Last = font
 			case "totalRow":
 				appearance.Totals = font
+				appearance.TotalsFill = fill
+			case "firstRowStripe":
+				appearance.FirstStripeFill, appearance.FirstStripeSize = fill, element.Size
+			case "secondRowStripe":
+				appearance.SecondStripeFill, appearance.SecondStripeSize = fill, element.Size
 			}
 		}
 		r.tableAppearances[table.Name] = appearance

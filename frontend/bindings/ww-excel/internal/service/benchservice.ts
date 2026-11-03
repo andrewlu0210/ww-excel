@@ -74,8 +74,8 @@ export function ReportBench(report: string): $CancellablePromise<void> {
  * SaveCopy saves the document as name next to the self-test report,
  * without dialogs, and returns the full path (self-test only).
  */
-export function SaveCopy(name: string): $CancellablePromise<string> {
-    return $Call.ByID(389330960, name);
+export function SaveCopy(name: string, allowChartRewrite: boolean): $CancellablePromise<string> {
+    return $Call.ByID(389330960, name, allowChartRewrite);
 }
 
 /**

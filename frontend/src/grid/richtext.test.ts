@@ -27,3 +27,30 @@ describe('rich text layout', () => {
     expect(lines[0].px).toBe(20);
   });
 });
+
+it('uses each shape paragraph font and the end font for blank paragraphs', () => {
+  const lines = layoutRichText([
+    run('Heading','#fff',22),run('\n','#fff',14),run('\n','#fff',24),
+    run('Body text','#fff',18),run('\n\n','#fff',18),run('Link','#fff',22),
+  ],300,true,measure,0);
+  expect(text(lines)).toEqual(['Heading','','Body text','','Link']);
+  expect(lines.map(l=>l.px)).toEqual([22,24,18,18,22]);
+  // Cell layout keeps its minimum font size.
+  expect(layoutRichText([run('body','#fff',10)],100,true,measure,20)[0].px).toBe(20);
+});
+
+it('retains the font of a trailing empty paragraph', () => {
+  const lines=layoutRichText([run('body','#fff',18),run('\n','#fff',18),run('','#fff',12)],100,true,measure,0);
+  expect(lines.map(l=>l.px)).toEqual([18,12]);
+});
+
+it('keeps closing CJK punctuation off the start of shape lines', () => {
+  const runs=[run('使用者皆適用。依照步調學習。')];
+  expect(text(layoutRichText(runs,60,true,measure,0,{hangingPunctuation:true}))).toEqual(['使用者皆適用。','依照步調學習。']);
+  expect(text(layoutRichText(runs,60,true,measure,0))).toEqual(['使用者皆適用','。依照步調學','習。']);
+});
+
+it('does not insert an extra line when a paragraph ends with an overflowing space', () => {
+  expect(text(layoutRichText([run('abcdef '),run('\n\nLink')],60,true,measure,0))).toEqual(['abcdef ','','Link']);
+  expect(text(layoutRichText([run('hello big world')],90,true,measure,0))).toEqual(['hello big','world']);
+});

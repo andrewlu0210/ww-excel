@@ -3,6 +3,8 @@
   import { t } from '../i18n';
   import { onMount } from 'svelte';
   import type { CFRuleDTO } from '../bridge/sheet';
+  import { drawConditionalIcon } from '../grid/conditional';
+  import { ICON_SETS, iconSetCount, iconThresholds } from '../grid/iconSets';
   import { colName } from '../grid/layout';
 
   interface Props {
@@ -22,6 +24,7 @@
 
   function fresh(): CFRuleDTO {
     return {
+      iconSet: {set:'3Arrows',reverse:false,hideValue:false,thresholds:iconThresholds(3)},
       ranges: [],
       type: 'cell',
       op: 'greaterThan',
@@ -51,6 +54,7 @@
     { value: '3_color_scale', label: t('三色色階') },
     { value: '2_color_scale', label: t('雙色色階') },
     { value: 'data_bar', label: t('資料橫條') },
+    { value: 'icon_set', label: t('圖示集') },
   ];
   const ops = [
     { value: 'greaterThan', label: t('大於') },
@@ -78,7 +82,7 @@
     { label: t('粗體'), color: '', fill: '' },
   ];
   let preset = $state(0);
-  let usesFormat = $derived(!['3_color_scale', '2_color_scale', 'data_bar'].includes(rule.type));
+  let usesFormat = $derived(!['3_color_scale', '2_color_scale', 'data_bar', 'icon_set'].includes(rule.type));
 
   function describe(r: CFRuleDTO): string {
     const kind = r.type === 'icon_set' ? t('圖示集') : kinds.find((k) => k.value === r.type)?.label ?? r.type;
@@ -91,6 +95,19 @@
     if (r.type === 'average') what = r.below ? t('低於平均') : t('高於平均');
     if (r.type === 'formula') what += `：=${r.value1}`;
     return `${what}（${where}）`;
+  }
+
+  function chooseIconSet(id:string):void {
+    rule.iconSet={...rule.iconSet,set:id,thresholds:iconThresholds(iconSetCount(id)),icons:undefined};
+  }
+
+  function iconPreview(canvas:HTMLCanvasElement,args:{set:string;index:number}) {
+    const paint=(value:typeof args)=>{
+      const dpr=window.devicePixelRatio||1;canvas.width=24*dpr;canvas.height=24*dpr;
+      const ctx=canvas.getContext('2d');if(!ctx)return;
+      ctx.setTransform(dpr,0,0,dpr,0,0);drawConditionalIcon(ctx,value,3,3,18);
+    };
+    paint(args);return{update:paint};
   }
 
   async function load(): Promise<void> {
@@ -106,6 +123,7 @@
       r.bold = p.label === t('粗體');
     }
     if (r.type === 'top' || r.type === 'bottom') r.value1 = r.value1 || '10';
+    if(r.type==='icon_set'){r.color='';r.fill='';r.bold=false;r.italic=false;} else r.iconSet=undefined;
     error = await onadd(r);
     if (!error) {
       if (manage) {
@@ -171,6 +189,33 @@
       {:else if rule.type === 'formula'}
         <label>{t('公式')} <input type="text" bind:value={rule.value1} placeholder="=$B1>100" /></label>
       {/if}
+      {#if rule.type === 'icon_set' && rule.iconSet}
+        <label>{t('圖示集')}
+          <select aria-label={t('圖示集')} value={rule.iconSet.set} onchange={(e)=>chooseIconSet(e.currentTarget.value)}>
+            {#each ICON_SETS as set}<option value={set.id}>{set.count} — {t(set.label)}</option>{/each}
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" bind:checked={rule.iconSet.reverse} />{t('反向順序')}</label>
+        <label class="check"><input type="checkbox" bind:checked={rule.iconSet.hideValue} />{t('只顯示圖示')}</label>
+        <div class="icon-thresholds">
+          {#each rule.iconSet.thresholds ?? [] as threshold,i}
+            <div class="icon-threshold">
+              <canvas use:iconPreview={{set:rule.iconSet.set,index:rule.iconSet.reverse?iconSetCount(rule.iconSet.set)-1-i:i}} style="width:24px;height:24px" aria-label={t('圖示')}></canvas>
+              {#if i === 0}<span>{t('其餘數值')}</span>
+              {:else}
+                <select aria-label={t('條件')} value={threshold.strict ?? false} onchange={(e)=>threshold.strict=e.currentTarget.value==='true'}>
+                  <option value="false">≥</option><option value="true">&gt;</option>
+                </select>
+                <select aria-label={t('門檻類型')} bind:value={threshold.type}>
+                  <option value="num">{t('數值')}</option><option value="percent">{t('百分比')}</option>
+                  <option value="percentile">{t('百分位數')}</option><option value="formula">{t('公式')}</option>
+                </select>
+                <input aria-label={t('門檻值')} type="text" bind:value={threshold.value} />
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
       {#if usesFormat}
         <label>
           {t('格式')}
@@ -211,6 +256,10 @@
 </div>
 
 <style>
+  .icon-thresholds { display:grid; gap:6px; margin:8px 0; }
+  .icon-threshold { display:flex; align-items:center; gap:8px; }
+  .icon-threshold input { width:100px; min-width:0; }
+  .icon-threshold canvas { flex-shrink:0; }
   label {
     justify-content: space-between;
   }

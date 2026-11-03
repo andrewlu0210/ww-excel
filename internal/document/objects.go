@@ -78,14 +78,27 @@ func (d *Document) checkChart(c *model.Chart) error {
 		return errors.New("缺少圖表設定")
 	}
 	switch c.Type {
-	case "column", "bar", "line", "pie", "doughnut", "scatter", "area":
+	case "column", "bar", "line", "pie", "doughnut", "scatter", "area", "combo":
 	default:
 		return fmt.Errorf("不支援的圖表類型「%s」", c.Type)
 	}
 	if len(c.Series) == 0 {
 		return errors.New("圖表至少要有一個數列")
 	}
+	columns, lines, primary := 0, 0, 0
 	for i := range c.Series {
+		if c.Type == "combo" {
+			if c.Series[i].Type == "column" {
+				columns++
+			} else if c.Series[i].Type == "line" {
+				lines++
+			} else {
+				return errors.New("組合圖僅支援柱狀與折線數列")
+			}
+			if !c.Series[i].Secondary {
+				primary++
+			}
+		}
 		s := &c.Series[i]
 		for _, f := range []*string{&s.Name, &s.Categories, &s.Values} {
 			*f = strings.TrimPrefix(strings.TrimSpace(*f), "=")
@@ -98,6 +111,14 @@ func (d *Document) checkChart(c *model.Chart) error {
 		}
 		if s.Values == "" {
 			return errors.New("每個數列都要有值的範圍")
+		}
+	}
+	if c.Type == "combo" {
+		if columns == 0 || lines == 0 {
+			return errors.New("組合圖至少需要一組柱狀及一組折線數列")
+		}
+		if primary == 0 {
+			return errors.New("組合圖至少需要一組主座標軸數列")
 		}
 	}
 	return nil
@@ -292,6 +313,19 @@ func (d *Document) ChartFromRange(sheet int, rg model.Range, typ string) (*model
 	}
 	if typ == "pie" || typ == "doughnut" {
 		chart.Series = chart.Series[:1]
+	}
+	if typ == "combo" {
+		chart.ValueAxis = &model.ChartAxis{Format: "General", GridLines: true, LineHidden: true}
+		chart.SecondaryAxis = &model.ChartAxis{Format: "General", LineHidden: true}
+		chart.SecondaryCategoryAxis = &model.ChartAxis{Hidden: true}
+		for i := range chart.Series {
+			chart.Series[i].Type = "column"
+			if i > 0 {
+				chart.Series[i].Type = "line"
+				chart.Series[i].Secondary = true
+				chart.Series[i].Marker = "none"
+			}
+		}
 	}
 	if len(chart.Series) == 1 && chart.Series[0].Name != "" {
 		chart.Title = strings.Join(d.chartTexts(sheet, chart.Series[0].Name, func(sh *model.Sheet, row, col int, c model.Cell) string { return c.Display() }), " ")

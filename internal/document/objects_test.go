@@ -136,3 +136,45 @@ func TestLiteralChartCategories(t *testing.T) {
 		t.Fatalf("changed default labels: %#v", data.Categories)
 	}
 }
+
+func TestComboChartCreationAndAxisEditingUndo(t *testing.T) {
+	d := New()
+	for r, row := range [][]string{{"Month", "Attendance", "Sales"}, {"Jan", "20", "5000"}, {"Feb", "15", "30000"}} {
+		for c, v := range row {
+			enter(t, d, 0, r, c, v)
+		}
+	}
+	chart, err := d.ChartFromRange(0, rg(0, 0, 2, 2), "combo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chart.Series) != 2 || chart.Series[0].Type != "column" || chart.Series[1].Type != "line" || !chart.Series[1].Secondary {
+		t.Fatalf("combo suggestion: %+v", chart)
+	}
+	cmd, id, err := d.AddObjectCommand(0, model.Object{Kind: model.ObjectChart, Chart: chart, W: 500, H: 300})
+	must(t, d)(cmd, err)
+	layout := d.Workbook().Sheets[0].Layout.Clone()
+	next := layout.Objects[0]
+	next.Chart.Series[1].Secondary = false
+	max := 50000.0
+	next.Chart.SecondaryAxis.Maximum = &max
+	must(t, d)(d.UpdateObjectCommand(0, next, "Edit combo"))
+	current := func() *model.Chart { return d.Workbook().Sheets[0].Layout.ObjectByID(id).Chart }
+	if current().Series[1].Secondary {
+		t.Fatal("axis edit was ignored")
+	}
+	d.Undo()
+	if !current().Series[1].Secondary || current().SecondaryAxis.Maximum != nil {
+		t.Fatal("undo failed to restore axes")
+	}
+	d.Redo()
+	if current().Series[1].Secondary || *current().SecondaryAxis.Maximum != max {
+		t.Fatal("redo failed to restore axes")
+	}
+	invalid := *chart
+	invalid.Series = append([]model.ChartSeries(nil), chart.Series...)
+	invalid.Series[1].Type = "pie"
+	if _, _, err := d.AddObjectCommand(0, model.Object{Kind: model.ObjectChart, Chart: &invalid}); err == nil {
+		t.Fatal("unsupported combo series accepted")
+	}
+}

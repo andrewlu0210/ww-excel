@@ -251,6 +251,15 @@ type SetCellResult struct {
 // data validation returns an error whose message is shown to the user;
 // nothing changes. Typing right below or next to a table extends it.
 func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text string) (SetCellResult, error) {
+	return s.setCell(ctx, sheet, row, col, text, nil, 0)
+}
+
+// SetRichCell commits text and its selected-character formatting as one edit.
+func (s *SheetService) SetRichCell(ctx context.Context, sheet, row, col int, text string, runs []TextRunDTO, rowHeight float64) (SetCellResult, error) {
+	return s.setCell(ctx, sheet, row, col, text, runs, rowHeight)
+}
+
+func (s *SheetService) setCell(ctx context.Context, sheet, row, col int, text string, runs []TextRunDTO, rowHeight float64) (SetCellResult, error) {
 	var err error
 	var res SetCellResult
 	s.at(ctx).change(false, func(d *document.Document) (document.Change, bool) {
@@ -260,6 +269,12 @@ func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text st
 		var in document.Input
 		if in, err = d.InputCell(sheet, text); err != nil {
 			return document.Change{}, false
+		}
+		if runs != nil {
+			in.Cell, err = richInput(in.Cell, text, runs, sheetAt(d, sheet).Get(row, col), d.Workbook().StyleTable().Get(sheetAt(d, sheet).EffectiveStyle(row, col)).Font)
+			if err != nil {
+				return document.Change{}, false
+			}
 		}
 		if in.Cell.F == nil {
 			if verr := d.Validate(sheet, row, col, in.Cell, shownText(d.Workbook())); verr != nil {
@@ -279,6 +294,11 @@ func (s *SheetService) SetCell(ctx context.Context, sheet, row, col int, text st
 				// The table grows first so structured references resolve.
 				cmd = &command.Batch{Name: "輸入", Cmds: []command.Command{grow, cmd}}
 			}
+		}
+		// Font growth on an automatic row belongs to the same undo step.
+		sh := sheetAt(d, sheet)
+		if _, custom := sh.Layout.Rows[row]; in.Cell.Rich != nil && !custom && !math.IsNaN(rowHeight) && !math.IsInf(rowHeight, 0) && rowHeight > sh.Layout.RowHeight(row) && rowHeight <= 546 {
+			cmd = &command.Batch{Name: "輸入", Cmds: []command.Command{cmd, command.GrowAutomaticRow(sheet, row, rowHeight)}}
 		}
 		return d.Exec(cmd)
 	})

@@ -38,9 +38,12 @@ func (w *writer) objects(sh *model.Sheet, old, cur []model.Object) error {
 	}
 	for _, o := range cur {
 		if o.Shape != nil {
-			if _, exists := byID[o.ID]; exists {
-				continue
+			if _, exists := byID[o.ID]; !exists {
+				if err := w.addShapeObject(sh, o, cellOf(o.Anchor)); err != nil {
+					return err
+				}
 			}
+			continue
 		}
 		if !dirty[cellOf(o.Anchor)] {
 			continue
@@ -67,6 +70,16 @@ func RewrittenCharts(old, cur []model.Object) []model.Object {
 }
 
 func changedObjectAnchors(old, cur []model.Object) map[string]bool {
+	withoutShapes := func(objects []model.Object) []model.Object {
+		var out []model.Object
+		for _, obj := range objects {
+			if obj.Shape == nil {
+				out = append(out, obj)
+			}
+		}
+		return out
+	}
+	old, cur = withoutShapes(old), withoutShapes(cur)
 	cellOf := func(a model.Anchor) string { n, _ := excelize.CoordinatesToCellName(a.Col+1, a.Row+1); return n }
 	byID := map[int]model.Object{}
 	for _, o := range old {
@@ -100,7 +113,7 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 	case o.Shape != nil:
 		shape := o.Shape
 		opts := &excelize.Shape{Cell: cell, Type: shape.Geometry, Width: uint(o.W), Height: uint(o.H), Format: format}
-		if opts.Type == "" {
+		if opts.Type == "" || shape.RawXML != "" || opts.Type == "custom" {
 			opts.Type = "rect"
 		}
 		if shape.Fill != "" {
@@ -122,12 +135,19 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		return w.f.AddPictureFromBytes(sh.Name, cell, &excelize.Picture{Extension: ext, File: o.Image.Data, Format: &format})
 	case o.Chart != nil:
 		c := o.Chart
+		if c.Type == "combo" {
+			return w.addComboChart(sh, o, cell, format)
+		}
 		xc := &excelize.Chart{
 			Type:      chartType(c),
 			HoleSize:  c.HoleSize,
 			Format:    format,
 			Dimension: excelize.ChartDimension{Width: uint(max(o.W, 50)), Height: uint(max(o.H, 50))},
 			Legend:    excelize.ChartLegend{Position: legendPos(c.Legend)},
+		}
+		if c.GapWidth != nil {
+			gap := uint(max(0, min(500, *c.GapWidth)))
+			xc.GapWidth = &gap
 		}
 		if a := c.ValueAxis; a != nil {
 			axis := excelize.ChartAxis{None: a.Hidden, MajorGridLines: a.GridLines, Minimum: a.Minimum, Maximum: a.Maximum, MajorUnit: a.MajorUnit, NumFmt: excelize.ChartNumFmt{CustomNumFmt: a.Format}}

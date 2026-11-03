@@ -159,6 +159,10 @@ export interface ChangedCell {
 }
 
 export interface ChartDTO {
+    "secondaryAxis"?: model$0.ChartAxis | null;
+    "secondaryCategoryAxis"?: model$0.ChartAxis | null;
+    "gapWidth"?: number | null;
+    "fontName"?: string;
     "plotArea"?: model$0.ChartPlotArea | null;
     "valueAxis"?: model$0.ChartAxis | null;
     "categoryAxis"?: model$0.ChartAxis | null;
@@ -177,6 +181,7 @@ export interface ChartDTO {
 }
 
 export interface ChartDataDTO {
+    "secondaryScale"?: ChartScaleDTO | null;
     "valueScale"?: ChartScaleDTO | null;
     "categories": string[] | null;
     "series": SeriesDataDTO[] | null;
@@ -190,6 +195,10 @@ export interface ChartScaleDTO {
 }
 
 export interface ChartSeriesDTO {
+    "type"?: string;
+    "secondary"?: boolean;
+    "lineWidth"?: number;
+    "marker"?: string;
     "pointStyles"?: { [_ in `${number}`]?: model$0.ChartPointStyle } | null;
     "categoryLabels"?: string[] | null;
     "color"?: string;
@@ -315,6 +324,7 @@ export interface LayoutChanged {
  * LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
  */
 export interface LayoutDTO {
+    "pivotHeaders"?: RangeDTO[] | null;
     "hideGridLines"?: boolean;
     "defaultRow": number;
     "defaultCol": number;
@@ -456,6 +466,7 @@ export interface ShapeDTO {
     "geometry": string;
     "fill": string;
     "lineColor": string;
+    "lineDash"?: string;
     "lineWidth": number;
     "radius": number;
     "runs": TextRunDTO[] | null;

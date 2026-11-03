@@ -26,6 +26,7 @@
 
   const types = [
     { value: 'column', label: t('直條圖') },
+    { value: 'combo', label: t('柱狀＋折線組合圖') },
     { value: 'bar', label: t('橫條圖') },
     { value: 'line', label: t('折線圖') },
     { value: 'area', label: t('區域圖') },
@@ -40,6 +41,7 @@
   });
 
   async function changeType(type: string): Promise<void> {
+    if(type===chart.type)return;
     if (!editing && suggest) {
       const next = await suggest(type);
       if (next) {
@@ -48,6 +50,16 @@
       }
     }
     chart.type = type;
+    chart.stacked = false;
+    if(type==='combo') {
+      chart.valueAxis ??= {format:'General',majorUnit:0,lineColor:'',lineHidden:true,hidden:false,majorTick:'none',gridLines:true,hideLabels:false};
+      chart.secondaryAxis ??= {...chart.valueAxis,gridLines:false};
+      chart.secondaryCategoryAxis ??= {...chart.valueAxis,hidden:true,gridLines:false};
+      chart.series?.forEach((s,i)=>{s.type=i===0?'column':'line';s.secondary=i>0;s.marker='none';});
+    } else {
+      chart.secondaryAxis=undefined;chart.secondaryCategoryAxis=undefined;
+      chart.series?.forEach(s=>{s.type=undefined;s.secondary=false;});
+    }
   }
 
   // Redraw the preview when anything changes.
@@ -79,7 +91,7 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('圖表')} style="width: 720px">
+  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('圖表')} style:width={chart.type === 'combo' ? '900px' : '720px'}>
     <h2>{editing ? t('編輯圖表') : t('插入圖表')}</h2>
     <div class="types" role="radiogroup" aria-label={t('圖表類型')}>
       {#each types as t (t.value)}
@@ -109,18 +121,26 @@
       <canvas bind:this={canvas} style="width: 360px; height: 216px" aria-label={t('預覽')}></canvas>
     </div>
     <div class="series">
-      <div class="head"><span>{t('數列名稱')}</span><span>{chart.type === 'scatter' ? t('X 值') : t('類別')}</span><span>{t('值')}</span><span></span></div>
+      <div class="head" class:combo={chart.type === 'combo'}><span>{t('數列名稱')}</span><span>{chart.type === 'scatter' ? t('X 值') : t('類別')}</span><span>{t('值')}</span>{#if chart.type === 'combo'}<span>{t('圖表類型')}</span><span>{t('座標軸')}</span>{/if}<span></span></div>
       {#each chart.series ?? [] as s, i (i)}
-        <div class="row">
+        <div class="row" class:combo={chart.type === 'combo'}>
           <input type="text" bind:value={s.name} />
           <input type="text" bind:value={s.categories} />
           <input type="text" bind:value={s.values} placeholder={t('=工作表1!$B$2:$B$10')} />
+          {#if chart.type === 'combo'}
+            <select aria-label={t('圖表類型')} bind:value={s.type}>
+              <option value="column">{t('直條圖')}</option><option value="line">{t('折線圖')}</option>
+            </select>
+            <select aria-label={t('座標軸')} value={s.secondary ? 'secondary' : 'primary'} onchange={(e)=>s.secondary=e.currentTarget.value==='secondary'}>
+              <option value="primary">{t('主座標軸')}</option><option value="secondary">{t('次座標軸')}</option>
+            </select>
+          {/if}
           <button aria-label={t('移除數列')} onclick={() => chart.series?.splice(i, 1)}>{t('－')}</button>
         </div>
       {/each}
       <div>
         <button
-          onclick={() => (chart.series = [...(chart.series ?? []), { name: '', categories: chart.series?.[0]?.categories ?? '', values: '' }])}
+          onclick={() => (chart.series = [...(chart.series ?? []), { name: '', categories: chart.series?.[0]?.categories ?? '', values: '', ...(chart.type==='combo'?{type:'line',secondary:true,marker:'none'}:{}) }])}
           >{t('＋ 新增數列')}</button
         >
       </div>
@@ -178,6 +198,7 @@
     grid-template-columns: 1fr 1.4fr 1.4fr 32px;
     gap: 6px;
   }
+  .head.combo, .row.combo { grid-template-columns: 1fr 1.4fr 1.4fr 90px 100px 32px; }
   .head {
     color: var(--chrome-muted);
   }

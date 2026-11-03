@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-// Keep the full-bleed artwork intact and apply the desktop icon silhouette.
+// Preserve the artwork while matching the visual footprint of macOS Dock icons.
 guard CommandLine.arguments.count == 3 else {
     fatalError("Usage: round-icon.swift input.png output.png")
 }
@@ -17,8 +17,12 @@ guard let source = CGImageSourceCreateWithURL(input as CFURL, nil),
                               bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
     fatalError("Cannot load icon artwork")
 }
-let bounds = CGRect(x: 0, y: 0, width: 1024, height: 1024)
-context.addPath(CGPath(roundedRect: bounds, cornerWidth: 224, cornerHeight: 224, transform: nil))
+let canvas = CGRect(x: 0, y: 0, width: 1024, height: 1024)
+let bounds = canvas.insetBy(dx: 88, dy: 88)
+let cornerRadius = 224 * bounds.width / canvas.width
+context.clear(canvas)
+context.interpolationQuality = .high
+context.addPath(CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil))
 context.clip()
 context.draw(image, in: bounds)
 guard let result = context.makeImage(),

@@ -644,6 +644,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 			l.Tables = append(l.Tables, t)
 		}
 	}
+	r.readPivotAppearance(sh, part)
 	if st.drawingRID != "" {
 		readDrawing(r.parts, relTarget(r.parts, part, st.drawingRID), sh)
 	}

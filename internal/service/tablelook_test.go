@@ -62,3 +62,35 @@ func TestCustomTableFontScopesAndConditionalPriority(t *testing.T) {
 		t.Fatalf("conditional format lost priority: %s", got)
 	}
 }
+
+func TestCustomTableFillBandsAndConditionalPriority(t *testing.T) {
+	wb := model.NewWorkbook()
+	sh := wb.Sheets[0]
+	green, gray, white, red := "339966", "F2F2F2", "FFFFFF", "FF0000"
+	sh.Layout.Tables = []model.Table{{Name: "Sales", Style: "Custom", Range: model.Range{R0: 2, C0: 2, R1: 9, C1: 5}, TotalsRow: true, Appearance: &model.TableAppearance{HeaderFill: &green, TotalsFill: &green, FirstStripeFill: &gray, FirstStripeSize: 2, Header: &model.RichFont{Color: &white}}}}
+	d := document.FromWorkbook(wb, "")
+	for _, tc := range []struct {
+		row  int
+		fill string
+	}{{2, green}, {3, gray}, {4, gray}, {5, ""}, {6, gray}, {7, gray}, {8, ""}, {9, green}} {
+		id, _, _, _, _ := newLook(d, 0).style(tc.row, 2, model.Cell{}, 0)
+		if got := wb.StyleTable().Get(id); got.Fill != tc.fill {
+			t.Fatalf("row %d fill %q, want %q", tc.row, got.Fill, tc.fill)
+		}
+	}
+	base := wb.StyleTable().Intern(model.Style{Fill: "FFFF00"})
+	id, _, _, _, _ := newLook(d, 0).style(3, 2, model.Cell{}, base)
+	if wb.StyleTable().Get(id).Fill != "FFFF00" {
+		t.Fatal("table fill overwrote direct formatting")
+	}
+	sh.Layout.Tables[0].NoBands = true
+	id, _, _, _, _ = newLook(d, 0).style(3, 2, model.Cell{}, 0)
+	if wb.StyleTable().Get(id).Fill != "" {
+		t.Fatal("disabled row stripes still visible")
+	}
+	sh.Layout.CondFormats = []model.CFRule{{Type: "formula", Ranges: []model.Range{{R0: 2, C0: 2, R1: 2, C1: 2}}, Value1: "TRUE", Format: model.CFFormat{Fill: red}}}
+	id, _, _, _, _ = newLook(d, 0).style(2, 2, model.Cell{}, 0)
+	if wb.StyleTable().Get(id).Fill != red {
+		t.Fatal("conditional formatting lost fill priority")
+	}
+}
