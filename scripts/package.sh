@@ -23,7 +23,8 @@ NOTARY_PROFILE=${NOTARY_PROFILE:-}
 APP_NAME="WW Excel"
 OUT=dist
 APP="$OUT/$APP_NAME.app"
-DMG="$OUT/WW-Excel-$VERSION.dmg"
+DMG_NAME="WW-Excel-$VERSION.dmg"
+DMG="$OUT/$DMG_NAME"
 
 if [ -n "$NOTARY_PROFILE" ] && [ "$SIGN_IDENTITY" = "-" ]; then
   echo "NOTARY_PROFILE needs SIGN_IDENTITY (a Developer ID Application certificate)" >&2
@@ -94,5 +95,5 @@ if [ -n "$NOTARY_PROFILE" ]; then
   spctl --assess --type open --context context:primary-signature -v "$DMG"
 fi
 
-shasum -a 256 "$DMG" | tee "$DMG.sha256"
+(cd "$OUT" && shasum -a 256 "$DMG_NAME" | tee "$DMG_NAME.sha256")
 echo "==> Done: $DMG"
