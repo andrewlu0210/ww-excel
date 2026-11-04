@@ -337,6 +337,14 @@ func (d *Document) ChartFromRange(sheet int, rg model.Range, typ string) (*model
 // charts (after rows or columns moved, or a sheet was renamed).
 func (d *Document) adjustObjectFormulas(fn func(n ast.Node, sheet string) (ast.Node, bool)) {
 	for _, sh := range d.wb.Sheets {
+		for i := range sh.Layout.Pivots {
+			p := &sh.Layout.Pivots[i]
+			if node, err := parser.Parse(p.Source); err == nil {
+				if out, changed := fn(node, sh.Name); changed {
+					p.Source = ast.Format(out)
+				}
+			}
+		}
 		for i := range sh.Layout.Objects {
 			c := sh.Layout.Objects[i].Chart
 			if c == nil {
@@ -376,13 +384,13 @@ func (d *Document) PageSetupCommand(sheet int, ps model.PageSetup) (command.Comm
 
 // objectsState snapshots every sheet's objects, for undoing edits that
 // rewrite chart references on other sheets.
-type objectsState map[*model.Sheet][]model.Object
+type objectsState map[*model.Sheet]model.Layout
 
 func (d *Document) saveObjects() objectsState {
 	out := objectsState{}
 	for _, sh := range d.wb.Sheets {
-		if len(sh.Layout.Objects) > 0 {
-			out[sh] = sh.Layout.Clone().Objects
+		if len(sh.Layout.Objects) > 0 || len(sh.Layout.Pivots) > 0 {
+			out[sh] = sh.Layout.Clone()
 		}
 	}
 	return out
@@ -391,7 +399,9 @@ func (d *Document) saveObjects() objectsState {
 func (s objectsState) restore(wb *model.Workbook) {
 	for _, sh := range wb.Sheets {
 		if objs, ok := s[sh]; ok {
-			sh.Layout.Objects = objs
+			sh.Layout.Objects = objs.Objects
+			sh.Layout.Pivots = objs.Pivots
+			sh.Layout.PivotHeaders = objs.PivotHeaders
 		}
 	}
 }

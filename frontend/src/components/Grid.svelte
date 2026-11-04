@@ -219,6 +219,7 @@
     cols.reset(l.defaultCol, (l.cols ?? []).map((s): [number, number] => [s.i, s.hidden ? 0 : s.px]));
     look = {
       hideGridLines:l.hideGridLines ?? false,
+      pivotButtons: l.pivotButtons ?? [],
       pivotHeaders: l.pivotHeaders ?? [],
       tableFilters:(l.tables ?? []).filter(t=>!t.noFilter).map(t=>({r0:t.range.r0,c0:t.range.c0,r1:t.range.r1,c1:t.range.c1})),
       rowStyles: new Map((l.rowStyles ?? []).map((s) => [s.i, s.s])),
@@ -328,9 +329,9 @@
     // Keep keyboard focus on the cell editor.
     e.preventDefault();
     lastPointer = { ...p, shift: e.shiftKey, meta: e.metaKey };
-    scroller.setPointerCapture(e.pointerId);
     const border = painting ? null : borderAt(p.x, p.y);
     if (border) {
+      scroller.setPointerCapture(e.pointerId);
       const axis = border.rows ? rows : cols;
       drag = {
         kind: 'resize',
@@ -343,6 +344,7 @@
       return;
     }
     if (!painting && onHandle(p.x, p.y)) {
+      scroller.setPointerCapture(e.pointerId);
       drag = { kind: 'select', area: 'fill', pointerId: e.pointerId };
       emit('down', 'fill');
       return;
@@ -351,12 +353,12 @@
     if (!painting && area === 'cell') {
       const btn = filterButtonAt(p.x, p.y);
       if (btn) {
-        scroller.releasePointerCapture(e.pointerId);
         const rect = host.getBoundingClientRect();
         onfilterbutton?.({ row:btn.row,col: btn.col, x: rect.left + transform.toScreen(btn.x), y: rect.top + transform.toScreen(btn.y) });
         return;
       }
     }
+    scroller.setPointerCapture(e.pointerId);
     drag = { kind: 'select', area, pointerId: e.pointerId };
     emit('down', area);
   }
@@ -369,7 +371,7 @@
   // The filter dropdown button under a point, if any.
   function filterButtonAt(x: number, y: number): { row:number; col: number; x: number; y: number } | null {
     const pos = posAt(x, y);
-    const f=[...(look.tableFilters ?? []),...(look.filter ? [look.filter] : [])].find(r=>pos.row===r.r0 && pos.col>=r.c0 && pos.col<=r.c1);
+    const f=[...(look.pivotButtons ?? []).map(b=>({r0:b.row,c0:b.col,r1:b.row,c1:b.col})),...(look.tableFilters ?? []),...(look.filter ? [look.filter] : [])].find(r=>pos.row===r.r0 && pos.col>=r.c0 && pos.col<=r.c1);
     if (!f) return null;
     if (pos.row !== f.r0 || pos.col < f.c0 || pos.col > f.c1) return null;
     const b = filterButton(frozenRect(rows, cols, { r0: pos.row, c0: pos.col, r1: pos.row, c1: pos.col }, look.freeze, sx, sy));

@@ -218,17 +218,18 @@ type StyleRefDTO struct {
 
 // LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
 type LayoutDTO struct {
-	PivotHeaders  []RangeDTO    `json:"pivotHeaders,omitempty"`
-	HideGridLines bool          `json:"hideGridLines,omitempty"`
-	DefaultRow    float64       `json:"defaultRow"`
-	DefaultCol    float64       `json:"defaultCol"`
-	Rows          []SizeDTO     `json:"rows"`
-	Cols          []SizeDTO     `json:"cols"`
-	RowStyles     []StyleRefDTO `json:"rowStyles"`
-	ColStyles     []StyleRefDTO `json:"colStyles"`
-	Merges        []RangeDTO    `json:"merges"`
-	FreezeRows    int           `json:"freezeRows"`
-	FreezeCols    int           `json:"freezeCols"`
+	PivotButtons  []model.PivotButton `json:"pivotButtons,omitempty"`
+	PivotHeaders  []RangeDTO          `json:"pivotHeaders,omitempty"`
+	HideGridLines bool                `json:"hideGridLines,omitempty"`
+	DefaultRow    float64             `json:"defaultRow"`
+	DefaultCol    float64             `json:"defaultCol"`
+	Rows          []SizeDTO           `json:"rows"`
+	Cols          []SizeDTO           `json:"cols"`
+	RowStyles     []StyleRefDTO       `json:"rowStyles"`
+	ColStyles     []StyleRefDTO       `json:"colStyles"`
+	Merges        []RangeDTO          `json:"merges"`
+	FreezeRows    int                 `json:"freezeRows"`
+	FreezeCols    int                 `json:"freezeCols"`
 	// Filter is the AutoFilter range, or nil; FilteredCols are the
 	// columns with criteria (their buttons show a funnel).
 	Filter       *RangeDTO `json:"filter"`
@@ -259,6 +260,9 @@ func layoutDTO(wb *model.Workbook, l model.Layout, knownStyles int) LayoutDTO {
 		a, b := out.Notes[i], out.Notes[j]
 		return a.Row < b.Row || a.Row == b.Row && a.Col < b.Col
 	})
+	for _, p := range l.Pivots {
+		out.PivotButtons = append(out.PivotButtons, p.Buttons()...)
+	}
 	for _, h := range l.PivotHeaders {
 		out.PivotHeaders = append(out.PivotHeaders, rangeDTO(h))
 	}

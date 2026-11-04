@@ -44,6 +44,7 @@ export interface SheetLook {
   filter: Range | null;
   tableFilters?: Range[];
   pivotHeaders?: Range[];
+  pivotButtons?: {row:number;col:number;field:string;name:string;filtered:boolean}[];
   filtered: Set<number>;
   // Cells with notes, as row * 16384 + col.
   notes: Set<number>;
@@ -378,7 +379,7 @@ export class GridRenderer extends Layer {
   }
 
   private drawFilterButtons(vr: VisibleRange, sx: number, sy: number): void {
-    const ranges = [...(this.look.tableFilters ?? []), ...(this.look.pivotHeaders ?? [])];
+    const ranges = [...(this.look.tableFilters ?? []), ...(this.look.pivotHeaders ?? []), ...(this.look.pivotButtons ?? []).filter(b=>!(this.look.pivotHeaders ?? []).some(r=>r.r0===b.row&&b.col>=r.c0&&b.col<=r.c1)).map(b=>({r0:b.row,c0:b.col,r1:b.row,c1:b.col}))];
     if (this.look.filter && !ranges.some(f=>f.r0===this.look.filter!.r0 && f.c0===this.look.filter!.c0 && f.c1===this.look.filter!.c1)) ranges.push(this.look.filter);
     const { ctx, theme: th } = this;
     for (const f of ranges) {
@@ -391,7 +392,7 @@ export class GridRenderer extends Layer {
         ctx.strokeStyle = '#8a8a8a';
         ctx.lineWidth = 1;
         ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-        const on = this.look.filter?.r0===f.r0 && this.look.filter?.c0===f.c0 && this.look.filtered.has(c);
+        const on = (this.look.filter?.r0===f.r0 && this.look.filter?.c0===f.c0 && this.look.filtered.has(c)) || (this.look.pivotButtons ?? []).some(b=>b.row===f.r0&&b.col===c&&b.filtered);
         ctx.fillStyle = on ? th.accent : '#666666';
         const cx = b.x + b.w / 2;
         const cy = b.y + b.h / 2;

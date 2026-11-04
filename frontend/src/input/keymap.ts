@@ -63,6 +63,8 @@ export type MenuAction =
   | 'condFormatManager'
   | 'clearCondFormats'
   | 'clearAllCondFormats'
+  | 'pivotTable'
+  | 'refreshPivot'
   | 'insertTable'
   | 'tableTotals'
   | 'renameTable'

@@ -4,6 +4,7 @@ import { shapeTest5SelfTest } from './shapeTest5SelfTest';
 import { shapeWorkbookSelfTest } from './shapeWorkbookSelfTest';
 import { iconWorkbookSelfTest } from './iconWorkbookSelfTest';
 import { learnWorkbookSelfTest } from './learnWorkbookSelfTest';
+import { pivotEditingSelfTest } from './pivotEditingSelfTest';
 import { pivotWorkbookSelfTest } from './pivotWorkbookSelfTest';
 import { chartWorkbookSelfTest } from './chartWorkbookSelfTest';
 import { listWorkbookSelfTest } from './listWorkbookSelfTest';
@@ -22,6 +23,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.[0] === '樞紐分析表驗收') return pivotEditingSelfTest(driver);
   if (state.sheets?.[0] === '文字方塊編輯驗收') return shapeWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '條件格式圖示驗收') return iconWorkbookSelfTest(driver);
   if (state.sheets?.includes('9.圖表')) {

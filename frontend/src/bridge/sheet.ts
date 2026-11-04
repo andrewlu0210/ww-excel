@@ -1,3 +1,6 @@
+import type { Pivot } from '../../bindings/ww-excel/internal/model/models';
+export type { Pivot, PivotValue } from '../../bindings/ww-excel/internal/model/models';
+export type { PivotInfoDTO, PivotFilterDTO } from '../../bindings/ww-excel/internal/service/models';
 // The only module that touches generated Wails bindings. Wails3 is still
 // in beta, so keep binding/event usage behind these wrappers.
 import { Events, Window } from '@wailsio/runtime';
@@ -114,6 +117,11 @@ async function failed<T>(p: Promise<T>): Promise<{ value: T | null; error: strin
 }
 
 export const sheetApi = {
+  pivots: async (sheet: number) => ((await SheetService.Pivots(sheet)) ?? []).map(p=>({...p,error:tr(p.error)})),
+  updatePivot: (sheet: number, pivot: Pivot): Promise<string | null> => rejected(SheetService.UpdatePivot(sheet, pivot)),
+  refreshPivot: (sheet: number, name: string): Promise<string | null> => rejected(SheetService.RefreshPivot(sheet, name)),
+  pivotFilter: async (sheet: number, row: number, col: number) => {const p=await SheetService.PivotFilter(sheet,row,col);return p ? {...p,error:tr(p.error)} : null;},
+  setPivotFilter: (sheet: number, name: string, field: string, shown: string[] | null): Promise<string | null> => rejected(SheetService.SetPivotFilter(sheet, name, field, shown ?? [], shown === null)),
   info(sheet: number): Promise<SheetInfo> {
     return SheetService.Info(sheet);
   },

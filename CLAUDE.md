@@ -7,9 +7,9 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v1.0 完成**（2026-10-24），下一步是 Backlog（v1.x）
+- 目前階段：**v1.2.7：新增樞紐欄位設定、篩選與重新整理**（2026-11-04）；操作與限制見 `docs/pivot-editing.md`。
 - 完成一個版本後，更新此區塊並勾選下方對應項目
-- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.0`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
+- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.1-0.20260915055537-22f76f9acb94`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
 
 ## 常用指令
 
@@ -286,7 +286,7 @@ ww-excel/
 - 留到後續版本：Sparkle 自動安裝更新、自動儲存回原檔、匯出 PDF 依儲存格字型、VoiceOver 念出公式與格式、更多語言
 
 ### Backlog（v1.x 之後）
-動態陣列與溢出（`FILTER`、`SORT`、`UNIQUE`）、`LET` / `LAMBDA`、樞紐分析表、巨集或腳本、外掛系統、多人協作（CRDT）
+動態陣列與溢出（`FILTER`、`SORT`、`UNIQUE`）、`LET` / `LAMBDA`、建立全新樞紐分析表與進階樞紐計算、巨集或腳本、外掛系統、多人協作（CRDT）
 
 ---
 

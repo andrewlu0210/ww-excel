@@ -179,7 +179,19 @@ func (d *Document) RenameTableCommand(sheet int, old, name string) (command.Comm
 			return r
 		})
 	})
-	return &command.Batch{Name: "重新命名表格", Cmds: []command.Command{layout, editsCommand(sheet, edits)}}, nil
+	var pivots objectsState
+	update := &command.Func{DoFn: func(wb *model.Workbook) command.Effect {
+		pivots = d.saveObjects()
+		for _, sh := range wb.Sheets {
+			for i := range sh.Layout.Pivots {
+				if strings.EqualFold(sh.Layout.Pivots[i].Source, old) {
+					sh.Layout.Pivots[i].Source = name
+				}
+			}
+		}
+		return command.Effect{Sheet: sheet}
+	}, UndoFn: func(wb *model.Workbook) command.Effect { pivots.restore(wb); return command.Effect{Sheet: sheet} }}
+	return &command.Batch{Name: "重新命名表格", Cmds: []command.Command{layout, editsCommand(sheet, edits), update}}, nil
 }
 
 // editsCommand applies formula rewrites as an undoable step.

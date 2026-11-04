@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -197,6 +198,12 @@ func (d *Document) saveXLSX(path string) error {
 	ch := xlsxfile.Changes{Cells: d.changedCells, OldLayouts: map[*model.Sheet]model.Layout{}, Shifts: d.shifts, Names: d.namesDirty}
 	for sh := range d.layoutDirty {
 		ch.OldLayouts[sh] = d.layoutBase[sh]
+	}
+	// Structural edits can rewrite a pivot source on a different sheet.
+	for _, sh := range d.wb.Sheets {
+		if base, ok := d.layoutBase[sh]; ok && (len(base.Pivots) > 0 || len(sh.Layout.Pivots) > 0) && !reflect.DeepEqual(base.Pivots, sh.Layout.Pivots) {
+			ch.OldLayouts[sh] = base
+		}
 	}
 	f, err := xlsxfile.Save(path, d.wb, d.xlsx, ch)
 	if err != nil {

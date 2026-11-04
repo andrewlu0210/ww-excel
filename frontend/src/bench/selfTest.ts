@@ -10,6 +10,7 @@ import { fontCss, styleStore } from '../stores/styles';
 import { single, type CellPos, type Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import { ribbonSelfTest } from './ribbonSelfTest';
+import { sheetTabsIntegrationTest, sheetTabsSelfTest } from './sheetTabsSelfTest';
 import { zoomSelfTest } from './zoomSelfTest';
 import { formatPainterSelfTest } from './formatPainterSelfTest';
 import type { BlockCache } from '../stores/viewportCache';
@@ -297,6 +298,8 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await formatPainterSelfTest(sheet, step, expect);
   await zoomSelfTest(sheet, step, expect);
   await ribbonSelfTest(sheet, step, expect);
+  await sheetTabsSelfTest(expect);
+  await sheetTabsIntegrationTest(step, expect);
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);

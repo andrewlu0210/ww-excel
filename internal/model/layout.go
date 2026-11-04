@@ -44,6 +44,7 @@ type Layout struct {
 	Tables      []Table
 	// PivotHeaders are display-only dropdowns from cached imported pivot results.
 	PivotHeaders []Range
+	Pivots       []Pivot
 	// Charts and pictures, and the print settings (nil = defaults).
 	Objects   []Object
 	PageSetup *PageSetup
@@ -100,6 +101,12 @@ func (l Layout) Clone() Layout {
 	out.CondFormats = cloneCF(l.CondFormats)
 	out.Tables = append([]Table(nil), l.Tables...)
 	out.PivotHeaders = append([]Range(nil), l.PivotHeaders...)
+	if l.Pivots != nil {
+		out.Pivots = make([]Pivot, len(l.Pivots))
+	}
+	for i, p := range l.Pivots {
+		out.Pivots[i] = p.Clone()
+	}
 	out.Objects = cloneObjects(l.Objects)
 	if l.PageSetup != nil {
 		ps := *l.PageSetup

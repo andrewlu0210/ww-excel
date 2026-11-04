@@ -162,6 +162,14 @@ func (l *Layout) shift(rows bool, at, count int) {
 	}
 	l.Tables = tables
 	l.PivotHeaders = shiftRanges(l.PivotHeaders, rows, at, count)
+	var pivots []Pivot
+	for _, p := range l.Pivots {
+		if rs := shiftRanges([]Range{p.Range}, rows, at, count); len(rs) == 1 {
+			p.Range = rs[0]
+			pivots = append(pivots, p)
+		}
+	}
+	l.Pivots = pivots
 	for i := range l.Objects {
 		a := &l.Objects[i].Anchor
 		k := &a.Col

@@ -8,6 +8,9 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
 import * as formula$0 from "../formula/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as model$0 from "../model/models.js";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -283,6 +286,14 @@ export function PasteSpecial(sheet: number, sel: $models.RangeDTO, mode: string,
     return $Call.ByID(544686695, sheet, sel, mode, transpose, skipBlanks);
 }
 
+export function PivotFilter(sheet: number, row: number, col: number): $CancellablePromise<$models.PivotFilterDTO | null> {
+    return $Call.ByID(18926597, sheet, row, col);
+}
+
+export function Pivots(sheet: number): $CancellablePromise<$models.PivotInfoDTO[] | null> {
+    return $Call.ByID(1414615064, sheet);
+}
+
 /**
  * PreviewFormat renders a cell's value with a format code, for the
  * number format dialog. Empty cells preview the number 1234.5678.
@@ -301,6 +312,10 @@ export function PrintPreview(sheet: number, charts: { [_ in `${number}`]?: strin
 
 export function Redo(): $CancellablePromise<boolean> {
     return $Call.ByID(547917765);
+}
+
+export function RefreshPivot(sheet: number, name: string): $CancellablePromise<void> {
+    return $Call.ByID(91566668, sheet, name);
 }
 
 export function RenameTable(sheet: number, old: string, name: string): $CancellablePromise<void> {
@@ -348,6 +363,10 @@ export function SetNote(sheet: number, row: number, col: number, text: string): 
 
 export function SetPageSetup(sheet: number, p: $models.PageSetupDTO): $CancellablePromise<void> {
     return $Call.ByID(751057473, sheet, p);
+}
+
+export function SetPivotFilter(sheet: number, name: string, field: string, shown: string[] | null, clear: boolean): $CancellablePromise<void> {
+    return $Call.ByID(2021174807, sheet, name, field, shown, clear);
 }
 
 /**
@@ -451,6 +470,10 @@ export function Unmerge(sheet: number, ranges: $models.RangeDTO[] | null): $Canc
  */
 export function UpdateObject(sheet: number, o: $models.ObjectDTO, label: string): $CancellablePromise<void> {
     return $Call.ByID(4131350511, sheet, o, label);
+}
+
+export function UpdatePivot(sheet: number, p: model$0.Pivot): $CancellablePromise<void> {
+    return $Call.ByID(3778457852, sheet, p);
 }
 
 /**

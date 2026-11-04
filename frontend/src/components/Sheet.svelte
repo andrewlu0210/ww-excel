@@ -1412,6 +1412,8 @@
       case 'dataValidation':
       case 'condFormat':
       case 'condFormatManager':
+      case 'pivotTable':
+      case 'refreshPivot':
       case 'insertTable':
       case 'renameTable':
         if (editing) commit('stay');
@@ -1615,14 +1617,25 @@
     focus();
   }
 
+  let pivotFilter = $state<{name: string; field: string} | null>(null);
+
   async function onFilterButton(e: { row:number; col: number; x: number; y: number }): Promise<void> {
     if (editing) commit('stay');
-    const values = await sheetApi.filterValues(sheet, e.col,e.row);
+    await whenIdle();
+    const pivot = await sheetApi.pivotFilter(sheet,e.row,e.col);
+    if (pivot?.error) return notify(pivot.error);
+    pivotFilter = pivot ? {name:pivot.name,field:pivot.field} : null;
+    const values = pivot ? pivot.values : await sheetApi.filterValues(sheet, e.col,e.row);
     const base = root.getBoundingClientRect();
-    filterMenu = { row:e.row,col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values, title: t('欄 %s', colName(e.col)) };
+    filterMenu = { row:e.row,col: e.col, x: e.x - base.left, y: e.y - base.top + 2, values: values ?? [], title: pivot?.field ?? t('欄 %s', colName(e.col)) };
   }
 
   async function applyFilter(shown: string[] | null): Promise<void> {
+    if (pivotFilter) {
+      const pivot=pivotFilter; pivotFilter=null; filterMenu=null;
+      notify(await serial(()=>sheetApi.setPivotFilter(sheet,pivot.name,pivot.field,shown)));
+      focus(); return;
+    }
     const col = filterMenu?.col;
     const row=filterMenu?.row ?? -1;
     filterMenu = null;
@@ -1695,6 +1708,8 @@
     return [
       ...clip,
       ...noteItems,
+      {label:t('樞紐分析表…'),action:'pivotTable'},
+      {label:t('重新整理樞紐分析表'),action:'refreshPivot'},
       null,
       { label: t('插入…'), action: 'insertCells', key: '⇧⌘=' },
       { label: t('刪除…'), action: 'deleteCells', key: '⌘-' },
@@ -2224,7 +2239,7 @@
       y={filterMenu.y}
       title={filterMenu.title}
       values={filterMenu.values}
-      onsort={(desc) => void sortByFilter(desc)}
+      onsort={pivotFilter ? undefined : (desc) => void sortByFilter(desc)}
       onapply={(shown) => void applyFilter(shown)}
       onclose={() => {
         filterMenu = null;

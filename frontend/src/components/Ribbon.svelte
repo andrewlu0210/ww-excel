@@ -12,7 +12,7 @@
     [{label:'表格',action:'insertTable',icon:'▦'}, {label:'圖片',action:'insertPicture',icon:'▧'}, {label:'圖表',action:'insertChart',icon:'▥'}, {label:'新增工作表',action:'insertSheet',icon:'＋'}],
     [{label:'版面設定…',action:'pageSetup',icon:'▤'}, {label:'列印預覽…',action:'printPreview',icon:'▣'}, {label:'列印…',action:'print',icon:'▤'}, {label:'匯出 PDF…',action:'exportPDF',icon:'↗'}],
     [{label:'定義名稱…',action:'defineName',icon:'ƒ'}, {label:'名稱管理員…',action:'nameManager',icon:'≡'}],
-    [{label:'排序…',action:'sort',icon:'↕'}, {label:'遞增排序',action:'sortAsc',icon:'↑'}, {label:'遞減排序',action:'sortDesc',icon:'↓'}, {label:'篩選',action:'filter',icon:'▽'}, {label:'資料驗證…',action:'dataValidation',icon:'✓'}],
+    [{label:'樞紐分析表…',action:'pivotTable',icon:'▦'}, {label:'重新整理樞紐分析表',action:'refreshPivot',icon:'↻'}, {label:'排序…',action:'sort',icon:'↕'}, {label:'遞增排序',action:'sortAsc',icon:'↑'}, {label:'遞減排序',action:'sortDesc',icon:'↓'}, {label:'篩選',action:'filter',icon:'▽'}, {label:'資料驗證…',action:'dataValidation',icon:'✓'}],
     [{label:'凍結窗格',action:'freezePanes',icon:'▦'}, {label:'凍結頂端列',action:'freezeTopRow',icon:'▤'}, {label:'凍結第一欄',action:'freezeFirstCol',icon:'▥'}, {label:'取消凍結窗格',action:'unfreeze',icon:'▦'}, {label:'偏好設定…',action:'preferences',icon:'⚙'}],
   ];
   function moveTab(e: KeyboardEvent) {

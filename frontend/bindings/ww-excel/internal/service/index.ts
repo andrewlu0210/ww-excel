@@ -42,6 +42,8 @@ export type {
     ObjectDTO,
     PageSetupDTO,
     PasteResult,
+    PivotFilterDTO,
+    PivotInfoDTO,
     PreviewResult,
     RangeDTO,
     SeriesDataDTO,

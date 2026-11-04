@@ -20,6 +20,8 @@
     type StyleDTO,
     type ValidationDTO,
   } from './bridge/sheet';
+  import PivotDialog from './components/PivotDialog.svelte';
+  import type { PivotInfoDTO } from './bridge/sheet';
   import ChartDialog from './components/ChartDialog.svelte';
   import CondFormatDialog from './components/CondFormatDialog.svelte';
   import PageSetupDialog from './components/PageSetupDialog.svelte';
@@ -102,6 +104,7 @@
   // v0.6 dialogs.
   let names = $state<string[]>([]);
   // v0.7 dialogs.
+  let pivotDialog = $state<{entries: PivotInfoDTO[]; initial: string} | null>(null);
   let chartDialog = $state<{ editing: boolean; initial: ChartDTO; id: number; at: { row: number; col: number } } | null>(null);
   let pageSetupDialog = $state<{ initial: PageSetupDTO; reopenPreview: boolean } | null>(null);
   let preview = $state<{ url: string; pages: number } | null>(null);
@@ -169,6 +172,10 @@
 
   function onAppAction(action: MenuAction): void {
     switch (action) {
+      case 'pivotTable':
+      case 'refreshPivot':
+        void openPivot(action === 'refreshPivot');
+        break;
       case 'insertSheet':
         void addSheet();
         break;
@@ -239,6 +246,20 @@
 
   function selectedRanges(): RangeDTO[] {
     return (sheetView?.getSelection().ranges ?? []).map((r) => ({ r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 }));
+  }
+
+  async function openPivot(refresh = false): Promise<void> {
+    if (sheetView && !(await sheetView.finishShapeEditing())) return;
+    await sheetView?.whenIdle();
+    const entries = await sheetApi.pivots(active);
+    if (!entries?.length) return notify(t('目前工作表沒有可編輯的樞紐分析表'));
+    const cell = sheetView?.getSelection().active;
+    const selected = entries.find(e=>cell && e.pivot.Range.R0<=cell.row && e.pivot.Range.R1>=cell.row && e.pivot.Range.C0<=cell.col && e.pivot.Range.C1>=cell.col) ?? entries[0];
+    if (refresh) {
+      if (selected.error) return notify(selected.error);
+      notify(await sheetApi.refreshPivot(active, selected.pivot.Name));
+      sheetView?.focus();
+    } else pivotDialog = {entries, initial:selected.pivot.Name};
   }
 
   async function openValidation(): Promise<void> {
@@ -563,6 +584,12 @@
 
   {#if toast}
     <div class="toast" role="status">{toast}</div>
+  {/if}
+
+  {#if pivotDialog}
+    <PivotDialog entries={pivotDialog.entries} initial={pivotDialog.initial}
+      onapply={async (pivot) => { const error = await sheetApi.updatePivot(active,pivot); if (!error) { pivotDialog=null; sheetView?.focus(); } return error; }}
+      onclose={() => {pivotDialog=null;sheetView?.focus();}} />
   {/if}
 
   {#if zoomDialog}

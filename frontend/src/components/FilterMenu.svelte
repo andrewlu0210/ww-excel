@@ -8,7 +8,7 @@
     y: number;
     title: string;
     values: FilterValueDTO[];
-    onsort: (desc: boolean) => void;
+    onsort?: (desc: boolean) => void;
     // null = show everything (clear the column's filter).
     onapply: (shown: string[] | null) => void;
     onclose: () => void;
@@ -43,10 +43,11 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="backdrop" onpointerdown={onclose}></div>
 <div class="dlg menu" style:left="{x}px" style:top="{y}px" role="dialog" aria-label={t('篩選 %s', title)}>
-  <div class="sorts">
+  {#if onsort}<div class="sorts">
     <button onclick={() => onsort(false)}>{t('A→Z 遞增排序')}</button>
     <button onclick={() => onsort(true)}>{t('Z→A 遞減排序')}</button>
-  </div>
+  </div>{/if}
+  <button onclick={() => onapply(null)}>{t('清除篩選')}</button>
   <input type="text" placeholder={t('搜尋')} bind:value={search} />
   <ul>
     <li>

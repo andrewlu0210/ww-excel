@@ -36,7 +36,7 @@ var appIcon []byte
 
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.2.6"
+	version = "1.2.7"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )
@@ -547,6 +547,9 @@ func buildMenu(a *docApp) *appMenus {
 	formulas.Add(T("名稱管理員…")).SetAccelerator("CmdOrCtrl+F3").OnClick(send("nameManager"))
 
 	data := root.AddSubmenu(T("資料"))
+	data.Add(T("樞紐分析表…")).OnClick(send("pivotTable"))
+	data.Add(T("重新整理樞紐分析表")).OnClick(send("refreshPivot"))
+	data.AddSeparator()
 	data.Add(T("排序…")).OnClick(send("sort"))
 	data.Add(T("遞增排序")).OnClick(send("sortAsc"))
 	data.Add(T("遞減排序")).OnClick(send("sortDesc"))

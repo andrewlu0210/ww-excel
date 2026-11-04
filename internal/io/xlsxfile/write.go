@@ -69,6 +69,9 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 			return nil, fmt.Errorf("工作表「%s」：%w", sh.Name, err)
 		}
 	}
+	if err := w.writePivots(ch.OldLayouts); err != nil {
+		return nil, err
+	}
 	if ch.Names || src == nil {
 		if err := w.names(); err != nil {
 			return nil, err

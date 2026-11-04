@@ -55,6 +55,17 @@
     ondone();
   }
 
+  // Capture the derived menu index as an argument before clearing menu.
+  function deleteSheet(i: number): void {
+    menu = null;
+    ondelete(i);
+  }
+
+  function moveSheet(from: number, to: number): void {
+    menu = null;
+    onmove(from, to);
+  }
+
   function onPointerDown(e: PointerEvent, i: number): void {
     if (e.button !== 0 || renaming !== null) return;
     e.preventDefault();
@@ -127,9 +138,9 @@
   <ul class="tab-menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
     <li><button role="menuitem" onclick={() => { menu = null; onadd(); }}>{t('插入工作表')}</button></li>
     <li><button role="menuitem" onclick={() => void startRename(i)}>{t('重新命名')}</button></li>
-    <li><button role="menuitem" disabled={visibleCount <= 1} onclick={() => { menu = null; ondelete(i); }}>{t('刪除')}</button></li>
-    <li><button role="menuitem" disabled={i === 0} onclick={() => { menu = null; onmove(i, i - 1); }}>{t('左移')}</button></li>
-    <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => { menu = null; onmove(i, i + 1); }}>{t('右移')}</button></li>
+    <li><button role="menuitem" disabled={visibleCount <= 1} onclick={() => deleteSheet(i)}>{t('刪除')}</button></li>
+    <li><button role="menuitem" disabled={i === 0} onclick={() => moveSheet(i, i - 1)}>{t('左移')}</button></li>
+    <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => moveSheet(i, i + 1)}>{t('右移')}</button></li>
   </ul>
 {/if}
 

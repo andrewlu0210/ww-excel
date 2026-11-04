@@ -324,6 +324,7 @@ export interface LayoutChanged {
  * LayoutDTO is a sheet's geometry, whole-row/column styles and merges.
  */
 export interface LayoutDTO {
+    "pivotButtons"?: model$0.PivotButton[] | null;
     "pivotHeaders"?: RangeDTO[] | null;
     "hideGridLines"?: boolean;
     "defaultRow": number;
@@ -426,6 +427,20 @@ export interface PasteResult {
      * Moved is set after pasting cut cells (the copy marquee ends).
      */
     "moved": boolean;
+}
+
+export interface PivotFilterDTO {
+    "name": string;
+    "field": string;
+    "values": FilterValueDTO[] | null;
+    "error": string;
+}
+
+export interface PivotInfoDTO {
+    "pivot": model$0.Pivot;
+    "fields": string[] | null;
+    "items": { [_ in string]?: string[] | null } | null;
+    "error": string;
 }
 
 /**
