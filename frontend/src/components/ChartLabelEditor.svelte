@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
+  import { chartLabelPositions } from '../charts/labelPositions';
   import type { ChartDTO, ChartDataDTO, ChartLabelPoint } from '../bridge/sheet';
   let { chart = $bindable(), data }: { chart:ChartDTO; data:ChartDataDTO|null } = $props();
   let selected = $state(0);
@@ -10,11 +11,13 @@
   const pointKey=$derived(`${pointIndex}` as `${number}`);
   const point = $derived(labels?.points?.[pointKey]);
   const points = $derived(Array.from({length:Math.min(10000,data?.series?.[selected]?.values?.length ?? 0)},(_,i)=>i));
-  const positions = [
+  const allPositions = [
     {value:'',label:t('自動')},{value:'ctr',label:t('置中')},{value:'inEnd',label:t('內側結尾')},
     {value:'inBase',label:t('內側基底')},{value:'outEnd',label:t('外側結尾')},{value:'t',label:t('上方')},
     {value:'b',label:t('下方')},{value:'l',label:t('左方')},{value:'r',label:t('右方')},{value:'bestFit',label:t('最適位置')},
   ];
+  const allowedPositions=$derived(chartLabelPositions(chart.type==='combo'?(series?.type ?? 'column'):chart.type,chart.stacked));
+  const positions=$derived(allPositions.filter(p=>allowedPositions.includes(p.value)));
   function enable(checked:boolean) {
     if(!series)return;
     if(!series.labels)series.labels={format:'General',showValue:true,showPercent:false,fontSize:11,color:'',points:{}};
@@ -43,7 +46,7 @@
       <label><input type="checkbox" bind:checked={labels.leaderLines}/>{t('顯示引導線')}</label>
     </div>
     <div class="settings">
-      <label>{t('標籤位置')}<select aria-label={t('標籤位置')} value={labels.position ?? ''} onchange={e=>labels.position=e.currentTarget.value}>{#each positions as p}<option value={p.value}>{p.label}</option>{/each}</select></label>
+      <label>{t('標籤位置')}<select aria-label={t('標籤位置')} value={allowedPositions.includes(labels.position ?? '')?(labels.position ?? ''):''} onchange={e=>labels.position=e.currentTarget.value}>{#each positions as p}<option value={p.value}>{p.label}</option>{/each}</select></label>
       <label>{t('分隔符號')}<select aria-label={t('分隔符號')} value={labels.separator || '\n'} onchange={e=>labels.separator=e.currentTarget.value}><option value={'\n'}>{t('換行')}</option><option value=", ">{t('逗號')}</option><option value=" / ">{t('斜線')}</option><option value=" ">{t('空格')}</option></select></label>
       <label>{t('數值格式')}<input aria-label={t('標籤數值格式')} type="text" bind:value={labels.format}/></label>
       {#if labels.showPercent}<label>{t('百分比格式')}<input aria-label={t('標籤百分比格式')} type="text" value={labels.percentFormat || '0%'} onchange={e=>labels.percentFormat=e.currentTarget.value}/></label>{/if}
@@ -68,7 +71,7 @@
         <textarea aria-label={t('標籤文字')} maxlength="8192" rows="2" value={point.customText ?? data?.series?.[selected]?.labels?.[pointIndex] ?? ''} oninput={e=>patchPoint({customText:e.currentTarget.value,reference:''})}></textarea>
       {/if}
       <div class="settings">
-        <label>{t('標籤位置')}<select aria-label={t('個別標籤位置')} value={point?.position ?? ''} onchange={e=>patchPoint({position:e.currentTarget.value,center:false})}>{#each positions as p}<option value={p.value}>{p.label}</option>{/each}</select></label>
+        <label>{t('標籤位置')}<select aria-label={t('個別標籤位置')} value={allowedPositions.includes(point?.position ?? '')?(point?.position ?? ''):''} onchange={e=>patchPoint({position:e.currentTarget.value,center:false})}>{#each positions as p}<option value={p.value}>{p.label}</option>{/each}</select></label>
         <label>{t('字型大小')}<input aria-label={t('個別標籤字型大小')} type="number" min="1" max="409" value={point?.fontSize || labels.fontSize || 11} onchange={e=>patchPoint({fontSize:e.currentTarget.valueAsNumber})}/></label>
         <label>{t('文字色彩')}<input aria-label={t('個別標籤文字色彩')} type="color" value={'#'+(point?.color || labels.color || '404040')} oninput={e=>patchPoint({color:e.currentTarget.value.slice(1)})}/></label>
         <div class="line"><label><input type="checkbox" checked={point?.bold ?? labels.bold ?? false} onchange={e=>patchPoint({bold:e.currentTarget.checked})}/>{t('粗體')}</label><label><input type="checkbox" checked={point?.italic ?? labels.italic ?? false} onchange={e=>patchPoint({italic:e.currentTarget.checked})}/>{t('斜體')}</label></div>

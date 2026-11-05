@@ -81,6 +81,7 @@ func TestChartAxisSettingsRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				got := reopened.Sheets[0].Layout.Objects[0].Chart
+				assertValueAxisStructure(t, []byte(got.Source.XML))
 				defer loaded.Close()
 				a := got.ValueAxis
 				if a.Minimum == nil || *a.Minimum != -100 || a.Maximum == nil || *a.Maximum != 400 || a.MajorUnit != 50 || a.FontSize != 14 || a.FontName != "Arial" || a.Format != c.ValueAxis.Format || !a.GridLines || a.MajorTick != "cross" || a.LineColor != "FF0000" || !a.HideLabels {

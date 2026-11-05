@@ -225,3 +225,23 @@ func restoreChartAxisSettings(data []byte, c, old *model.Chart) []byte {
 	}
 	return applyDrawingEdits(data, edits)
 }
+
+// Excelize's scatter X axis is serialized from a category-axis structure.
+// Remove category-only children from value axes, including files we previously
+// exported, while retaining their IDs, numeric scales and unknown extensions.
+func repairChartValueAxes(data []byte) []byte {
+	root, err := drawingNodes(data)
+	if err != nil {
+		return data
+	}
+	var edits []drawingEdit
+	for _, axis := range root.all("valAx") {
+		for _, child := range axis.children {
+			switch child.name {
+			case "auto", "lblAlgn", "lblOffset", "tickLblSkip", "tickMarkSkip", "noMultiLvlLbl":
+				edits = append(edits, drawingEdit{child.start, child.end, ""})
+			}
+		}
+	}
+	return applyDrawingEdits(data, edits)
+}

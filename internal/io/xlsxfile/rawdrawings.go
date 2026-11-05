@@ -630,6 +630,9 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	if doc.Properties.Line.NoFill == nil {
 		c.Border = doc.Properties.Line.Fill.color(theme)
+		if c.Border == "" {
+			c.Border = "D9D9D9"
+		}
 	}
 	if doc.Properties.NoFill != nil {
 		c.Background = "transparent"

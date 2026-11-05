@@ -142,7 +142,7 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 			Type:      chartType(c),
 			HoleSize:  c.HoleSize,
 			Format:    format,
-			Dimension: excelize.ChartDimension{Width: uint(max(o.W, 50)), Height: uint(max(o.H, 50))},
+			Dimension: chartDrawingDimension(o, format),
 			Legend:    excelize.ChartLegend{Position: legendPos(c.Legend)},
 		}
 		if c.GapWidth != nil {
@@ -197,6 +197,12 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		}
 	}
 	return nil
+}
+
+// Excelize's oneCell mode uses dimensions as end offsets without adding the
+// start offset. Compensate here before converting to an explicit extent.
+func chartDrawingDimension(o model.Object, format excelize.GraphicOptions) excelize.ChartDimension {
+	return excelize.ChartDimension{Width: uint(max(o.W, 50)) + uint(max(format.OffsetX, 0)), Height: uint(max(o.H, 50)) + uint(max(format.OffsetY, 0))}
 }
 
 func chartType(c *model.Chart) excelize.ChartType {

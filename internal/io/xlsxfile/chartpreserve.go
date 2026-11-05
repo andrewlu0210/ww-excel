@@ -293,7 +293,7 @@ func matchChartSeries(nodes []*drawingNode, data []byte, series model.ChartSerie
 }
 func preserveChartXML(c *model.Chart, generated []byte) ([]byte, error) {
 	if !CanPreserveChart(c) {
-		return restoreChartAxisSettings(restoreChartAxisTitles(restoreGeneratedSeriesStyles(generated, c), c), c, &model.Chart{}), nil
+		return restoreChartAxisSettings(restoreChartAxisTitles(restoreGeneratedSeriesStyles(restoreGeneratedChartBorder(generated, c), c), c), c, &model.Chart{}), nil
 	}
 	source := []byte(c.Source.XML)
 	old := c.Source.Baseline
@@ -369,6 +369,7 @@ func (w *writer) preserveChartPart(name string, c *model.Chart, generated []byte
 	if err != nil {
 		return err
 	}
+	data = repairChartValueAxes(data)
 	w.f.Pkg.Store(name, data)
 	if !CanPreserveChart(c) || len(c.Source.Resources) == 0 {
 		return nil

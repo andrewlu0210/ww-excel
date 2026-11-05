@@ -304,3 +304,52 @@ self-test 模擬不了原生 IME、選單操作、系統剪貼簿與其他 app �
 - [ ] **分頁人工操作**：右鍵選色、清除、Escape 取消；核對暗色介面、移動、改名與復原後色彩。
 - [ ] **Microsoft Excel 16.114.3 互通**：用匯出副本開啟、重存並核對圖表與分頁；本次 AppleEvent 自動開檔逾時，尚未列為通過。
 - [ ] **本版原生輸入法與滑鼠**：重測注音、倉頡、自訂標籤文字與實際滑鼠拖曳。
+
+## v1.2.8 散佈圖 XLSX 結構修正（2026-11-05）
+
+- 使用者以 Microsoft Excel 開啟 `test_data/v128-excel-qa/chart-input.xlsx` 時出現修復提示；不列為 Excel 互通通過。
+- 發現散佈圖 X 數值軸包含類別軸專用的 `auto`、`lblAlgn`、`lblOffset`、`noMultiLvlLbl`。匯出現在移除這些非法欄位，保留數值範圍、刻度、交叉軸及擴充。
+- 新增數值軸合法子節點與順序檢查，涵蓋新建散佈圖、既有錯誤軸修復、各類圖表及 XLSX／WWX 轉存。
+- 已產生 `chart-input-fixed.xlsx` 副本；原始檔案保留。依 Microsoft Open XML SDK 的結構定義檢查，四張圖表未再發現子節點結構錯誤。
+- 初次修正版仍被 Excel 拒絕，使用者提供修復紀錄顯示移除了 `/xl/drawings/drawing1.xml`。後續發現數列資料標籤位置另受 Office 規則限制，僅通過 XML schema 驗證不足以判斷可開啟。
+- [x] **Excel 實際開啟及重存**：Excel 16.114.3 對各圖表逐一隔離後，確認折線／散佈／環圈圖沿用 `outEnd` 造成開檔失敗。移除不合法的位置後，完整副本 `chart-input-excel-fixed.xlsx` 能開啟，包含 4 張圖表；用 Excel 另存並重開仍為 4 張圖表。自訂中文標籤文字、柱距 75% 及環圈內徑 70% 仍在重存 XML 中。
+- [ ] **Excel 外觀人工核對**：核對標籤位置、雙軸及數列樣式的實際畫面。
+
+結構定義來源：[Microsoft Open XML SDK 圖表結構](https://github.com/dotnet/Open-XML-SDK/blob/main/data/schemas/schemas_openxmlformats_org_drawingml_2006_chart.json)。
+
+### Office 標籤位置限制修正
+
+- 折線／散佈圖允許上下左右及置中；圓餅圖允許最適、外側結尾、內側結尾與置中；堆疊柱狀圖禁止外側結尾；區域／環圈等圖表的數列標籤不寫入 `dLblPos`，使用 Excel 自動位置，手動位置與自訂文字保留。
+- 下拉選單依目前圖表及數列類型顯示合法選項。儲存時也清除先前檔案中的不合法位置，包含未修改的圖表。
+- 規則依據：[Microsoft Office 對 dLblPos 的額外限制](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/7dd610ae-d805-40a4-ae3b-c171b6bf08e3)。
+
+- 最新本機 Universal 程式：圖表原生驗收 45／45、完整 Go 測試、245 項前端測試、型別檢查 0 錯誤／0 警告通過。由新程式實際匯出的 `chart-new-export.xlsx` 亦使用 Excel 完成開啟、另存與重開，前後均保留 4 張圖表。
+
+## 圖表尺寸互通修正（2026-11-05）
+
+- 使用者回報檔案可開啟但圖表縮成儲存格大小。原先只驗證圖表數量，未驗證 Excel 讀入的寬高，不能視為版面通過。
+- 原因：Excelize 的 `oneCell` 模式產生 `twoCellAnchor`，卻讓右下角維持在起點儲存格，僅以大偏移量表示尺寸；Excel 會限制這些偏移。現改為真正 `oneCellAnchor`，用明確 EMU `ext` 保存寬高，並補償新建圖表起點的格內偏移。
+- [x] **Excel 實際尺寸**：`chart-input-size-fixed.xlsx` 由 Excel 16.114.3 開啟後，四張圖表分別為 480×270、450×255、450×255、375×225 點，對應 WW Excel 的 640×360、600×340、600×340、500×300 像素。
+- [x] **Excel 重存尺寸**：由 Excel 另存為 `chart-input-size-excel-roundtrip.xlsx` 再開啟，四張圖表數量及上述尺寸保持一致。
+- 新增非零起點偏移、明確 extent、重複保存及 XLSX／WWX 往返的回歸測試。原始檔案保留。
+- [ ] **整張工作表人工比對**：以最新尺寸副本核對圖表、中文字型及標籤的畫面位置。
+
+- 最新 Universal 程式圖表驗收 45／45 與完整 Go 回歸通過；新匯出的 `chart-size-new-export.xlsx` 在 Excel 中量測亦為 480×270、450×255、450×255、375×225 點。
+
+## 組合圖自訂標籤文字互通（2026-11-05）
+
+- 使用者回報第二張圖自訂文字重疊並出現圖例鍵及額外數值。Excel 重存 XML 顯示個別 `dLbl` 缺少明確旗標時，六種自動內容均成為 `true`；與 WW Excel「自訂文字取代自動內容」不同。
+- 匯出自訂文字／參照標籤時，明確關閉 `showLegendKey`、`showVal`、`showCatName`、`showSerName`、`showPercent`、`showBubbleSize`。
+- App 產生的純文字標籤會寫入中文字型、置中及固定 1.2×字級的點數行距，避免 Excel 的預設中文字型與百分比行距改變排版；原檔已設定的富文字區段及段落格式保留。
+- [x] **Excel 文字與位置**：Excel 16.114.3 開啟 `chart-input-text-fixed.xlsx`，第二張圖兩個數列的個別標籤文字均為「自訂收入\n150 元」、圖例鍵 false、left 240.68748、top 83.83331、width 70、height 41 點。高度與 WW Excel 計算的約 41.4 點接近，兩數列文字框完全重合，不再因額外內容而錯位。
+- [x] **結構檢查**：Microsoft OpenXmlValidator 回報 0 錯誤；完整 Go 回歸通過。
+- [ ] **人工畫面確認**：核對新版副本的多行標籤、主副座標軸與整體外觀。
+
+- 最終修正另將行距、置中與字型寫入個別標籤 `txPr`，避免 Excel 重存丟棄 caption 的段落設定。Excel 16.114.3 對 `chart-input-label-layout-fixed.xlsx` 及其 Excel 重存副本的量測完全相同：兩數列 caption「自訂收入\n150 元」、legend key false、left 240.68748、top 83.83331、width 64、height 38 點；四張圖表保留。此處以文字框屬性驗證，尚未宣稱兩個程式的所有字型和軸標籤像素完全相同。
+
+## 圖表預設外框（2026-11-05）
+
+- 使用者回報 Excel 有圖表淡灰外框，WW Excel 卻沒有。原因為未指定線條色彩時，WW Excel 將 Office 的自動外框當成無外框。
+- 匯入未明確指定外框的圖表時，使用 `D9D9D9`；明確 `a:ln/a:noFill` 仍為無外框。新建圖表的預設同樣使用淡灰色。
+- 重新產生圖表 XML 時，依模型明確寫入外框色彩或無外框，避免 Excel 自動補出與畫面不同的框線。
+- Go 回歸涵蓋自動外框、明確無框、自訂色彩及新建圖表往返。

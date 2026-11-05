@@ -60,7 +60,7 @@ func (w *writer) addComboChart(sh *model.Sheet, o model.Object, cell string, for
 		if g.typ == "line" {
 			typ = excelize.Line
 		}
-		xc := &excelize.Chart{Type: typ, Format: format, Dimension: excelize.ChartDimension{Width: uint(max(o.W, 50)), Height: uint(max(o.H, 50))}, Legend: excelize.ChartLegend{Position: legendPos(c.Legend)}}
+		xc := &excelize.Chart{Type: typ, Format: format, Dimension: chartDrawingDimension(o, format), Legend: excelize.ChartLegend{Position: legendPos(c.Legend)}}
 		axis, category := c.ValueAxis, c.CategoryAxis
 		if g.secondary {
 			axis, category = c.SecondaryAxis, c.SecondaryCategoryAxis

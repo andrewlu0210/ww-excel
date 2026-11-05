@@ -205,6 +205,10 @@ func patchShapeDrawing(data []byte, sh *model.Sheet, old []model.Object, added m
 func (w *writer) preserveShapes(filename string, old map[*model.Sheet]model.Layout) error {
 	needed := false
 	for _, sh := range w.wb.Sheets {
+		if hasChartObjects(sh.Layout.Objects) {
+			needed = true
+			break
+		}
 		prev, tracked := old[sh]
 		if !tracked && len(w.shapeAdded[sh]) == 0 {
 			continue
@@ -233,10 +237,8 @@ func (w *writer) preserveShapes(filename string, old map[*model.Sheet]model.Layo
 	changed := map[string][]byte{}
 	for _, sh := range w.wb.Sheets {
 		prev, tracked := old[sh]
-		if !tracked && len(w.shapeAdded[sh]) == 0 {
-			continue
-		}
-		if len(w.shapeAdded[sh]) == 0 && reflect.DeepEqual(shapeObjects(prev.Objects), shapeObjects(sh.Layout.Objects)) {
+		shapeChanged := len(w.shapeAdded[sh]) > 0 || tracked && !reflect.DeepEqual(shapeObjects(prev.Objects), shapeObjects(sh.Layout.Objects))
+		if !shapeChanged && !hasChartObjects(sh.Layout.Objects) {
 			continue
 		}
 		sheetPart := sheets[sh.Name]
@@ -252,10 +254,14 @@ func (w *writer) preserveShapes(filename string, old map[*model.Sheet]model.Layo
 		if part == "" {
 			return fmt.Errorf("無法寫入文字方塊")
 		}
-		data, e := patchShapeDrawing(readPart(parts, part), sh, prev.Objects, w.shapeAdded[sh])
-		if e != nil {
-			return e
+		data := readPart(parts, part)
+		if shapeChanged {
+			data, e = patchShapeDrawing(data, sh, prev.Objects, w.shapeAdded[sh])
+			if e != nil {
+				return e
+			}
 		}
+		data = normalizeChartDrawingAnchors(data, &sh.Layout)
 		changed[part] = data
 	}
 	temp, err := os.CreateTemp(filepath.Dir(filename), ".shape-details-*.xlsx")

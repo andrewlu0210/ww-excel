@@ -128,6 +128,28 @@ func restoreChartAppearance(data []byte, c *model.Chart) []byte {
 
 const chartNamespaces = ` xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"`
 
+// An empty model border means explicitly no outline. Otherwise Office would
+// supply its default outline when the generated chart leaves the line unset.
+func restoreGeneratedChartBorder(data []byte, c *model.Chart) []byte {
+	root, err := drawingNodes(data)
+	if err != nil || len(root.children) != 1 {
+		return data
+	}
+	space := root.children[0]
+	raw := []byte(chartElement("spPr", ""))
+	if properties := space.child("spPr"); properties != nil {
+		raw = []byte(standaloneChartNode(data, properties))
+	}
+	tree, _ := drawingNodes(raw)
+	fill := `<a:noFill/>`
+	if c.Border != "" {
+		fill = `<a:solidFill><a:srgbClr val="` + chartHex(c.Border) + `"/></a:solidFill>`
+	}
+	line := `<a:ln xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" w="9525">` + fill + `</a:ln>`
+	properties := replaceChartChildren(raw, tree.children[0], []chartReplacement{{"ln", line}}, drawingFillOrder)
+	return []byte(replaceChartChildren(data, space, []chartReplacement{{"spPr", properties}}, []string{"date1904", "lang", "roundedCorners", "style", "clrMapOvr", "pivotSource", "protection", "chart", "spPr", "txPr", "externalData", "printSettings", "userShapes", "extLst"}))
+}
+
 func chartLayoutXML(p *model.ChartPlotArea) string {
 	return fmt.Sprintf(`<c:layout%s><c:manualLayout><c:layoutTarget val="inner"/><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="%g"/><c:y val="%g"/><c:w val="%g"/><c:h val="%g"/></c:manualLayout></c:layout>`, chartNamespaces, p.X, p.Y, p.W, p.H)
 }

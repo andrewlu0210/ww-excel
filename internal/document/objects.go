@@ -301,7 +301,7 @@ func (d *Document) ChartFromRange(sheet int, rg model.Range, typ string) (*model
 		return nil, errors.New("請選取含有數字的資料範圍")
 	}
 	byRow := data.C1-data.C0 > data.R1-data.R0 && typ != "scatter"
-	chart := &model.Chart{Type: typ, Legend: "right"}
+	chart := &model.Chart{Type: typ, Legend: "right", Border: "D9D9D9"}
 	if byRow {
 		for r := data.R0; r <= data.R1; r++ {
 			s := model.ChartSeries{Values: ref(r, data.C0, r, data.C1)}

@@ -58,7 +58,7 @@ func TestAdvancedChartPreservesUnknownXMLReferencesAndResources(t *testing.T) {
 	}
 	c.Title = "New & Title"
 	c.Series[0].Values = "Sheet1!$B$2:$B$4"
-	c.Series[0].Labels.Position = "outEnd"
+	c.Series[0].Labels.Position = "t"
 	c.Series[0].Labels.FontSize = 16
 	text := "Edited\nA&B"
 	point := c.Series[0].Labels.Points[1]
@@ -109,7 +109,7 @@ func assertAdvancedChart(t *testing.T, file, text string) {
 		t.Fatalf("title/references: %+v", c)
 	}
 	l := c.Series[0].Labels
-	if l == nil || l.Position != "outEnd" || l.FontSize != 16 || l.Points[1].CustomText == nil || *l.Points[1].CustomText != text || l.Points[1].Layout == nil {
+	if l == nil || l.Position != "t" || l.FontSize != 16 || l.Points[1].CustomText == nil || *l.Points[1].CustomText != text || l.Points[1].Layout == nil {
 		t.Fatalf("label settings: %+v", l)
 	}
 	if !strings.Contains(c.Source.XML, "series-stay") || !strings.Contains(c.Source.XML, `token="stay"`) || !strings.Contains(c.Source.XML, "urn:point") {

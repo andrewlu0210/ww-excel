@@ -92,6 +92,17 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	tmpName := tmp.Name()
 	tmp.Close()
 	defer os.Remove(tmpName)
+	// Also repair untouched chart parts from earlier exports, including orphaned
+	// parts retained by Excelize when replacing a chart.
+	f.Pkg.Range(func(key, value any) bool {
+		name := key.(string)
+		if strings.HasPrefix(name, "xl/charts/chart") && strings.HasSuffix(name, ".xml") {
+			if data, ok := value.([]byte); ok {
+				f.Pkg.Store(name, restoreCustomLabelText(repairChartLabelPositions(repairChartValueAxes(data))))
+			}
+		}
+		return true
+	})
 	if err := f.SaveAs(tmpName); err != nil {
 		return nil, err
 	}
