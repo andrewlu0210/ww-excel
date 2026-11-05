@@ -147,6 +147,13 @@ export function SetName(oldName: string, oldScope: number, n: $models.NameDTO): 
     return $Call.ByID(2261626332, oldName, oldScope, n);
 }
 
+/**
+ * SetTabColor changes the worksheet tab color as one undoable edit.
+ */
+export function SetTabColor(sheet: number, color: string): $CancellablePromise<void> {
+    return $Call.ByID(1752785369, sheet, color);
+}
+
 export function State(): $CancellablePromise<$models.DocState> {
     return $Call.ByID(997426474);
 }

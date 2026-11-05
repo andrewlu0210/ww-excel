@@ -36,7 +36,7 @@ var appIcon []byte
 
 // Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
 var (
-	version = "1.2.7"
+	version = "1.2.8"
 	// updateRepo is the GitHub repository whose releases are checked.
 	updateRepo = "andrewlu0210/ww-excel"
 )

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"testing"
 	"ww-excel/internal/document"
 	"ww-excel/internal/model"
@@ -78,5 +79,36 @@ func TestComboScalesUseOnlyTheirOwnSeries(t *testing.T) {
 	c.Series[1].Secondary = false
 	if chartSecondaryScale(c, data) != nil || chartValueScale(c, data).Max <= 900000 {
 		t.Fatal("series axis reassignment was ignored")
+	}
+}
+
+func TestScatterIndependentAxesAndOneSidedBounds(t *testing.T) {
+	x, y := 2., 10.
+	xmin, xmax, ymin, ymax := 0., 20., -10., 100.
+	c := &model.Chart{Type: "scatter", CategoryAxis: &model.ChartAxis{Minimum: &xmin, Maximum: &xmax, MajorUnit: 5, Format: "0.0"}, ValueAxis: &model.ChartAxis{Minimum: &ymin, Maximum: &ymax, MajorUnit: 10, Format: `"$"0`}}
+	data := document.ChartData{Series: []document.SeriesData{{X: []*float64{&x}, Values: []*float64{&y}}}}
+	sx, sy := chartScatterScale(c, data, true), chartValueScale(c, data)
+	if sx == nil || sx.Min != 0 || sx.Max != 20 || sx.Step != 5 || sx.Labels[1] != "5.0" || sy == nil || sy.Min != -10 || sy.Max != 100 || sy.Labels[1] != "$0" {
+		t.Fatalf("scatter scales: %+v / %+v", sx, sy)
+	}
+	c.ValueAxis.Maximum = nil
+	*c.ValueAxis.Minimum = 1000
+	if scale := chartValueScale(c, data); scale == nil || scale.Min != 1000 || scale.Max <= 1000 {
+		t.Fatalf("one-sided minimum ignored: %+v", scale)
+	}
+}
+func TestDenseChartTicksRemainBounded(t *testing.T) {
+	lo, hi := 0., 1000000.
+	scale := numericChartScale(&model.ChartAxis{Minimum: &lo, Maximum: &hi, MajorUnit: .01}, lo, hi)
+	if scale == nil || scale.Min != lo || scale.Max != hi || len(scale.Labels) > 201 {
+		t.Fatalf("dense ticks lost range: %+v", scale)
+	}
+}
+
+func TestTinyMajorUnitDoesNotOverflowDisplayTicks(t *testing.T) {
+	lo, hi := 0., 1000000.
+	scale := numericChartScale(&model.ChartAxis{Minimum: &lo, Maximum: &hi, MajorUnit: math.SmallestNonzeroFloat64}, lo, hi)
+	if scale == nil || math.IsInf(scale.Step, 0) || math.IsNaN(scale.Step) || len(scale.Labels) > 201 {
+		t.Fatalf("invalid display scale: %+v", scale)
 	}
 }

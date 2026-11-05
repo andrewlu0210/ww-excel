@@ -18,7 +18,6 @@ import (
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
 	"ww-excel/internal/model"
-	"ww-excel/internal/numfmt"
 	"ww-excel/internal/printing"
 )
 
@@ -247,6 +246,7 @@ type SeriesDataDTO struct {
 }
 
 type ChartDataDTO struct {
+	XScale         *ChartScaleDTO  `json:"xScale,omitempty"`
 	SecondaryScale *ChartScaleDTO  `json:"secondaryScale,omitempty"`
 	ValueScale     *ChartScaleDTO  `json:"valueScale,omitempty"`
 	Categories     []string        `json:"categories"`
@@ -266,11 +266,12 @@ func (s *SheetService) ChartData(ctx context.Context, sheet, id int) ChartDataDT
 			return
 		}
 		data := d.ChartData(sheet, o.Chart, shownText(d.Workbook()))
+		out.XScale = chartScatterScale(o.Chart, data, true)
 		out.ValueScale = chartValueScale(o.Chart, data)
 		out.SecondaryScale = chartSecondaryScale(o.Chart, data)
 		out.Categories = append(out.Categories, data.Categories...)
 		for i, sd := range data.Series {
-			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(o.Chart.Series[i].Labels, sd.Values)})
+			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: d.ChartLabelTexts(sheet, o.Chart, data, i)})
 		}
 	})
 	return out
@@ -284,39 +285,19 @@ func (s *SheetService) ChartPreview(ctx context.Context, sheet int, chart ChartD
 			return
 		}
 		data := d.ChartData(sheet, chart.model(), shownText(d.Workbook()))
+		out.XScale = chartScatterScale(chart.model(), data, true)
 		out.ValueScale = chartValueScale(chart.model(), data)
 		out.SecondaryScale = chartSecondaryScale(chart.model(), data)
 		out.Categories = append(out.Categories, data.Categories...)
 		for i, sd := range data.Series {
-			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: chartLabelText(chart.Series[i].Labels, sd.Values)})
+			out.Series = append(out.Series, SeriesDataDTO{Name: sd.Name, Values: orEmpty(sd.Values), X: orEmpty(sd.X), Labels: d.ChartLabelTexts(sheet, chart.model(), data, i)})
 		}
 	})
 	return out
 }
 
 func chartLabelText(labels *model.ChartLabels, values []*float64) []string {
-	if labels == nil {
-		return nil
-	}
-	total := 0.0
-	for _, v := range values {
-		if v != nil && *v > 0 {
-			total += *v
-		}
-	}
-	out := make([]string, len(values))
-	for i, v := range values {
-		if v == nil || labels.Points[i].Hidden {
-			continue
-		}
-		if labels.ShowValue {
-			out[i] = numfmt.Format(*v, labels.Format)
-		}
-		if labels.ShowPercent && total > 0 {
-			out[i] = numfmt.Format(*v/total, "0%")
-		}
-	}
-	return out
+	return document.FormatChartLabels(labels, values, "", nil)
 }
 
 func orEmpty(v []*float64) []*float64 {
@@ -590,4 +571,11 @@ func (ds *DocumentService) PrintSheet(ctx context.Context, sheet int, charts map
 	f.Close()
 	ds.PrintPDF(f.Name())
 	return nil
+}
+
+// MoveChartLabel commits a drag as one undoable edit to the current chart.
+func (s *SheetService) MoveChartLabel(ctx context.Context, sheet, id, series, point int, x, y float64) error {
+	return s.exec(ctx, sheet, func(d *document.Document) (command.Command, error) {
+		return d.MoveChartLabelCommand(sheet, id, series, point, x, y)
+	})
 }

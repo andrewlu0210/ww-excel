@@ -301,6 +301,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 	var v, ftext string
 	inExt := 0 // depth inside extLst (x14 data validations)
 	inHeaderFooter := false
+	inSheetPr := false
 
 	for {
 		tok, err := dec.RawToken()
@@ -313,6 +314,12 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 		switch t := tok.(type) {
 		case xml.StartElement:
 			switch t.Name.Local {
+			case "sheetPr":
+				inSheetPr = true
+			case "tabColor":
+				if inSheetPr {
+					l.TabColor = r.sheetTabColor(t)
+				}
 			case "sheetFormatPr":
 				if v := attr(t, "defaultRowHeight"); v != "" {
 					if h, err := strconv.ParseFloat(v, 64); err == nil && h > 0 {
@@ -520,6 +527,8 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 			}
 		case xml.EndElement:
 			switch t.Name.Local {
+			case "sheetPr":
+				inSheetPr = false
 			case "v":
 				v, hasV, collect = text.String(), true, false
 			case "f":

@@ -181,6 +181,7 @@ export interface ChartDTO {
 }
 
 export interface ChartDataDTO {
+    "xScale"?: ChartScaleDTO | null;
     "secondaryScale"?: ChartScaleDTO | null;
     "valueScale"?: ChartScaleDTO | null;
     "categories": string[] | null;
@@ -236,6 +237,7 @@ export interface DocState {
      */
     "sheets": string[] | null;
     "hiddenSheets"?: number[] | null;
+    "tabColors"?: string[] | null;
 
     /**
      * Names are the defined names, for autocomplete and the name box.

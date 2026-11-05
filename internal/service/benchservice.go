@@ -198,3 +198,23 @@ func (b *BenchService) FixturePath() string {
 	}
 	return os.Getenv("WW_XLSX_FIXTURE")
 }
+
+// SavePDF exports a real PDF beside the self-test report, without a native dialog.
+func (b *BenchService) SavePDF(ctx context.Context, name string, sheet int, charts map[int]string) (string, error) {
+	if !b.SelfTestMode() {
+		return "", fmt.Errorf("SavePDF is only available in self-test mode")
+	}
+	data, _, err := renderPDF(b.docs.at(ctx), sheet, charts)
+	if err != nil {
+		return "", err
+	}
+	filename := filepath.Base(name)
+	if !strings.HasSuffix(strings.ToLower(filename), ".pdf") {
+		filename += ".pdf"
+	}
+	target := filepath.Join(filepath.Dir(benchOutPath()), filename)
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		return "", err
+	}
+	return target, nil
+}

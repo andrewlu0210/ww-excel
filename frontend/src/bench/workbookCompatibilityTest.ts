@@ -4,6 +4,8 @@ import { shapeTest5SelfTest } from './shapeTest5SelfTest';
 import { shapeWorkbookSelfTest } from './shapeWorkbookSelfTest';
 import { iconWorkbookSelfTest } from './iconWorkbookSelfTest';
 import { learnWorkbookSelfTest } from './learnWorkbookSelfTest';
+import { tabColorWorkbookSelfTest } from './tabColorWorkbookSelfTest';
+import { chartLabelEditingSelfTest } from './chartLabelEditingSelfTest';
 import { pivotEditingSelfTest } from './pivotEditingSelfTest';
 import { pivotWorkbookSelfTest } from './pivotWorkbookSelfTest';
 import { chartWorkbookSelfTest } from './chartWorkbookSelfTest';
@@ -23,6 +25,8 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (state.sheets?.join(',') === '學期,學分,預算,書籍') return tabColorWorkbookSelfTest(driver);
+  if (state.sheets?.[0] === '圖表標籤驗收') return chartLabelEditingSelfTest(driver);
   if (state.sheets?.[0] === '樞紐分析表驗收') return pivotEditingSelfTest(driver);
   if (state.sheets?.[0] === '文字方塊編輯驗收') return shapeWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '條件格式圖示驗收') return iconWorkbookSelfTest(driver);

@@ -1,6 +1,9 @@
 <script lang="ts">
   // 插入 › 圖表… and editing a chart (double-click): type, titles,
   // legend and the series references, with a live preview.
+  import ChartSeriesEditor from './ChartSeriesEditor.svelte';
+  import ChartAxisEditor from './ChartAxisEditor.svelte';
+  import ChartLabelEditor from './ChartLabelEditor.svelte';
   import { t } from '../i18n';
   import { onMount } from 'svelte';
   import type { ChartDataDTO, ChartDTO } from '../bridge/sheet';
@@ -21,6 +24,7 @@
 
   let chart = $state<ChartDTO>({ type: 'column', title: '', series: [], legend: 'right', xTitle: '', yTitle: '', stacked: false });
   let error = $state<string | null>(null);
+  let busy = $state(false);
   let canvas: HTMLCanvasElement;
   let data = $state<ChartDataDTO | null>(null);
 
@@ -69,7 +73,7 @@
     const token = ++previewToken;
     void preview(snapshot).then((d) => {
       if (token === previewToken) data = d;
-    });
+    }).catch((e)=>{if(token===previewToken)error=String(e);});
   });
   $effect(() => {
     const d = data;
@@ -84,14 +88,15 @@
   });
 
   async function apply(): Promise<void> {
-    error = await onapply($state.snapshot(chart) as ChartDTO);
+    busy=true;
+    try {error = await onapply($state.snapshot(chart) as ChartDTO);}catch(e){error=String(e);}finally{busy=false;}
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
+<svelte:window onkeydown={(e) => e.key === 'Escape' && !busy && onclose()} />
 
-<div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="dlg" role="dialog" aria-modal="true" aria-label={t('圖表')} style:width={chart.type === 'combo' ? '900px' : '720px'}>
+<div class="dlg-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && !busy && onclose()}>
+  <div class="dlg chart-dialog" role="dialog" aria-modal="true" aria-label={t('圖表')} style:width={chart.type === 'combo' ? '900px' : '720px'}>
     <h2>{editing ? t('編輯圖表') : t('插入圖表')}</h2>
     <div class="types" role="radiogroup" aria-label={t('圖表類型')}>
       {#each types as t (t.value)}
@@ -145,15 +150,19 @@
         >
       </div>
     </div>
+    <ChartSeriesEditor bind:chart {data}/>
+    <ChartAxisEditor bind:chart/>
+    <ChartLabelEditor bind:chart {data}/>
     {#if error}<div class="error" role="alert">{error}</div>{/if}
     <div class="dlg-actions">
-      <button onclick={onclose}>{t('取消')}</button>
-      <button class="primary" onclick={() => void apply()}>{t('確定')}</button>
+      <button disabled={busy} onclick={onclose}>{t('取消')}</button>
+      <button class="primary" disabled={busy} onclick={() => void apply()}>{t('確定')}</button>
     </div>
   </div>
 </div>
 
 <style>
+  .chart-dialog { max-width:96vw; max-height:94vh; overflow:auto; }
   .types {
     display: flex;
     gap: 4px;

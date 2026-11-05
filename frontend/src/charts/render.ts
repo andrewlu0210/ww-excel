@@ -2,9 +2,15 @@
 // scatter, in Excel's default look. Pure apart from the canvas, so the
 // same code draws on screen and the pictures sent to the PDF renderer.
 
+import {drawChartMarker} from './markers';
+import { drawDataLabel, type LabelSpec, type LabelAnchor, type LabelRect, type ChartLabelHit } from './labels';
 import { fontFamilies } from '../stores/fonts';
 
 interface ChartAxis {
+  format?:string;
+  majorUnit?:number;
+  minimum?:number|null;
+  maximum?:number|null;
   fontSize?: number;
   fontName?: string;
   lineColor: string;
@@ -34,11 +40,7 @@ export interface ChartSpec {
       lineHidden?:boolean;
     } | undefined} | null;
     pointColors?: { [key: string]: string | undefined } | null;
-    labels?: {
-      fontSize: number;
-      color: string;
-      points: { [key: string]: { hidden: boolean; center: boolean } | undefined } | null;
-    } | null;
+    labels?: LabelSpec | null;
   }[] | null;
   background?: string;
   holeSize?: number;
@@ -62,6 +64,7 @@ export interface ChartSeriesData {
 
 export interface ChartData {
   secondaryScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
+  xScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
   valueScale?: {min:number;max:number;step:number;labels:string[] | null} | null;
   categories: string[];
   series: ChartSeriesData[];
@@ -150,7 +153,8 @@ interface Box {
   h: number;
 }
 
-export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, spec: ChartSpec, data: ChartData, theme: ChartTheme = LIGHT_THEME): void {
+export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, spec: ChartSpec, data: ChartData, theme: ChartTheme = LIGHT_THEME, hits?:ChartLabelHit[]): void {
+  if(hits)hits.length=0;
   ctx.save();
   const background = spec.background === 'transparent' ? 'transparent' : spec.background ? `#${spec.background}` : theme.bg;
   theme = { ...theme, bg: background, font: spec.fontName ? chartFont(spec.fontName) : theme.font };
@@ -192,9 +196,9 @@ export function drawChart(ctx: CanvasRenderingContext2D, w: number, h: number, s
     const p=spec.plotArea;
     if ([p.x,p.y,p.w,p.h].every(Number.isFinite) && p.w>0 && p.h>0) box={x:p.x*w,y:p.y*h,w:p.w*w,h:p.h*h};
   }
-  if (pie) drawPie(ctx, box, spec, data, theme, spec.type === 'doughnut' ? Math.max(10, Math.min(90, spec.holeSize || 50)) / 100 : 0);
-  else if (spec.type === 'scatter') drawScatter(ctx, box, spec, data, theme);
-  else drawCategoryChart(ctx, box, spec, data, theme);
+  if (pie) drawPie(ctx, box, spec, data, theme, {w,h}, spec.type === 'doughnut' ? Math.max(10, Math.min(90, spec.holeSize || 50)) / 100 : 0, hits);
+  else if (spec.type === 'scatter') drawScatter(ctx, box, spec, data, theme, {w,h}, hits);
+  else drawCategoryChart(ctx, box, spec, data, theme, {w,h}, hits);
   ctx.restore();
 }
 
@@ -241,7 +245,7 @@ function finite(v: number | null): v is number {
 }
 
 // Column, bar, line and area charts share a category axis.
-function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, data: ChartData, theme: ChartTheme): void {
+function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, data: ChartData, theme: ChartTheme, viewport:{w:number;h:number}, hits?:ChartLabelHit[]): void {
   const combo = spec.type === 'combo';
   const horizontal = spec.type === 'bar';
   const stacked = spec.stacked && spec.type !== 'line';
@@ -373,6 +377,9 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
       const inside=categoryAxis.majorTick==='in' || categoryAxis.majorTick==='cross' ? 4 : 0;
       axisLine(categoryAxis,horizontal ? zero-outside : p,horizontal ? p : zero-inside,horizontal ? zero+inside : p,horizontal ? p : zero+outside);
     }
+    if(categoryAxis?.gridLines&&!categoryAxis.hidden) {
+      ctx.strokeStyle=theme.grid;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(horizontal?plot.x:p,horizontal?p:plot.y);ctx.lineTo(horizontal?plot.x+plot.w:p,horizontal?p:plot.y+plot.h);ctx.stroke();
+    }
     if(categoryAxis?.hidden || categoryAxis?.hideLabels) continue;
     const label = data.categories[i] ?? String(i + 1);
     if (horizontal) {
@@ -398,12 +405,22 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     ctx.restore();
   }
 
+  const anchors:{si:number;index:number;anchor:LabelAnchor}[]=[];
+  const paintLabels=()=>{
+    const occupied:LabelRect[]=[];
+    for(const item of anchors){
+      const labels=spec.series?.[item.si]?.labels;if(!labels)continue;
+      const text=data.series[item.si].labels?.[item.index] ?? (labels.showValue?String(data.series[item.si].values[item.index] ?? ''):'');
+      const rect=drawDataLabel(ctx,viewport,item.anchor,text,labels,labels.points?.[item.index],theme,occupied);
+      if(rect)hits?.push({...rect,series:item.si,point:item.index,rotation:labels.rotation || 0});
+    }
+  };
   const columns=data.series.map((_,i)=>i).filter(i=>!combo || spec.series?.[i]?.type==='column');
   const k=columns.length;
   ctx.save();ctx.beginPath();ctx.rect(plot.x,plot.y,plot.w,plot.h);ctx.clip();
   if (spec.type === 'column' || spec.type === 'bar' || (combo && k>0)) {
     // Excel's gap is measured in column widths, including a valid zero gap.
-    const gapRatio = Number.isFinite(spec.gapWidth) ? Math.max(0, Math.min(500, spec.gapWidth!)) / 100 : (stacked ? 1 : k);
+    const gapRatio = Number.isFinite(spec.gapWidth) ? Math.max(0, Math.min(500, spec.gapWidth!)) / 100 : 1.5;
     const barW = band / ((stacked ? 1 : k) + gapRatio);
     const inner = barW * (stacked ? 1 : k);
     const gap = (band - inner) / 2;
@@ -428,11 +445,12 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
         const p0 = stacked ? mapValue(a) : baseZero;
         const p1 = mapValue(b);
         const offset = band * i + gap + (stacked ? 0 : barW * columnIndex);
-        if (horizontal) ctx.fillRect(Math.min(p0, p1), plot.y + offset, Math.abs(p1 - p0), barW);
-        else ctx.fillRect(plot.x + offset, Math.min(p0, p1), barW, Math.abs(p1 - p0));
+        const rect=horizontal?{x:Math.min(p0,p1),y:plot.y+offset,w:Math.abs(p1-p0),h:barW}:{x:plot.x+offset,y:Math.min(p0,p1),w:barW,h:Math.abs(p1-p0)};
+        ctx.fillRect(rect.x,rect.y,rect.w,rect.h);
+        if(p1>=(horizontal?plot.x:plot.y)-1e-8&&p1<=(horizontal?plot.x+plot.w:plot.y+plot.h)+1e-8)anchors.push({si,index:i,anchor:{x:horizontal?p1:rect.x+rect.w/2,y:horizontal?rect.y+rect.h/2:p1,bar:rect,horizontal,negative:v<0}});
       }
     });
-    if(!combo){ctx.restore();return;}
+    if(!combo){ctx.restore();paintLabels();return;}
   }
   // Line and area: points at category centers.
   const stack = new Array<number>(n).fill(0);
@@ -450,7 +468,8 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
       }
       const base = stacked && !combo ? stack[i] : 0;
       if (stacked && !combo) stack[i] += v;
-      pts.push([plot.x + band * (i + 0.5), mapValue(base + v)]);
+      const point:[number,number]=[plot.x+band*(i+0.5),mapValue(base+v)];
+      pts.push(point);if(point[1]>=plot.y-1e-8&&point[1]<=plot.y+plot.h+1e-8)anchors.push({si,index:i,anchor:{x:point[0],y:point[1]}});
     }
     if (spec.type === 'area') {
       ctx.globalAlpha = stacked ? 0.9 : 0.6;
@@ -495,16 +514,14 @@ function drawCategoryChart(ctx: CanvasRenderingContext2D, box: Box, spec: ChartS
     ctx.fillStyle = color;
     for (const p of pts) {
       if (p && spec.series?.[si]?.marker!=='none') {
-        ctx.beginPath();
-        ctx.arc(p[0], p[1], 3, 0, Math.PI * 2);
-        ctx.fill();
+        drawChartMarker(ctx,p[0],p[1],3,spec.series?.[si]?.marker || 'auto');
       }
     }
   });
-  ctx.restore();
+  ctx.restore();paintLabels();
 }
 
-function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: ChartData, theme: ChartTheme, hole = 0): void {
+function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: ChartData, theme: ChartTheme, viewport:{w:number;h:number}, hole = 0, hits?:ChartLabelHit[]): void {
   const values = data.series[0].values.map((v) => (finite(v) && v > 0 ? v : 0));
   const total = values.reduce((a, b) => a + b, 0);
   if (total <= 0) return;
@@ -534,6 +551,7 @@ function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: 
     angle+=sweep;
   }
   angle=-Math.PI/2;
+  const occupied:LabelRect[]=[];
   values.forEach((v, i) => {
     if (v <= 0) return;
     const sweep = (v / total) * Math.PI * 2;
@@ -562,20 +580,18 @@ function drawPie(ctx: CanvasRenderingContext2D, box: Box, spec:ChartSpec, data: 
     ctx.restore();
     const labels = spec.series?.[0]?.labels;
     const point = labels?.points?.[i];
-    const text = labels ? data.series[0].labels?.[i] ?? '' : `${Math.round((v / total) * 100)}%`;
+    const text = labels ? data.series[0].labels?.[i] ?? (labels.showPercent?`${Math.round((v / total) * 100)}%`:'') : `${Math.round((v / total) * 100)}%`;
     if (!point?.hidden && text && (labels || sweep > 0.25)) {
       const mid = angle + sweep / 2;
-      ctx.fillStyle = labels?.color ? `#${labels.color}` : '#ffffff';
-      ctx.font = `${labels?.fontSize ? labels.fontSize * 96 / 72 : 11}px ${theme.font}`;
-      ctx.textAlign = 'center';
       const radius = point?.center && hole ? 0 : r * (hole ? (1 + hole) / 2 : 0.62);
-      ctx.fillText(text, cx + Math.cos(mid) * radius, cy + Math.sin(mid) * radius);
+      const rect=drawDataLabel(ctx,viewport,{x:cx+Math.cos(mid)*radius,y:cy+Math.sin(mid)*radius,pie:{cx,cy,radius:r,angle:mid}},text,labels ?? {fontSize:8.25,color:'ffffff'},point,theme,occupied);
+      if(rect)hits?.push({...rect,series:0,point:i,rotation:labels?.rotation || 0});
     }
     angle += sweep;
   });
 }
 
-function drawScatter(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, data: ChartData, theme: ChartTheme): void {
+function drawScatter(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, data: ChartData, theme: ChartTheme, viewport:{w:number;h:number}, hits?:ChartLabelHit[]): void {
   const xs: number[] = [];
   const ys: number[] = [];
   const pointsOf = (s: ChartSeriesData) =>
@@ -592,39 +608,36 @@ function drawScatter(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, d
     }
   }
   if (xs.length === 0) return;
-  const sx = niceScale(Math.min(...xs), Math.max(...xs));
-  const sy = niceScale(Math.min(...ys), Math.max(...ys));
-  ctx.font = `11px ${theme.font}`;
+  const sx = data.xScale ?? niceScale(Math.min(...xs), Math.max(...xs));
+  const sy = data.valueScale ?? niceScale(Math.min(...ys), Math.max(...ys));
+  const xAxis=spec.categoryAxis,yAxis=spec.valueAxis;
+  const font=(a:ChartAxis|null|undefined)=>`${(a?.fontSize || 8.25)*96/72}px ${a?.fontName?chartFont(a.fontName):theme.font}`;
   const yLabels: string[] = [];
-  for (let v = sy.min; v <= sy.max + sy.step / 2; v += sy.step) yLabels.push(formatTick(v, sy.step));
-  const labelW = Math.max(...yLabels.map((t) => ctx.measureText(t).width)) + 8;
-  const plot: Box = { x: box.x + labelW + (spec.yTitle ? 18 : 0), y: box.y + 6, w: 0, h: 0 };
-  plot.w = box.x + box.w - plot.x - 8;
-  plot.h = box.y + box.h - plot.y - 20 - (spec.xTitle ? 18 : 0);
-  if (plot.w < 20 || plot.h < 20) return;
-  const px = (v: number) => plot.x + ((v - sx.min) / (sx.max - sx.min)) * plot.w;
-  const py = (v: number) => plot.y + plot.h - ((v - sy.min) / (sy.max - sy.min)) * plot.h;
-  ctx.strokeStyle = theme.grid;
-  ctx.fillStyle = theme.muted;
-  ctx.lineWidth = 1;
-  yLabels.forEach((label, i) => {
-    const y = Math.round(py(sy.min + i * sy.step)) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(plot.x, y);
-    ctx.lineTo(plot.x + plot.w, y);
-    ctx.stroke();
-    ctx.textAlign = 'right';
-    ctx.fillText(label, plot.x - 6, y);
-  });
-  for (let v = sx.min; v <= sx.max + sx.step / 2; v += sx.step) {
-    const x = Math.round(px(v)) + 0.5;
-    ctx.beginPath();
-    ctx.moveTo(x, plot.y);
-    ctx.lineTo(x, plot.y + plot.h);
-    ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.fillText(formatTick(v, sx.step), x, plot.y + plot.h + 10);
-  }
+  for(let i=0;i<=200&&sy.min+i*sy.step<=sy.max+sy.step*1e-8;i++)yLabels.push(data.valueScale?.labels?.[i] ?? formatTick(sy.min+i*sy.step,sy.step));
+  ctx.font=font(yAxis);
+  const labelW=yAxis?.hidden||yAxis?.hideLabels?0:Math.max(...yLabels.map(t=>ctx.measureText(t).width))+8;
+  const xBand=Math.max(20,(xAxis?.fontSize || 8.25)*96/72*1.9);
+  const plot:Box={x:box.x+labelW+(spec.yTitle?18:0),y:box.y+Math.max(6,(yAxis?.fontSize || 8.25)*96/72/2),w:0,h:0};
+  plot.w=box.x+box.w-plot.x-8;plot.h=box.y+box.h-plot.y-xBand-(spec.xTitle?18:0);
+  if(plot.w<20||plot.h<20)return;
+  const px=(v:number)=>plot.x+(v-sx.min)/(sx.max-sx.min)*plot.w;
+  const py=(v:number)=>plot.y+plot.h-(v-sy.min)/(sy.max-sy.min)*plot.h;
+  const line=(axis:ChartAxis|null|undefined,x1:number,y1:number,x2:number,y2:number)=>{
+    if(axis?.hidden||axis?.lineHidden)return;ctx.strokeStyle=axis?.lineColor?'#'+axis.lineColor:theme.muted;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  };
+  const ticks=(axis:ChartAxis|null|undefined,horizontal:boolean)=>{
+    const scale=horizontal?sx:sy;ctx.font=font(axis);ctx.fillStyle=theme.muted;
+    for(let i=0;i<=200&&scale.min+i*scale.step<=scale.max+scale.step*1e-8;i++){
+      if(axis?.hidden)break;
+      const v=scale.min+i*scale.step,p=horizontal?px(v):py(v);
+      if(axis?.gridLines ?? true){ctx.strokeStyle=theme.grid;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(horizontal?p:plot.x,horizontal?plot.y:p);ctx.lineTo(horizontal?p:plot.x+plot.w,horizontal?plot.y+plot.h:p);ctx.stroke();}
+      if(!axis?.hideLabels){ctx.textAlign=horizontal?'center':'right';ctx.fillText((horizontal?data.xScale?.labels?.[i]:yLabels[i]) ?? formatTick(v,scale.step),horizontal?p:plot.x-6,horizontal?plot.y+plot.h+xBand/2:p);}
+      const tick=axis?.majorTick || 'none',outside=['out','cross'].includes(tick)?4:0,inside=['in','cross'].includes(tick)?4:0;
+      if(tick!=='none')line(axis,horizontal?p:plot.x-outside,horizontal?plot.y+plot.h+outside:p,horizontal?p:plot.x+inside,horizontal?plot.y+plot.h-inside:p);
+    }
+  };
+  ticks(xAxis,true);ticks(yAxis,false);
+  line(xAxis,plot.x,plot.y+plot.h,plot.x+plot.w,plot.y+plot.h);line(yAxis,plot.x,plot.y,plot.x,plot.y+plot.h);
   ctx.fillStyle = theme.text;
   if (spec.xTitle) {
     ctx.textAlign = 'center';
@@ -638,13 +651,19 @@ function drawScatter(ctx: CanvasRenderingContext2D, box: Box, spec: ChartSpec, d
     ctx.fillText(spec.yTitle, 0, 0);
     ctx.restore();
   }
-  data.series.forEach((s, si) => {
-    ctx.fillStyle = chartColor(spec, si);
-    for (const p of pointsOf(s)) {
-      if (!p) continue;
-      ctx.beginPath();
-      ctx.arc(px(p[0]), py(p[1]), 3.5, 0, Math.PI * 2);
-      ctx.fill();
+  const occupied:LabelRect[]=[],anchors:{si:number;i:number;x:number;y:number}[]=[];
+  ctx.save();ctx.beginPath();ctx.rect(plot.x,plot.y,plot.w,plot.h);ctx.clip();
+  data.series.forEach((s,si)=>{
+    ctx.fillStyle=chartColor(spec,si);
+    for(const [i,p] of pointsOf(s).entries()){
+      if(!p||p[0]<sx.min||p[0]>sx.max||p[1]<sy.min||p[1]>sy.max)continue;
+      const x=px(p[0]),y=py(p[1]);drawChartMarker(ctx,x,y,3.5,spec.series?.[si]?.marker || 'auto');anchors.push({si,i,x,y});
     }
   });
+  ctx.restore();
+  for(const {si,i,x,y} of anchors){
+    const s=data.series[si],labels=spec.series?.[si]?.labels;if(!labels)continue;
+    const rect=drawDataLabel(ctx,viewport,{x,y},s.labels?.[i] ?? (labels.showValue?String(s.values[i] ?? ''):''),labels,labels.points?.[i],theme,occupied);
+    if(rect)hits?.push({...rect,series:si,point:i,rotation:labels.rotation || 0});
+  }
 }

@@ -1,11 +1,15 @@
 <script lang="ts">
   // Sheet tabs: click to switch, double-click to rename, right-click for
   // a menu, drag to reorder, + to add.
+  import ColorPicker from './ColorPicker.svelte';
+  import { sheetTabStyle } from './sheetTabColor';
   import { t } from '../i18n';
   import { tick } from 'svelte';
 
   interface Props {
     sheets: string[];
+    colors?: string[];
+    oncolor?:(i:number,color:string)=>void;
     hidden?: number[];
     active: number;
     onselect: (i: number) => void;
@@ -17,7 +21,7 @@
     ondone: () => void;
   }
 
-  let { sheets, hidden = [], active, onselect, onadd, onrename, ondelete, onmove, ondone }: Props = $props();
+  let { sheets, colors = [], oncolor, hidden = [], active, onselect, onadd, onrename, ondelete, onmove, ondone }: Props = $props();
 
   const visibleCount = $derived(sheets.length - hidden.length);
 
@@ -25,6 +29,8 @@
   let draft = $state('');
   let error = $state<string | null>(null);
   let menu = $state<{ i: number; x: number; y: number } | null>(null);
+  let colorTarget=$state<{i:number;x:number;y:number}|null>(null);
+  function setColor(i:number,color:string):void{colorTarget=null;oncolor?.(i,color);ondone();}
   let dragFrom: number | null = null;
   let dropAt = $state<number | null>(null);
   let input = $state<HTMLInputElement>();
@@ -87,14 +93,15 @@
 
 <svelte:window
   onpointerup={onPointerUp}
-  onpointerdown={(e) => menu && !(e.target as Element).closest?.('.tab-menu') && (menu = null)}
+  onpointerdown={(e)=>{if(!(e.target as Element).closest?.('.tab-menu,.tab-color-popup')){menu=null;colorTarget=null;}}}
 />
 
 <div class="tabs" data-sheet-tabs role="tablist" aria-label={t('工作表')}>
   {#each sheets as name, i (i + ':' + name)}
+    {@const colorStyle=sheetTabStyle(colors[i])}
     {#if !hidden.includes(i)}
     {#if renaming === i}
-      <span class="tab active editing">
+      <span class="tab active editing" class:colored={!!colorStyle} style={colorStyle}>
         <input
           bind:this={input}
           bind:value={draft}
@@ -112,6 +119,9 @@
     {:else}
       <button
         class="tab"
+        class:colored={!!colorStyle}
+        style={colorStyle}
+        data-tab-color={colors[i] ?? ''}
         class:active={i === active}
         class:drop={dropAt === i}
         data-sheet-index={i}
@@ -138,13 +148,23 @@
   <ul class="tab-menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
     <li><button role="menuitem" onclick={() => { menu = null; onadd(); }}>{t('插入工作表')}</button></li>
     <li><button role="menuitem" onclick={() => void startRename(i)}>{t('重新命名')}</button></li>
+    <li><button role="menuitem" disabled={!oncolor} onclick={()=>{colorTarget={i,x:Math.max(4,Math.min(menu!.x,window.innerWidth-248)),y:Math.max(4,menu!.y-270)};menu=null;}}>{t('分頁色彩…')}</button></li>
     <li><button role="menuitem" disabled={visibleCount <= 1} onclick={() => deleteSheet(i)}>{t('刪除')}</button></li>
     <li><button role="menuitem" disabled={i === 0} onclick={() => moveSheet(i, i - 1)}>{t('左移')}</button></li>
     <li><button role="menuitem" disabled={i === sheets.length - 1} onclick={() => moveSheet(i, i + 1)}>{t('右移')}</button></li>
   </ul>
 {/if}
 
+{#if colorTarget}
+ {@const target=colorTarget}
+ <div class="tab-color-popup" style:left="{target.x}px" style:top="{target.y}px">
+  <ColorPicker resetLabel={t('無色彩')} onpick={color=>setColor(target.i,color)} onclose={()=>colorTarget=null}/>
+ </div>
+{/if}
+
 <style>
+  .tab-color-popup {position:fixed;z-index:50;}
+  .tab-color-popup :global(.picker){position:static;margin:0;}
   .tabs {
     display: flex;
     align-items: stretch;
@@ -175,6 +195,9 @@
     border-bottom-color: var(--accent);
     background: var(--input-bg);
   }
+  .tab.colored { background:var(--sheet-tab-color);color:var(--sheet-tab-text); }
+  .tab.colored:hover { filter:brightness(1.08); }
+  .tab.colored.active { background:var(--sheet-tab-active-bg);color:#111111;border-bottom-color:var(--sheet-tab-color); }
   .tab.drop {
     box-shadow: inset 2px 0 0 var(--accent);
   }

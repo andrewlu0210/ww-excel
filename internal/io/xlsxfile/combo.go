@@ -106,13 +106,17 @@ func (w *writer) addComboChart(sh *model.Sheet, o model.Object, cell string, for
 	if err := w.f.AddChart(sh.Name, cell, charts[0], charts[1:]...); err != nil {
 		return err
 	}
+	var writeErr error
 	w.f.Pkg.Range(func(k, v any) bool {
 		name := k.(string)
-		if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.HasSuffix(name, ".xml") {
+		if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.Count(name, "/") == 2 && strings.HasSuffix(name, ".xml") {
 			data := restoreChartAppearance(restoreChartCategories(restoreChartLabels(v.([]byte), ordered.Series), ordered.Series), &ordered)
-			w.f.Pkg.Store(name, restoreComboAxes(data, &ordered))
+			if err := w.preserveChartPart(name, c, restoreComboAxes(data, &ordered)); err != nil {
+				writeErr = err
+				return false
+			}
 		}
 		return true
 	})
-	return nil
+	return writeErr
 }

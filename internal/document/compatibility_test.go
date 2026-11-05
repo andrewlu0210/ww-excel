@@ -78,6 +78,16 @@ func TestImportedChartSaveRisks(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Exec(cmd)
+	if got := d.SaveRisks(path); len(got) != 0 {
+		t.Fatalf("resizing must preserve original chart XML: %+v", got)
+	}
+	obj = d.wb.Sheets[0].Layout.Clone().Objects[0]
+	obj.Chart.Type = "line"
+	cmd, err = d.UpdateObjectCommand(0, obj, "change chart type")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Exec(cmd)
 	for _, output := range []string{path, filepath.Join(t.TempDir(), "copy.xlsx")} {
 		risks := d.SaveRisks(output)
 		if len(risks) != 1 || risks[0].Code != "xlsx-chart" || risks[0].ObjectID != id {

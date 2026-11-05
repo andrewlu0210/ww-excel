@@ -248,6 +248,13 @@ export function Merge(sheet: number, rg: $models.RangeDTO, center: boolean): $Ca
 }
 
 /**
+ * MoveChartLabel commits a drag as one undoable edit to the current chart.
+ */
+export function MoveChartLabel(sheet: number, id: number, series: number, point: number, x: number, y: number): $CancellablePromise<void> {
+    return $Call.ByID(4151845422, sheet, id, series, point, x, y);
+}
+
+/**
  * ObjectImage returns a picture as a data URL.
  */
 export function ObjectImage(sheet: number, id: number): $CancellablePromise<string> {

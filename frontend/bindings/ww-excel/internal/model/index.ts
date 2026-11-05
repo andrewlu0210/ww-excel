@@ -10,6 +10,7 @@ export type {
     ChartAxis,
     ChartGradient,
     ChartGradientStop,
+    ChartLabelLayout,
     ChartLabelPoint,
     ChartLabels,
     ChartPlotArea,

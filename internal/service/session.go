@@ -93,6 +93,7 @@ type DocState struct {
 	// Sheets are the sheet names in order.
 	Sheets       []string `json:"sheets"`
 	HiddenSheets []int    `json:"hiddenSheets,omitempty"`
+	TabColors    []string `json:"tabColors,omitempty"`
 	// Names are the defined names, for autocomplete and the name box.
 	Names []string `json:"names"`
 }
@@ -156,6 +157,7 @@ func (s *Session) stateLocked() DocState {
 		Circular:     s.doc.Circular(),
 		Sheets:       s.sheetNamesLocked(),
 		HiddenSheets: s.hiddenSheetsLocked(),
+		TabColors:    s.tabColorsLocked(),
 		Names:        s.definedNamesLocked(),
 	}
 }
@@ -170,6 +172,15 @@ func (s *Session) definedNamesLocked() []string {
 		}
 	}
 	return names
+}
+
+// Tab colors include hidden sheets so indices always match Sheets.
+func (s *Session) tabColorsLocked() []string {
+	colors := make([]string, len(s.doc.Workbook().Sheets))
+	for i, sh := range s.doc.Workbook().Sheets {
+		colors[i] = sh.Layout.TabColor
+	}
+	return colors
 }
 
 func (s *Session) sheetNamesLocked() []string {

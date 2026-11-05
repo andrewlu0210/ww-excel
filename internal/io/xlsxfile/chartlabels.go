@@ -46,13 +46,13 @@ func restoreChartLabels(data []byte, series []model.ChartSeries) []byte {
 				}
 			}
 		case xml.EndElement:
-			preserve := index >= 0 && index < len(series) && series[index].Labels != nil && series[index].Labels.RawXML != ""
+			preserve := index >= 0 && index < len(series) && series[index].Labels != nil
 			if labelStart >= 0 && depth == labelDepth && t.Name.Local == "dLbls" {
 				labelEnd = int(d.InputOffset())
 			}
 			if depth == seriesDepth && t.Name.Local == "ser" {
 				if preserve {
-					raw := `<c:dLbls xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:c15="http://schemas.microsoft.com/office/drawing/2012/chart">` + series[index].Labels.RawXML + `</c:dLbls>`
+					raw := chartLabelsXML(series[index].Labels)
 					if labelEnd >= 0 {
 						edits = append(edits, edit{labelStart, labelEnd, raw})
 					} else {

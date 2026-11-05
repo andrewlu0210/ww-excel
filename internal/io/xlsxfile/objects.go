@@ -62,7 +62,7 @@ func RewrittenCharts(old, cur []model.Object) []model.Object {
 	var charts []model.Object
 	for _, o := range cur {
 		cell, _ := excelize.CoordinatesToCellName(o.Anchor.Col+1, o.Anchor.Row+1)
-		if o.Chart != nil && dirty[cell] {
+		if o.Chart != nil && dirty[cell] && !CanPreserveChart(o.Chart) {
 			charts = append(charts, o)
 		}
 	}
@@ -180,13 +180,21 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		if err := w.f.AddChart(sh.Name, cell, xc); err != nil {
 			return fmt.Errorf("圖表：%w", err)
 		}
+		var writeErr error
 		w.f.Pkg.Range(func(k, v any) bool {
 			name := k.(string)
-			if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.HasSuffix(name, ".xml") {
-				w.f.Pkg.Store(name, restoreChartAppearance(restoreChartCategories(restoreChartLabels(v.([]byte), c.Series), c.Series), c))
+			if !before[name] && strings.HasPrefix(name, "xl/charts/chart") && strings.Count(name, "/") == 2 && strings.HasSuffix(name, ".xml") {
+				data := restoreChartAppearance(restoreChartCategories(restoreChartLabels(v.([]byte), c.Series), c.Series), c)
+				if err := w.preserveChartPart(name, c, data); err != nil {
+					writeErr = err
+					return false
+				}
 			}
 			return true
 		})
+		if writeErr != nil {
+			return writeErr
+		}
 	}
 	return nil
 }

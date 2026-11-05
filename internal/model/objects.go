@@ -41,7 +41,8 @@ type Image struct {
 // Chart is a chart linked to cells. Series references are formulas
 // without "=", usually absolute references with the sheet name.
 type Chart struct {
-	GapWidth *float64 // Gap between clusters as a percentage of a column width.
+	Source   *ChartSource `json:",omitempty"`
+	GapWidth *float64     // Gap between clusters as a percentage of a column width.
 	FontName string
 	PlotArea *ChartPlotArea
 	// Type: column, bar, line, pie, doughnut, scatter, area, combo.
@@ -105,19 +106,69 @@ type ChartAxis struct {
 	HideLabels bool     `json:"hideLabels"`
 }
 
+// ChartSource is immutable provenance used for preserving imported chart markup.
+// It is stored in WWX but never accepted from the editing UI.
+type ChartSource struct {
+	XML       string
+	Part      string
+	Baseline  *Chart
+	Resources map[string]ChartResource
+}
+type ChartResource struct {
+	Data        []byte
+	ContentType string
+}
+
 type ChartLabels struct {
-	Format      string                  `json:"format"`
-	ShowValue   bool                    `json:"showValue"`
-	ShowPercent bool                    `json:"showPercent"`
-	FontSize    float64                 `json:"fontSize"`
-	Color       string                  `json:"color"`
-	Points      map[int]ChartLabelPoint `json:"points"`
-	RawXML      string                  `json:"rawXML,omitempty"`
+	Disabled      bool                    `json:"disabled,omitempty"`
+	Position      string                  `json:"position,omitempty"`
+	FontName      string                  `json:"fontName,omitempty"`
+	Bold          bool                    `json:"bold,omitempty"`
+	Italic        bool                    `json:"italic,omitempty"`
+	Rotation      float64                 `json:"rotation,omitempty"`
+	Fill          string                  `json:"fill,omitempty"`
+	Border        string                  `json:"border,omitempty"`
+	ShowCategory  bool                    `json:"showCategory,omitempty"`
+	ShowSeries    bool                    `json:"showSeries,omitempty"`
+	PercentFormat string                  `json:"percentFormat,omitempty"`
+	Separator     string                  `json:"separator,omitempty"`
+	LeaderLines   bool                    `json:"leaderLines,omitempty"`
+	SourceConfig  string                  `json:"sourceConfig,omitempty"`
+	Format        string                  `json:"format"`
+	ShowValue     bool                    `json:"showValue"`
+	ShowPercent   bool                    `json:"showPercent"`
+	FontSize      float64                 `json:"fontSize"`
+	Color         string                  `json:"color"`
+	Points        map[int]ChartLabelPoint `json:"points"`
+	RawXML        string                  `json:"rawXML,omitempty"`
 }
 
 type ChartLabelPoint struct {
-	Hidden bool `json:"hidden"`
-	Center bool `json:"center"`
+	Position     string            `json:"position,omitempty"`
+	CustomText   *string           `json:"customText,omitempty"`
+	Reference    string            `json:"reference,omitempty"`
+	Format       string            `json:"format,omitempty"`
+	FontName     string            `json:"fontName,omitempty"`
+	FontSize     float64           `json:"fontSize,omitempty"`
+	Color        string            `json:"color,omitempty"`
+	Bold         *bool             `json:"bold,omitempty"`
+	Italic       *bool             `json:"italic,omitempty"`
+	ShowValue    *bool             `json:"showValue,omitempty"`
+	ShowPercent  *bool             `json:"showPercent,omitempty"`
+	ShowCategory *bool             `json:"showCategory,omitempty"`
+	ShowSeries   *bool             `json:"showSeries,omitempty"`
+	Layout       *ChartLabelLayout `json:"layout,omitempty"`
+	Hidden       bool              `json:"hidden"`
+	Center       bool              `json:"center"`
+}
+
+type ChartLabelLayout struct {
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	W     float64 `json:"w"`
+	H     float64 `json:"h"`
+	XMode string  `json:"xMode,omitempty"`
+	YMode string  `json:"yMode,omitempty"`
 }
 
 type ChartSeries struct {
@@ -135,7 +186,7 @@ type ChartSeries struct {
 	Values         string
 }
 
-func (c *Chart) clone() *Chart {
+func (c *Chart) Clone() *Chart {
 	if c == nil {
 		return nil
 	}
@@ -197,7 +248,7 @@ func (c *Chart) clone() *Chart {
 			labels := *s.Labels
 			labels.Points = make(map[int]ChartLabelPoint, len(s.Labels.Points))
 			for k, v := range s.Labels.Points {
-				labels.Points[k] = v
+				labels.Points[k] = v.Clone()
 			}
 			out.Series[i].Labels = &labels
 		}
@@ -208,10 +259,35 @@ func (c *Chart) clone() *Chart {
 func cloneObjects(objs []Object) []Object {
 	out := make([]Object, len(objs))
 	for i, o := range objs {
-		o.Chart = o.Chart.clone()
+		o.Chart = o.Chart.Clone()
 		out[i] = o
 	}
 	return out
+}
+
+func (p ChartLabelPoint) Clone() ChartLabelPoint {
+	copyBool := func(v *bool) *bool {
+		if v == nil {
+			return nil
+		}
+		n := *v
+		return &n
+	}
+	p.Bold = copyBool(p.Bold)
+	p.Italic = copyBool(p.Italic)
+	p.ShowValue = copyBool(p.ShowValue)
+	p.ShowPercent = copyBool(p.ShowPercent)
+	p.ShowCategory = copyBool(p.ShowCategory)
+	p.ShowSeries = copyBool(p.ShowSeries)
+	if p.CustomText != nil {
+		v := *p.CustomText
+		p.CustomText = &v
+	}
+	if p.Layout != nil {
+		v := *p.Layout
+		p.Layout = &v
+	}
+	return p
 }
 
 // NextObjectID returns an unused object ID for the sheet.

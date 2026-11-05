@@ -51,6 +51,13 @@ interface Check {
   detail: string;
 }
 
+let progressChecks:Check[]=[];
+let progressPhase='startup / fixture';
+export function selfTestTimeoutReport():{markdown:string;failed:number} {
+  const report=finish(progressChecks);
+  return {markdown:report.markdown+`\n❌ 逾時（120 秒）；階段：${progressPhase}；最後檢查：${progressChecks.at(-1)?.name ?? ''}\n`,failed:report.failed+1};
+}
+
 const settle = () => new Promise((r) => setTimeout(r, 60));
 
 function addr(p: CellPos): string {
@@ -59,6 +66,7 @@ function addr(p: CellPos): string {
 
 export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promise<{ markdown: string; failed: number }> {
   const checks: Check[] = [];
+  progressChecks=checks;progressPhase='keyboard';
 
   const step = async () => {
     await sheet.whenIdle();
@@ -290,15 +298,25 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await key('ArrowUp');
   await key('Backspace');
 
+  progressPhase='formatTests';
   await formatTests(sheet, { key, type, goTo, step, expect, expectCell });
+  progressPhase='productivityTests';
   await productivityTests(sheet, { key, type, goTo, step, expect, expectCell });
+  progressPhase='dataTests';
   await dataTests(sheet, { key, type, goTo, step, expect, expectCell });
+  progressPhase='outputTests';
   await outputTests(sheet, { key, type, goTo, step, expect, expectCell });
+  progressPhase='polishTests';
   await polishTests(sheet, { key, type, goTo, step, expect, expectCell });
+  progressPhase='formatPainterSelfTest';
   await formatPainterSelfTest(sheet, step, expect);
+  progressPhase='zoomSelfTest';
   await zoomSelfTest(sheet, step, expect);
+  progressPhase='ribbonSelfTest';
   await ribbonSelfTest(sheet, step, expect);
+  progressPhase='sheetTabsSelfTest';
   await sheetTabsSelfTest(expect);
+  progressPhase='sheetTabsIntegrationTest';
   await sheetTabsIntegrationTest(step, expect);
 
   // Show a formula being edited, with reference boxes, for the snapshot.

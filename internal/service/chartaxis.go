@@ -17,6 +17,9 @@ type ChartScaleDTO struct {
 
 // Format ticks in Go so axes use the same Excel number formats as cells.
 func chartValueScale(c *model.Chart, data document.ChartData) *ChartScaleDTO {
+	if c.Type == "scatter" {
+		return chartScatterScale(c, data, false)
+	}
 	return chartAxisScale(c, data, false)
 }
 
@@ -101,11 +104,22 @@ func chartAxisScale(c *model.Chart, data document.ChartData, secondary bool) *Ch
 			hi = 1
 		}
 	}
+	return numericChartScale(a, lo, hi)
+}
+
+func numericChartScale(a *model.ChartAxis, lo, hi float64) *ChartScaleDTO {
 	if a.Minimum != nil {
 		lo = *a.Minimum
 	}
 	if a.Maximum != nil {
 		hi = *a.Maximum
+	}
+	if hi <= lo {
+		if a.Maximum == nil {
+			hi = lo + math.Max(1, math.Abs(lo)*.1)
+		} else if a.Minimum == nil {
+			lo = hi - math.Max(1, math.Abs(hi)*.1)
+		}
 	}
 	if math.IsNaN(lo) || math.IsNaN(hi) || math.IsInf(lo, 0) || math.IsInf(hi, 0) || hi <= lo {
 		return nil
@@ -132,8 +146,17 @@ func chartAxisScale(c *model.Chart, data document.ChartData, secondary bool) *Ch
 	if a.MajorUnit > 0 {
 		step = a.MajorUnit
 	}
-	if math.IsInf(step, 0) || math.IsNaN(step) || step <= 0 || (hi-lo)/step > 200 {
+	if math.IsInf(step, 0) || math.IsNaN(step) || step <= 0 {
 		return nil
+	}
+	// Thin crowded ticks to multiples of the requested unit without losing bounds.
+	if count := (hi - lo) / step; count > 199 {
+		multiple := math.Ceil((hi - lo) / 199 / step)
+		if math.IsInf(multiple, 0) {
+			step = (hi - lo) / 199
+		} else {
+			step *= multiple
+		}
 	}
 	if a.Minimum == nil {
 		lo = math.Floor(lo/step) * step
@@ -150,4 +173,48 @@ func chartAxisScale(c *model.Chart, data document.ChartData, secondary bool) *Ch
 		out.Labels = append(out.Labels, numfmt.Format(v, a.Format))
 	}
 	return out
+}
+
+func chartScatterScale(c *model.Chart, data document.ChartData, horizontal bool) *ChartScaleDTO {
+	if c.Type != "scatter" {
+		return nil
+	}
+	axis := c.ValueAxis
+	if horizontal {
+		axis = c.CategoryAxis
+	}
+	if axis == nil {
+		return nil
+	}
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for _, series := range data.Series {
+		for i, y := range series.Values {
+			if y == nil {
+				continue
+			}
+			x := float64(i + 1)
+			if len(series.X) > 0 {
+				if i >= len(series.X) || series.X[i] == nil {
+					continue
+				}
+				x = *series.X[i]
+			}
+			if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(*y) || math.IsInf(*y, 0) {
+				continue
+			}
+			value := *y
+			if horizontal {
+				value = x
+			}
+			lo = math.Min(lo, value)
+			hi = math.Max(hi, value)
+		}
+	}
+	if math.IsInf(lo, 0) {
+		lo, hi = 0, 1
+	}
+	if lo == hi {
+		hi = lo + math.Max(1, math.Abs(lo)*.1)
+	}
+	return numericChartScale(axis, lo, hi)
 }

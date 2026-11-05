@@ -98,6 +98,9 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	if err := preserveConditionalDetails(tmpName, wb); err != nil {
 		return nil, err
 	}
+	if err := w.writeTabColors(tmpName); err != nil {
+		return nil, err
+	}
 	if err := w.preserveShapes(tmpName, ch.OldLayouts); err != nil {
 		return nil, err
 	}
@@ -118,6 +121,7 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 }
 
 type writer struct {
+	tabColors  map[string]string
 	digitWidth float64
 	f          *excelize.File
 	wb         *model.Workbook
@@ -500,12 +504,16 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 			return err
 		}
 	}
-	for col := range union(old.ColStyles, l.ColStyles) {
-		x, err := w.style(l.ColStyles[col])
+	for _, run := range columnStyleRuns(old.ColStyles, l.ColStyles) {
+		x, err := w.style(run.style)
 		if err != nil {
 			return err
 		}
-		name, _ := excelize.ColumnNumberToName(col + 1)
+		name, _ := excelize.ColumnNumberToName(run.first + 1)
+		if run.last != run.first {
+			end, _ := excelize.ColumnNumberToName(run.last + 1)
+			name += ":" + end
+		}
 		if err := f.SetColStyle(sh.Name, name, x); err != nil {
 			return err
 		}
@@ -612,6 +620,12 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 		if err := writeCondFormats(f, sh.Name, l.CondFormats); err != nil {
 			return err
 		}
+	}
+	if l.TabColor != old.TabColor {
+		if w.tabColors == nil {
+			w.tabColors = map[string]string{}
+		}
+		w.tabColors[sh.Name] = l.TabColor
 	}
 	if l.Zoom != old.Zoom {
 		zoom := float64(l.Zoom)

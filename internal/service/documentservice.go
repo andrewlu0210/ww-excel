@@ -415,3 +415,8 @@ func Recover(ds *DocumentService, ctx context.Context, store *recovery.Store) {
 		store.Remove(e.ID)
 	}
 }
+
+// SetTabColor changes the worksheet tab color as one undoable edit.
+func (ds *DocumentService) SetTabColor(ctx context.Context, sheet int, color string) error {
+	return ds.sheetChange(ctx, func(d *document.Document) (command.Command, error) { return d.SetTabColorCommand(sheet, color) })
+}

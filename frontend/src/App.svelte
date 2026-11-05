@@ -3,7 +3,7 @@
   import { languageSelfTest } from './bench/languageSelfTest';
   import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
-  import { runSelfTest } from './bench/selfTest';
+  import { runSelfTest, selfTestTimeoutReport } from './bench/selfTest';
   import { workbookCompatibilityTest } from './bench/workbookCompatibilityTest';
   import {
     benchApi,
@@ -55,6 +55,7 @@
   let sheets = $state<string[]>([]);
   let active = $state(0);
   let hiddenSheets = $state<number[]>([]);
+  let tabColors=$state<string[]>([]);
   // Bumped when the sheet list or document changes: remounts the sheet
   // view, whose block cache is keyed by sheet index.
   let generation = $state(0);
@@ -143,6 +144,7 @@
     zooms.reconcile(sheets, st.sheets ?? []);
     sheets = st.sheets ?? [];
     hiddenSheets = st.hiddenSheets ?? [];
+    tabColors = st.tabColors ?? [];
     if (preferIndex !== null) {
       const i = preferIndex;
       preferIndex = null;
@@ -167,6 +169,7 @@
     styleStore.reset();
     sheets = st.sheets ?? [];
     hiddenSheets = st.hiddenSheets ?? [];
+    tabColors = st.tabColors ?? [];
     await showSheet(0);
   }
 
@@ -458,6 +461,7 @@
         else void sheetView?.runMenu(action);
       }),
       documentApi.onState((st) => {
+        tabColors = st.tabColors ?? [];
         canUndo = st.canUndo; canRedo = st.canRedo;
         circular = st.circular;
         names = st.names ?? [];
@@ -471,6 +475,7 @@
       canUndo = st.canUndo; canRedo = st.canRedo;
       sheets = st.sheets ?? [];
       hiddenSheets = st.hiddenSheets ?? [];
+      tabColors = st.tabColors ?? [];
       circular = st.circular;
       names = st.names ?? [];
       await showSheet(SHEET);
@@ -485,11 +490,11 @@
         // a hang.
         const fail = (what: string) => void benchApi.report(`# Self-test\n\n❌ JS 錯誤：${what}\n`);
         window.addEventListener('error', (e) => fail(`${e.message} @ ${e.filename}:${e.lineno}`));
-        window.addEventListener('unhandledrejection', (e) => fail(String(e.reason?.stack ?? e.reason)));
+        window.addEventListener('unhandledrejection', (e) => fail(`${String(e.reason)}\n${e.reason?.stack ?? ""}`));
         await wait(500);
         // Watchdog: a hung step must still produce a report and quit.
         // A run takes about 45s; the first run after a build is slower.
-        const timeout = wait(120_000).then(() => ({ markdown: '# Self-test\n\n❌ 逾時（120 秒）：有步驟沒有完成。\n', failed: 1 }));
+        const timeout = wait(120_000).then(selfTestTimeoutReport);
         // Sheet operations remount the sheet view; the driver always
         // talks to the current one.
         const driver = new Proxy({} as NonNullable<typeof sheetView>, {
@@ -564,6 +569,8 @@
         <SheetTabs
           {sheets}
           hidden={hiddenSheets}
+          colors={tabColors}
+          oncolor={(i,color)=>void documentApi.setTabColor(i,color).then(notify)}
           {active}
           onselect={async (i) => {
             if (i === active) return;

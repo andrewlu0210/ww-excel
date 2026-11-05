@@ -11,6 +11,7 @@ import (
 	"ww-excel/internal/formula/parser"
 	"ww-excel/internal/i18n"
 	"ww-excel/internal/model"
+	"ww-excel/internal/numfmt"
 )
 
 // AddObjectCommand adds a chart or picture; the new ID is reported
@@ -42,6 +43,9 @@ func (d *Document) UpdateObjectCommand(sheet int, obj model.Object, label string
 		return nil, errors.New("物件不存在")
 	}
 	if obj.Kind == model.ObjectChart {
+		if old := d.wb.Sheets[sheet].Layout.ObjectByID(obj.ID); old != nil && old.Chart != nil && obj.Chart != nil {
+			obj.Chart.Source = old.Chart.Source
+		}
 		if err := d.checkChart(obj.Chart); err != nil {
 			return nil, err
 		}
@@ -85,8 +89,17 @@ func (d *Document) checkChart(c *model.Chart) error {
 	if len(c.Series) == 0 {
 		return errors.New("圖表至少要有一個數列")
 	}
+	if err := validateChartSeriesStyle(c); err != nil {
+		return err
+	}
+	if err := validateChartAxes(c); err != nil {
+		return err
+	}
 	columns, lines, primary := 0, 0, 0
 	for i := range c.Series {
+		if err := validateChartLabels(c.Series[i].Labels); err != nil {
+			return err
+		}
 		if c.Type == "combo" {
 			if c.Series[i].Type == "column" {
 				columns++
@@ -153,7 +166,16 @@ func (d *Document) ChartData(sheet int, c *model.Chart, display DisplayFunc) Cha
 			sd.X = d.chartNumbers(sheet, s.Categories)
 		}
 		if i == 0 && s.Categories != "" {
-			out.Categories = d.chartTexts(sheet, s.Categories, display)
+			categoryDisplay := display
+			if a := c.CategoryAxis; a != nil && a.Format != "" && a.Format != "General" {
+				categoryDisplay = func(sh *model.Sheet, row, col int, cell model.Cell) string {
+					if cell.Kind == model.KindNumber {
+						return numfmt.Format(cell.Num, a.Format)
+					}
+					return display(sh, row, col, cell)
+				}
+			}
+			out.Categories = d.chartTexts(sheet, s.Categories, categoryDisplay)
 		} else if i == 0 && s.CategoryLabels != nil {
 			out.Categories = append([]string{}, s.CategoryLabels...)
 		}

@@ -1,5 +1,5 @@
 import type { Pivot } from '../../bindings/ww-excel/internal/model/models';
-export type { Pivot, PivotValue } from '../../bindings/ww-excel/internal/model/models';
+export type { ChartLabels, ChartLabelPoint, ChartAxis, Pivot, PivotValue } from '../../bindings/ww-excel/internal/model/models';
 export type { PivotInfoDTO, PivotFilterDTO } from '../../bindings/ww-excel/internal/service/models';
 // The only module that touches generated Wails bindings. Wails3 is still
 // in beta, so keep binding/event usage behind these wrappers.
@@ -257,6 +257,8 @@ export const sheetApi = {
   updateShapeText: (sheet:number,id:number,runs:TextRunDTO[]):Promise<string|null> => rejected(SheetService.UpdateShapeText(sheet,id,runs)),
   updateObject: (sheet: number, o: ObjectDTO, label: string): Promise<string | null> =>
     rejected(SheetService.UpdateObject(sheet, o, label)),
+  moveChartLabel: (sheet:number,id:number,series:number,point:number,x:number,y:number):Promise<string|null> =>
+    rejected(SheetService.MoveChartLabel(sheet,id,series,point,x,y)),
   deleteObjects: (sheet: number, ids: number[]): Promise<string | null> => rejected(SheetService.DeleteObjects(sheet, ids)),
   objectImage: (sheet: number, id: number): Promise<string> => SheetService.ObjectImage(sheet, id),
   chartData: (sheet: number, id: number): Promise<ChartDataDTO> => SheetService.ChartData(sheet, id),
@@ -295,6 +297,7 @@ export const documentApi = {
   deleteSheet: (index: number): Promise<boolean> => DocumentService.DeleteSheet(index),
   renameSheet: (index: number, name: string): Promise<string | null> =>
     rejected(DocumentService.RenameSheet(index, name)),
+  setTabColor:(index:number,color:string):Promise<string|null> => rejected(DocumentService.SetTabColor(index,color)),
   moveSheet: (from: number, to: number): Promise<void> => DocumentService.MoveSheet(from, to),
   async names(): Promise<NameDTO[]> {
     return (await DocumentService.Names()) ?? [];
@@ -342,6 +345,7 @@ export const benchApi = {
   report: (markdown: string): Promise<void> => BenchService.ReportBench(markdown),
   snapshot: (name: string, dataURL: string): Promise<void> => BenchService.SaveSnapshot(name, dataURL),
   recalcChain: (n: number): Promise<number> => BenchService.RecalcChain(n),
+  savePDF:(name:string,sheet:number,charts:Record<number,string>):Promise<string>=>BenchService.SavePDF(name,sheet,charts),
   saveCopy: (name: string, allowChartRewrite = false): Promise<string> => BenchService.SaveCopy(name, allowChartRewrite),
 
   onBlockEvent(cb: (e: BenchEvent) => void): () => void {

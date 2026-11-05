@@ -65,12 +65,49 @@ export interface ChartGradientStop {
     "color": string;
 }
 
+export interface ChartLabelLayout {
+    "x": number;
+    "y": number;
+    "w": number;
+    "h": number;
+    "xMode"?: string;
+    "yMode"?: string;
+}
+
 export interface ChartLabelPoint {
+    "position"?: string;
+    "customText"?: string | null;
+    "reference"?: string;
+    "format"?: string;
+    "fontName"?: string;
+    "fontSize"?: number;
+    "color"?: string;
+    "bold"?: boolean | null;
+    "italic"?: boolean | null;
+    "showValue"?: boolean | null;
+    "showPercent"?: boolean | null;
+    "showCategory"?: boolean | null;
+    "showSeries"?: boolean | null;
+    "layout"?: ChartLabelLayout | null;
     "hidden": boolean;
     "center": boolean;
 }
 
 export interface ChartLabels {
+    "disabled"?: boolean;
+    "position"?: string;
+    "fontName"?: string;
+    "bold"?: boolean;
+    "italic"?: boolean;
+    "rotation"?: number;
+    "fill"?: string;
+    "border"?: string;
+    "showCategory"?: boolean;
+    "showSeries"?: boolean;
+    "percentFormat"?: string;
+    "separator"?: string;
+    "leaderLines"?: boolean;
+    "sourceConfig"?: string;
     "format": string;
     "showValue": boolean;
     "showPercent": boolean;

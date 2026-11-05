@@ -296,27 +296,99 @@ func anchorSize(l *model.Layout, a rawAnchor) (float64, float64) {
 type rawChartBool struct {
 	Val bool `xml:"val,attr"`
 }
+type rawLabelLayout struct {
+	X struct {
+		Val float64 `xml:"val,attr"`
+	} `xml:"x"`
+	Y struct {
+		Val float64 `xml:"val,attr"`
+	} `xml:"y"`
+	W struct {
+		Val float64 `xml:"val,attr"`
+	} `xml:"w"`
+	H struct {
+		Val float64 `xml:"val,attr"`
+	} `xml:"h"`
+	XMode struct {
+		Val string `xml:"val,attr"`
+	} `xml:"xMode"`
+	YMode struct {
+		Val string `xml:"val,attr"`
+	} `xml:"yMode"`
+}
+
+func (l *rawLabelLayout) model() *model.ChartLabelLayout {
+	if l == nil {
+		return nil
+	}
+	return &model.ChartLabelLayout{X: l.X.Val, Y: l.Y.Val, W: l.W.Val, H: l.H.Val, XMode: l.XMode.Val, YMode: l.YMode.Val}
+}
+
+type rawLabelFlags struct {
+	Val bool `xml:"val,attr"`
+}
+
+func labelFlag(f *rawLabelFlags) *bool {
+	if f == nil {
+		return nil
+	}
+	v := f.Val
+	return &v
+}
+
+type rawLabelText struct {
+	Runs []struct {
+		Runs []struct {
+			Text string `xml:"t"`
+		} `xml:"r"`
+	} `xml:"rich>p"`
+	Ref   string   `xml:"strRef>f"`
+	Cache []string `xml:"strRef>strCache>pt>v"`
+}
 type rawChartLabels struct {
-	RawXML string `xml:",innerxml"`
+	Delete rawChartBool `xml:"delete"`
+	RawXML string       `xml:",innerxml"`
 	Format struct {
 		Code string `xml:"formatCode,attr"`
 	} `xml:"numFmt"`
-	ShowValue   rawChartBool `xml:"showVal"`
-	ShowPercent rawChartBool `xml:"showPercent"`
-	Font        drawingFont  `xml:"txPr>p>pPr>defRPr"`
-	Points      []struct {
+	Position struct {
+		Val string `xml:"val,attr"`
+	} `xml:"dLblPos"`
+	Separator    string       `xml:"separator"`
+	ShowValue    rawChartBool `xml:"showVal"`
+	ShowPercent  rawChartBool `xml:"showPercent"`
+	ShowCategory rawChartBool `xml:"showCatName"`
+	ShowSeries   rawChartBool `xml:"showSerName"`
+	LeaderLines  rawChartBool `xml:"showLeaderLines"`
+	Font         drawingFont  `xml:"txPr>p>pPr>defRPr"`
+	Rotation     struct {
+		Value float64 `xml:"rot,attr"`
+	} `xml:"txPr>bodyPr"`
+	Box struct {
+		Fill drawingFill `xml:"solidFill"`
+		Line struct {
+			Fill drawingFill `xml:"solidFill"`
+		} `xml:"ln"`
+	} `xml:"spPr"`
+	Points []struct {
 		Index struct {
 			Val int `xml:"val,attr"`
 		} `xml:"idx"`
-		Delete rawChartBool `xml:"delete"`
-		Layout struct {
-			W struct {
-				Val float64 `xml:"val,attr"`
-			} `xml:"w"`
-			H struct {
-				Val float64 `xml:"val,attr"`
-			} `xml:"h"`
-		} `xml:"extLst>ext>layout>manualLayout"`
+		Delete   rawChartBool `xml:"delete"`
+		Position struct {
+			Val string `xml:"val,attr"`
+		} `xml:"dLblPos"`
+		Format struct {
+			Code string `xml:"formatCode,attr"`
+		} `xml:"numFmt"`
+		Font         drawingFont     `xml:"txPr>p>pPr>defRPr"`
+		Text         *rawLabelText   `xml:"tx"`
+		Manual       *rawLabelLayout `xml:"layout>manualLayout"`
+		Legacy       *rawLabelLayout `xml:"extLst>ext>layout>manualLayout"`
+		ShowValue    *rawLabelFlags  `xml:"showVal"`
+		ShowPercent  *rawLabelFlags  `xml:"showPercent"`
+		ShowCategory *rawLabelFlags  `xml:"showCatName"`
+		ShowSeries   *rawLabelFlags  `xml:"showSerName"`
 	} `xml:"dLbl"`
 }
 
@@ -324,12 +396,46 @@ func (l *rawChartLabels) model(theme map[string]string) *model.ChartLabels {
 	if l == nil {
 		return nil
 	}
-	labels := &model.ChartLabels{Format: l.Format.Code, ShowValue: l.ShowValue.Val, ShowPercent: l.ShowPercent.Val,
-		FontSize: xmlFloat(l.Font.Size) / 100, Color: l.Font.Fill.color(theme), RawXML: l.RawXML, Points: map[int]model.ChartLabelPoint{}}
+	labels := &model.ChartLabels{Disabled: l.Delete.Val, Format: l.Format.Code, Position: l.Position.Val, Separator: l.Separator, ShowValue: l.ShowValue.Val, ShowPercent: l.ShowPercent.Val, ShowCategory: l.ShowCategory.Val, ShowSeries: l.ShowSeries.Val, LeaderLines: l.LeaderLines.Val, FontSize: xmlFloat(l.Font.Size) / 100, FontName: l.Font.Latin.Name, Bold: chartBool(l.Font.Bold), Italic: chartBool(l.Font.Italic), Color: l.Font.Fill.color(theme), Rotation: l.Rotation.Value / 60000, Fill: l.Box.Fill.color(theme), Border: l.Box.Line.Fill.color(theme), RawXML: l.RawXML, Points: map[int]model.ChartLabelPoint{}}
 	for _, p := range l.Points {
-		// Excel uses a plot-sized manual label box to center a doughnut KPI.
-		labels.Points[p.Index.Val] = model.ChartLabelPoint{Hidden: p.Delete.Val, Center: p.Layout.W.Val > .9 && p.Layout.H.Val > .9}
+		point := model.ChartLabelPoint{Hidden: p.Delete.Val, Position: p.Position.Val, Format: p.Format.Code, FontName: p.Font.Latin.Name, FontSize: xmlFloat(p.Font.Size) / 100, Color: p.Font.Fill.color(theme), Layout: p.Manual.model(), ShowValue: labelFlag(p.ShowValue), ShowPercent: labelFlag(p.ShowPercent), ShowCategory: labelFlag(p.ShowCategory), ShowSeries: labelFlag(p.ShowSeries)}
+		if p.Font.Bold != "" {
+			v := chartBool(p.Font.Bold)
+			point.Bold = &v
+		}
+		if p.Font.Italic != "" {
+			v := chartBool(p.Font.Italic)
+			point.Italic = &v
+		}
+		if p.Manual != nil && p.Manual.W.Val > .9 && p.Manual.H.Val > .9 {
+			point.Center = true
+			point.Layout = nil
+		}
+		if p.Legacy != nil && p.Legacy.W.Val > .9 && p.Legacy.H.Val > .9 {
+			point.Center = true
+		}
+		if p.Text != nil {
+			if p.Text.Ref != "" {
+				point.Reference = p.Text.Ref
+			} else {
+				lines := []string{}
+				for _, para := range p.Text.Runs {
+					text := ""
+					for _, r := range para.Runs {
+						text += r.Text
+					}
+					lines = append(lines, text)
+				}
+				text := strings.Join(lines, "\n")
+				point.CustomText = &text
+			}
+		}
+		labels.Points[p.Index.Val] = point
 	}
+	if labels.ShowPercent && !labels.ShowValue && strings.Contains(labels.Format, "%") {
+		labels.PercentFormat = labels.Format
+	}
+	labels.SourceConfig = labelConfig(labels)
 	return labels
 }
 
@@ -377,7 +483,8 @@ type rawAxisNumber struct {
 	Val float64 `xml:"val,attr"`
 }
 type rawChartAxis struct {
-	Position struct {
+	TitleText []string `xml:"title>tx>rich>p>r>t"`
+	Position  struct {
 		Val string `xml:"val,attr"`
 	} `xml:"axPos"`
 	Cross struct {
@@ -499,6 +606,20 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	c := &model.Chart{FontName: doc.Font.Latin.Name, ValueAxis: valueAxis, CategoryAxis: categoryAxis, Legend: "none"}
 	c.PlotArea = p.Manual.model()
+	for _, axis := range append(append(append([]rawChartAxis{}, p.CategoryAxis...), p.DateAxis...), p.ValueAxis...) {
+		title := strings.Join(axis.TitleText, "")
+		switch axis.Position.Val {
+		case "b", "t":
+			if c.XTitle == "" {
+				c.XTitle = title
+			}
+		case "l", "r":
+			if c.YTitle == "" {
+				c.YTitle = title
+			}
+		}
+	}
+
 	if t := doc.Chart.TitleEl; t != nil {
 		// A title without its own text shows the series name (single series).
 		c.AutoTitle = t.Text == nil
@@ -538,6 +659,16 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 	}
 	if c.Type == "doughnut" {
 		c.HoleSize = plot.HoleSize.Val
+	}
+	if c.Type == "scatter" {
+		for i := range p.ValueAxis {
+			axis := &p.ValueAxis[i]
+			if axis.Position.Val == "b" || axis.Position.Val == "t" {
+				c.CategoryAxis = axis.model(theme)
+			} else {
+				c.ValueAxis = axis.model(theme)
+			}
+		}
 	}
 	combo := len(p.Bar) > 0 && p.Bar[0].BarDir.Val != "bar" && len(p.Line) > 0
 	primaryID := 0
@@ -596,7 +727,7 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 		}
 		for _, s := range current.Series {
 			cs := model.ChartSeries{Type: seriesType, Secondary: secondary, LineWidth: s.Line.Width / emuPerPx, Marker: s.Marker.Val, Name: s.Name, Categories: s.CatStr, Values: s.Val, Color: s.Fill.color(theme), PointColors: map[int]string{}, PointStyles: map[int]model.ChartPointStyle{}}
-			if seriesType == "line" || c.Type == "line" {
+			if seriesType == "line" || c.Type == "line" || c.Type == "scatter" {
 				if color := s.Line.Fill.color(theme); color != "" {
 					cs.Color = color
 				}
@@ -676,5 +807,7 @@ func readChart(parts map[string]*zip.File, name string) *model.Chart {
 			c.Legend = "right"
 		}
 	}
+	attachChartSource(parts, name, c)
+
 	return c
 }

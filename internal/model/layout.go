@@ -18,6 +18,7 @@ type Size struct {
 
 // Layout holds the per-sheet geometry and whole-row/column formats.
 type Layout struct {
+	TabColor         string // Resolved RGB tab color; empty uses the application default.
 	Zoom             int
 	ColumnDigitWidth float64
 	HideGridLines    bool

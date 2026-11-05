@@ -79,6 +79,13 @@ export function SaveCopy(name: string, allowChartRewrite: boolean): $Cancellable
 }
 
 /**
+ * SavePDF exports a real PDF beside the self-test report, without a native dialog.
+ */
+export function SavePDF(name: string, sheet: number, charts: { [_ in `${number}`]?: string } | null): $CancellablePromise<string> {
+    return $Call.ByID(3435876497, name, sheet, charts);
+}
+
+/**
  * SaveSnapshot writes a PNG data URL next to the bench report so grid
  * rendering can be checked without screen-capture permissions.
  */

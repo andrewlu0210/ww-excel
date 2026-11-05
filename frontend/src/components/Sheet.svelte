@@ -2151,6 +2151,7 @@
           focus();
         }}
         oncommit={commitObject}
+        onlabelcommit={async(id,series,point,x,y)=>{const targetSheet=sheet;notify(await serial(()=>sheetApi.moveChartLabel(targetSheet,id,series,point,x,y)));}}
         onedit={(id) => {
           selectedObject = id;
           if (objects.some(o=>o.id===id && canEditShapeText(o))) void beginShapeEdit(id);

@@ -54,6 +54,7 @@ type fileStyleRef struct {
 }
 
 type fileLayout struct {
+	TabColor         string         `json:"tabColor,omitempty"`
 	Zoom             int            `json:"zoom,omitempty"`
 	ColumnDigitWidth float64        `json:"columnDigitWidth,omitempty"`
 	HideGridLines    bool           `json:"hideGridLines,omitempty"`
@@ -223,7 +224,7 @@ func Read(r io.Reader) (*model.Workbook, error) {
 }
 
 func writeLayout(l model.Layout) *fileLayout {
-	fl := &fileLayout{Zoom: l.Zoom, ColumnDigitWidth: l.ColumnDigitWidth, HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
+	fl := &fileLayout{TabColor: l.TabColor, Zoom: l.Zoom, ColumnDigitWidth: l.ColumnDigitWidth, HideGridLines: l.HideGridLines, DefaultRow: l.DefaultRow, DefaultCol: l.DefaultCol, FreezeRows: l.FreezeRows, FreezeCols: l.FreezeCols}
 	if f := l.Filter; f != nil {
 		fl.Filter = &fileFilter{Range: [4]int{f.Range.R0, f.Range.C0, f.Range.R1, f.Range.C1}, Cols: f.Cols}
 	}
@@ -263,6 +264,7 @@ func writeLayout(l model.Layout) *fileLayout {
 
 func readLayout(fl *fileLayout) model.Layout {
 	l := model.NewLayout()
+	l.TabColor = fl.TabColor
 	l.Zoom = fl.Zoom
 	l.ColumnDigitWidth = fl.ColumnDigitWidth
 	if fl.DefaultRow > 0 {
