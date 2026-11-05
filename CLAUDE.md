@@ -7,7 +7,7 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v1.2.8：圖表標籤、座標軸與數列外觀編輯，工作表分頁色彩設定**（2026-11-05）。
+- 目前階段：**v1.2.9：修正 Excel 圖表互通、尺寸、標籤排版與預設外框**（2026-11-05）。
 - 操作與限制見 `docs/chart-labels.md`、`docs/chart-axes.md`、`docs/chart-series.md`、`docs/sheet-tab-colors.md`；真正 Excel 互通與原生滑鼠／輸入法仍有待人工驗收的項目。
 - 完成一個版本後，更新此區塊並勾選下方對應項目
 - 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.1-0.20260915055537-22f76f9acb94`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
