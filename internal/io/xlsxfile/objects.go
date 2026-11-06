@@ -122,17 +122,18 @@ func (w *writer) addObject(sh *model.Sheet, o model.Object, cell string) error {
 		opts.Paragraph = richExcelRuns(shape.Text, shape.Font)
 		return w.f.AddShape(sh.Name, opts)
 	case o.Image != nil:
-		cfg, _, err := image.DecodeConfig(bytes.NewReader(o.Image.Data))
+		picture := o.Image.Rendered()
+		cfg, _, err := image.DecodeConfig(bytes.NewReader(picture.Data))
 		if err != nil || cfg.Width == 0 || cfg.Height == 0 {
 			return nil // not a picture we can size; leave it out
 		}
 		format.ScaleX = o.W / float64(cfg.Width)
 		format.ScaleY = o.H / float64(cfg.Height)
-		ext := o.Image.Ext
+		ext := picture.Ext
 		if ext == "" {
 			ext = ".png"
 		}
-		return w.f.AddPictureFromBytes(sh.Name, cell, &excelize.Picture{Extension: ext, File: o.Image.Data, Format: &format})
+		return w.f.AddPictureFromBytes(sh.Name, cell, &excelize.Picture{Extension: ext, File: picture.Data, Format: &format})
 	case o.Chart != nil:
 		c := o.Chart
 		if c.Type == "combo" {

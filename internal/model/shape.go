@@ -14,6 +14,7 @@ type Shape struct {
 	Font                     Font
 	Text                     *RichText
 	AlignH, AlignV           string
+	ClipText                 bool // Hide complete lines that exceed the text area's height.
 	Left, Right, Top, Bottom float64
 	// W and H are the unrotated size in pixels; zero means the object size.
 	// Rot is clockwise degrees. The object box is the rotated bounding box.

@@ -40,6 +40,7 @@ type rawAnchor struct {
 	Blip struct {
 		RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships embed,attr"`
 	} `xml:"pic>blipFill>blip"`
+	Crop    model.ImageCrop `xml:"pic>blipFill>srcRect"`
 	twoCell bool
 }
 
@@ -53,6 +54,7 @@ type rawGroup struct {
 // rawPicture is a picture inside a group.
 type rawPicture struct {
 	Transform drawingTransform `xml:"spPr>xfrm"`
+	Crop      model.ImageCrop  `xml:"blipFill>srcRect"`
 	Blip      struct {
 		RID string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships embed,attr"`
 	} `xml:"blipFill>blip"`
@@ -146,7 +148,7 @@ func readDrawing(parts map[string]*zip.File, drawing string, sh *model.Sheet) {
 				continue
 			}
 			obj.Kind = model.ObjectImage
-			obj.Image = &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media))}
+			obj.Image = &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media)), Crop: a.Crop}
 		default:
 			continue
 		}
@@ -171,7 +173,7 @@ func readGroup(parts map[string]*zip.File, drawing string, l *model.Layout, them
 			}
 			r := g.childRect(item.Picture.Transform, frame)
 			add(model.Object{Kind: model.ObjectImage, Anchor: shiftAnchor(l, origin, r.x, r.y), W: r.w, H: r.h, ReadOnly: true,
-				Image: &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media))}})
+				Image: &model.Image{Data: data, Ext: strings.ToLower(path.Ext(media)), Crop: item.Picture.Crop}})
 		}
 	}
 }

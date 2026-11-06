@@ -93,3 +93,14 @@ export function drawRichLines(ctx: CanvasRenderingContext2D, lines: RichLine[], 
     top += line.px * LINE_HEIGHT;
   }
 }
+
+// Clip whole overflowing lines before alignment so hidden lines do not shift
+// the visible text away from its vertical anchor.
+export function clipRichLines(lines: RichLine[], height: number): RichLine[] {
+  let used = 0;
+  const end = lines.findIndex(line => {
+    used += line.px * LINE_HEIGHT;
+    return used > height + 0.001;
+  });
+  return end < 0 ? lines : lines.slice(0, end);
+}

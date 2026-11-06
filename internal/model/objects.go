@@ -35,7 +35,16 @@ type Anchor struct {
 // and never modified.
 type Image struct {
 	Data []byte
-	Ext  string // ".png", ".jpg", ".gif"
+	Ext  string    // ".png", ".jpg", ".gif"
+	Crop ImageCrop `json:",omitempty"`
+}
+
+// ImageCrop stores DrawingML source rectangle insets in 1/1000 percent.
+type ImageCrop struct {
+	Left   int `xml:"l,attr"`
+	Top    int `xml:"t,attr"`
+	Right  int `xml:"r,attr"`
+	Bottom int `xml:"b,attr"`
 }
 
 // Chart is a chart linked to cells. Series references are formulas

@@ -7,6 +7,19 @@ import (
 	"ww-excel/internal/model"
 )
 
+func TestShapeVerticalOverflowClip(t *testing.T) {
+	for _, mode := range []string{"clip", "overflow", ""} {
+		var raw drawingShape
+		if err := xml.Unmarshal([]byte(`<sp><spPr><prstGeom prst="roundRect"/></spPr><txBody><bodyPr vertOverflow="`+mode+`" anchor="ctr"/><p><r><t>Title</t></r></p></txBody></sp>`), &raw); err != nil {
+			t.Fatal(err)
+		}
+		shape := raw.model(nil, 356, 76.8)
+		if shape.ClipText != (mode == "clip") || shape.AlignV != "center" {
+			t.Fatalf("incorrect overflow mode %q: %+v", mode, shape)
+		}
+	}
+}
+
 func TestGroupChildrenAreFlattenedIntoPixelFrame(t *testing.T) {
 	const src = `<grpSp><grpSpPr><xfrm><off x="0" y="0"/><ext cx="1905000" cy="952500"/><chOff x="100" y="200"/><chExt cx="3810000" cy="1905000"/></xfrm></grpSpPr>
 <sp><spPr><xfrm><off x="1905100" y="200"/><ext cx="1905000" cy="952500"/></xfrm><prstGeom prst="ellipse"/><solidFill><srgbClr val="FF0000"/></solidFill></spPr></sp></grpSp>`

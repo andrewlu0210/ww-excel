@@ -1,6 +1,6 @@
 import type { ShapeDTO } from '../../bindings/ww-excel/internal/service/models';
 import { TextCache } from '../grid/text';
-import { drawRichLines, layoutRichText, styledRuns } from '../grid/richtext';
+import { clipRichLines, drawRichLines, layoutRichText, styledRuns } from '../grid/richtext';
 
 const LINE_DASHES: Record<string, number[]> = {
   dot:[1,3], sysDot:[1,1], dash:[4,3], sysDash:[3,1], lgDash:[8,3],
@@ -218,7 +218,8 @@ export function drawShape(ctx: CanvasRenderingContext2D, width: number, height: 
     const box = geometry.text;
     const cache = new TextCache(ctx);
     const measure = (font: string, text: string) => cache.width(font, text);
-    const lines = layoutRichText(runs, Math.max(1, box.w - shape.left - shape.right), true, measure, 0, { hangingPunctuation: true });
+    let lines = layoutRichText(runs, Math.max(1, box.w - shape.left - shape.right), true, measure, 0, { hangingPunctuation: true });
+    if (shape.clipText) lines = clipRichLines(lines, Math.max(0, box.h - shape.top - shape.bottom));
     drawRichLines(ctx, lines, measure, box, shape.alignH, shape.alignV,
       { left: shape.left, right: shape.right, top: shape.top, bottom: shape.bottom });
   }

@@ -495,6 +495,7 @@ export interface ShapeDTO {
     "runs": TextRunDTO[] | null;
     "alignH": string;
     "alignV": string;
+    "clipText"?: boolean;
     "left": number;
     "right": number;
     "top": number;

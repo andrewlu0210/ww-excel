@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"image"
 	"net/http"
@@ -72,6 +73,7 @@ type ShapeDTO struct {
 	Runs      []TextRunDTO `json:"runs"`
 	AlignH    string       `json:"alignH"`
 	AlignV    string       `json:"alignV"`
+	ClipText  bool         `json:"clipText,omitempty"`
 	Left      float64      `json:"left"`
 	Right     float64      `json:"right"`
 	Top       float64      `json:"top"`
@@ -138,13 +140,14 @@ func objectDTO(o model.Object) ObjectDTO {
 	dto := ObjectDTO{ID: o.ID, Kind: o.Kind, Row: o.Anchor.Row, Col: o.Anchor.Col, DX: o.Anchor.DX, DY: o.Anchor.DY, W: o.W, H: o.H, Chart: chartDTO(o.Chart)}
 	if shape := o.Shape; shape != nil {
 		dto.Shape = &ShapeDTO{Geometry: shape.Geometry, Fill: shape.Fill, LineColor: shape.LineColor, LineDash: shape.LineDash, LineWidth: shape.LineWidth, Radius: shape.Radius,
-			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom,
+			Runs: richTextDTO(shape.Text, shape.Font), AlignH: shape.AlignH, AlignV: shape.AlignV, ClipText: shape.ClipText, Left: shape.Left, Right: shape.Right, Top: shape.Top, Bottom: shape.Bottom,
 			W: shape.W, H: shape.H, Rot: shape.Rot, FlipH: shape.FlipH, FlipV: shape.FlipV, Adjust: shape.Adjust, Path: shape.Path, HeadArrow: shape.HeadArrow, TailArrow: shape.TailArrow}
 	}
 	dto.ReadOnly = o.ReadOnly
 	if o.Image != nil {
 		h := fnv.New64a()
 		h.Write(o.Image.Data)
+		fmt.Fprint(h, o.Image.Crop)
 		dto.ImageKey = hex.EncodeToString(h.Sum(nil))
 	}
 	return dto
@@ -228,6 +231,7 @@ func (s *SheetService) ObjectImage(ctx context.Context, sheet, id int) string {
 }
 
 func dataURL(img *model.Image) string {
+	img = img.Rendered()
 	mime := "image/png"
 	switch strings.ToLower(img.Ext) {
 	case ".jpg", ".jpeg":
@@ -430,7 +434,7 @@ func (p printSource) View(row, col int) (printing.CellView, bool) {
 
 func (p printSource) ObjectImage(o model.Object) []byte {
 	if o.Image != nil {
-		return o.Image.Data
+		return o.Image.Rendered().Data
 	}
 	return p.charts[o.ID]
 }

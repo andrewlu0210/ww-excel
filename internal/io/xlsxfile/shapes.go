@@ -169,11 +169,12 @@ type drawingShape struct {
 	} `xml:"spPr"`
 	Body struct {
 		Properties struct {
-			Anchor string `xml:"anchor,attr"`
-			Left   string `xml:"lIns,attr"`
-			Right  string `xml:"rIns,attr"`
-			Top    string `xml:"tIns,attr"`
-			Bottom string `xml:"bIns,attr"`
+			Anchor       string `xml:"anchor,attr"`
+			VertOverflow string `xml:"vertOverflow,attr"`
+			Left         string `xml:"lIns,attr"`
+			Right        string `xml:"rIns,attr"`
+			Top          string `xml:"tIns,attr"`
+			Bottom       string `xml:"bIns,attr"`
 		} `xml:"bodyPr"`
 		Paragraphs []struct {
 			Properties struct {
@@ -339,7 +340,8 @@ func (raw *drawingShape) model(theme map[string]string, width, height float64) *
 		return xmlFloat(value) / emuPerPx
 	}
 	shape := &model.Shape{SourceID: raw.NonVisual.ID, Geometry: kind, Fill: raw.Properties.Fill.color(theme), Font: model.DefaultFont, Text: &model.RichText{}, AlignH: "left", AlignV: "top",
-		Left: pad(body.Left, 9.6), Right: pad(body.Right, 9.6), Top: pad(body.Top, 4.8), Bottom: pad(body.Bottom, 4.8)}
+		ClipText: body.VertOverflow == "clip",
+		Left:     pad(body.Left, 9.6), Right: pad(body.Right, 9.6), Top: pad(body.Top, 4.8), Bottom: pad(body.Bottom, 4.8)}
 	if shape.Fill == "" && raw.Properties.NoFill == nil && raw.FillRef.Index != "" && raw.FillRef.Index != "0" {
 		shape.Fill = raw.FillRef.color(theme)
 	}
