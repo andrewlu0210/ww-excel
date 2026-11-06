@@ -197,14 +197,17 @@
     schedule();
   }
 
-  function setScroll(x: number, y: number): void {
+  function setScroll(x: number, y: number, roundUp = false): void {
     // Calls that arrive after unmount (pending edits, selections) do
     // nothing.
     if (destroyed || !scroller) return;
     sx = clamp(x, cols.total - (viewW() - metrics.headerW));
     sy = clamp(y, rows.total - (viewH() - HEADER_H));
-    scroller.scrollLeft = scrollX.toScroll(transform.toScreen(sx));
-    scroller.scrollTop = scrollY.toScroll(transform.toScreen(sy));
+    // Zooming to a fractional pixel must not expose the preceding row/column.
+    const nativeX = scrollX.toScroll(transform.toScreen(sx));
+    const nativeY = scrollY.toScroll(transform.toScreen(sy));
+    scroller.scrollLeft = roundUp ? Math.ceil(nativeX) : nativeX;
+    scroller.scrollTop = roundUp ? Math.ceil(nativeY) : nativeY;
     schedule();
   }
 
@@ -251,7 +254,7 @@
     untrack(() => {
       if (!gridLayer || !scroller || destroyed) return;
       resize();
-      setScroll(sx, sy);
+      setScroll(sx, sy, true);
     });
   });
 

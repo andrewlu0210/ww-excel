@@ -27,6 +27,7 @@ type Reader interface {
 
 // Evaluator evaluates one formula at a fixed position.
 type Evaluator struct {
+	Check           func() error
 	R               Reader
 	Sheet, Row, Col int
 	Now             time.Time
@@ -43,7 +44,8 @@ type Evaluator struct {
 }
 
 // Eval returns the scalar result of a formula.
-func (e *Evaluator) Eval(n ast.Node) Value {
+func (e *Evaluator) Eval(n ast.Node) (result Value) {
+	defer recoverFormulaValue(&result)
 	v := e.eval(n)
 	switch v.Kind {
 	case KRef:
@@ -56,6 +58,11 @@ func (e *Evaluator) Eval(n ast.Node) Value {
 }
 
 func (e *Evaluator) eval(n ast.Node) Value {
+	if e.Check != nil {
+		if err := e.Check(); err != nil {
+			panic(err)
+		}
+	}
 	switch x := n.(type) {
 	case ast.Number:
 		return Number(x.V)
@@ -98,7 +105,7 @@ func (e *Evaluator) eval(n ast.Node) Value {
 		if x.Op == '+' {
 			return v
 		}
-		return lift1(v, func(s Value) Value {
+		return e.lift1(v, func(s Value) Value {
 			n, err := ToNumber(s)
 			if err.IsErr() {
 				return err
@@ -106,7 +113,7 @@ func (e *Evaluator) eval(n ast.Node) Value {
 			return Number(-n)
 		})
 	case ast.Percent:
-		return lift1(e.operand(x.X), func(s Value) Value {
+		return e.lift1(e.operand(x.X), func(s Value) Value {
 			n, err := ToNumber(s)
 			if err.IsErr() {
 				return err
@@ -116,7 +123,7 @@ func (e *Evaluator) eval(n ast.Node) Value {
 	case ast.Binary:
 		l := e.operand(x.L)
 		r := e.operand(x.R)
-		return lift2(l, r, func(a, b Value) Value { return binary(x.Op, a, b) })
+		return e.lift2(l, r, func(a, b Value) Value { return binary(x.Op, a, b) })
 	case ast.Call:
 		def := Lookup(x.Name)
 		if def == nil {
@@ -133,8 +140,18 @@ func (e *Evaluator) eval(n ast.Node) Value {
 
 // Reference evaluates a reference expression (INDIRECT) without
 // dereferencing it.
-func (e *Evaluator) Reference(n ast.Node) Value {
+func (e *Evaluator) Reference(n ast.Node) (result Value) {
+	defer recoverFormulaValue(&result)
 	return e.eval(n)
+}
+
+// Recover at the single-formula boundary, on the same goroutine as the
+// evaluator (including parallel workers). A normal error value lets command
+// history, dependency updates and document bookkeeping finish consistently.
+func recoverFormulaValue(result *Value) {
+	if recover() != nil {
+		*result = Err(model.ErrValue)
+	}
 }
 
 func (e *Evaluator) ref(x ast.Ref) Value {
@@ -197,6 +214,9 @@ func (e *Evaluator) clampUsed(r *Ref) *Ref {
 
 func (e *Evaluator) toArray(r *Ref) Value {
 	c := e.clampUsed(r)
+	if c.Rows() > 1_000_000/c.Cols() {
+		return Err(model.ErrValue)
+	}
 	arr := &Array{Rows: c.Rows(), Cols: c.Cols(), V: make([]Value, c.Rows()*c.Cols())}
 	e.R.Each(c.Sheet, c.Range(), func(row, col int, cell model.Cell) {
 		arr.V[(row-c.R0)*arr.Cols+(col-c.C0)] = FromCell(cell)
@@ -204,12 +224,17 @@ func (e *Evaluator) toArray(r *Ref) Value {
 	return ArrayOf(arr)
 }
 
-func lift1(v Value, f func(Value) Value) Value {
+func (e *Evaluator) lift1(v Value, f func(Value) Value) Value {
 	if v.Kind != KArray {
 		return f(v)
 	}
 	out := &Array{Rows: v.Arr.Rows, Cols: v.Arr.Cols, V: make([]Value, len(v.Arr.V))}
 	for i, el := range v.Arr.V {
+		if e.Check != nil {
+			if err := e.Check(); err != nil {
+				panic(err)
+			}
+		}
 		out.V[i] = f(el)
 	}
 	return ArrayOf(out)
@@ -217,16 +242,24 @@ func lift1(v Value, f func(Value) Value) Value {
 
 // lift2 applies f element-wise, broadcasting scalars and single rows or
 // columns; positions outside a smaller array are #N/A, as in Excel.
-func lift2(a, b Value, f func(Value, Value) Value) Value {
+func (e *Evaluator) lift2(a, b Value, f func(Value, Value) Value) Value {
 	if a.Kind != KArray && b.Kind != KArray {
 		return f(a, b)
 	}
 	ra, ca := dims(a)
 	rb, cb := dims(b)
 	rows, cols := max(ra, rb), max(ca, cb)
+	if cols <= 0 || rows > 1_000_000/cols {
+		return Err(model.ErrValue)
+	}
 	out := &Array{Rows: rows, Cols: cols, V: make([]Value, rows*cols)}
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
+			if e.Check != nil {
+				if err := e.Check(); err != nil {
+					panic(err)
+				}
+			}
 			out.V[r*cols+c] = f(elem(a, r, c), elem(b, r, c))
 		}
 	}

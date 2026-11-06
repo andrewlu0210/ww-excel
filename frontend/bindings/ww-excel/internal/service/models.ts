@@ -245,6 +245,12 @@ export interface DocState {
     "names": string[] | null;
 }
 
+export interface FileLoading {
+    "id": number;
+    "active": boolean;
+    "name": string;
+}
+
 export interface FilterValueDTO {
     "text": string;
     "shown": boolean;

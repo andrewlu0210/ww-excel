@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { ZoomTransform } from '../grid/zoom';
   // Sheet controller: selection, keyboard, the cell editor, the formula
   // bar and the link to Go. Rendering lives in Grid.
   //
@@ -131,7 +132,7 @@
     oncrossdone,
   }: Props = $props();
 
-  let scale = $derived(zoom / 100);
+  let scale = $derived(new ZoomTransform(zoom).scale);
 
   // Fixed for the lifetime of the component: the grid is always full size.
   const lim = untrack(() => ({ rows: info.rows, cols: info.cols }));

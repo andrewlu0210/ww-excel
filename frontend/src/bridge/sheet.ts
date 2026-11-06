@@ -3,7 +3,7 @@ export type { ChartLabels, ChartLabelPoint, ChartAxis, Pivot, PivotValue } from 
 export type { PivotInfoDTO, PivotFilterDTO } from '../../bindings/ww-excel/internal/service/models';
 // The only module that touches generated Wails bindings. Wails3 is still
 // in beta, so keep binding/event usage behind these wrappers.
-import { Events, Window } from '@wailsio/runtime';
+import { Events, Screens, Window } from '@wailsio/runtime';
 import { BenchService, DocumentService, SettingsService, SheetService } from '../../bindings/ww-excel/internal/service';
 import type { Settings } from '../../bindings/ww-excel/internal/settings/models';
 import type { FuncInfo } from '../../bindings/ww-excel/internal/formula/models';
@@ -285,7 +285,12 @@ async function rejected(p: Promise<void>): Promise<string | null> {
   }
 }
 
+export type FileLoading = { id: number; active: boolean; name: string };
+
 export const documentApi = {
+ opening: ():Promise<FileLoading> => DocumentService.Opening(),
+ cancelOpen: ():Promise<boolean> => DocumentService.CancelOpen(),
+ onLoading: (cb:(state:FileLoading)=>void):(()=>void) => on("doc:loading",cb),
   state: (): Promise<DocState> => DocumentService.State(),
   newDocument: (): Promise<boolean> => DocumentService.New(),
   open: (): Promise<boolean> => DocumentService.Open(),
@@ -335,6 +340,14 @@ export const settingsApi = {
 };
 
 export const benchApi = {
+  windowSize: () => Window.Size(),
+  windowPosition: () => Window.Position(),
+  windowScreen: async () => {
+    const current = await Window.GetScreen();
+    return (await Screens.GetAll()).find(screen => screen.ID === current.ID) ?? current;
+  },
+  setWindowPosition: (x: number, y: number): Promise<void> => Window.SetPosition(x, y),
+  setWindowSize: (width: number, height: number): Promise<void> => Window.SetSize(width, height),
   benchMode: (): Promise<boolean> => BenchService.BenchMode(),
   selfTestMode: (): Promise<boolean> => BenchService.SelfTestMode(),
   fixturePath: (): Promise<string> => BenchService.FixturePath(),

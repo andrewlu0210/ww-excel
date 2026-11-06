@@ -18,10 +18,11 @@
     cache?: BlockCache;
     drawTimes?: Samples;
     benchBusy: boolean;
+    benchAllowed: boolean;
     onbench: () => void;
   }
 
-  let { zoom, onzoom, onzoomdialog, mode, tabs, circular, cache, drawTimes, benchBusy, onbench }: Props = $props();
+  let { zoom, onzoom, onzoomdialog, mode, tabs, circular, cache, drawTimes, benchBusy, benchAllowed, onbench }: Props = $props();
 
   const MODE_LABEL: Record<SheetMode, string> = { ready: t('就緒'), enter: t('模式|輸入'), edit: t('編輯'), point: t('指向') };
 
@@ -66,7 +67,7 @@
         <span title="Grid draw time, p95">draw {drawP95.toFixed(1)} ms</span>
         <span title="Last GetBlocks round trip">fetch {fetchMs.toFixed(1)} ms</span>
         <span title="Blocks cached in the frontend">{blocks} blocks</span>
-        <button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? t('量測中…') : t('效能量測')}</button>
+        {#if benchAllowed}<button tabindex="-1" onclick={onbench} disabled={benchBusy}>{benchBusy ? t('量測中…') : t('效能量測')}</button>{/if}
       </div>
     {/if}
     <ZoomControl {zoom} onchange={onzoom} onopen={onzoomdialog} />

@@ -14,12 +14,14 @@
 package formula
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"ww-excel/internal/formula/ast"
@@ -33,6 +35,7 @@ import (
 type Key = depgraph.Key
 
 type Engine struct {
+	check func() error
 	wb    *model.Workbook
 	graph *depgraph.Graph
 	// Now and Rand are injectable for tests.
@@ -125,6 +128,11 @@ func (e *Engine) compile(node ast.Node, sheet int) *compiled {
 // defined names to the references they stand for.
 func (e *Engine) collectAreas(node ast.Node, sheet int, c *compiled, depth int) {
 	ast.Walk(node, func(n ast.Node) {
+		if e.check != nil {
+			if err := e.check(); err != nil {
+				panic(err)
+			}
+		}
 		switch r := n.(type) {
 		case ast.Ref:
 			s := sheet
@@ -303,6 +311,11 @@ func (e *Engine) Rebuild() []Key {
 	var all []Key
 	for si, sh := range e.wb.Sheets {
 		sh.EachInRange(model.Range{R1: model.MaxRows - 1, C1: model.MaxCols - 1}, func(row, col int, c model.Cell) {
+			if e.check != nil {
+				if err := e.check(); err != nil {
+					panic(err)
+				}
+			}
 			if c.F == nil {
 				return
 			}
@@ -323,6 +336,11 @@ func (e *Engine) Rebuild() []Key {
 // whose values changed.
 func (e *Engine) Update(changed []Key) []Key {
 	for _, k := range changed {
+		if e.check != nil {
+			if err := e.check(); err != nil {
+				panic(err)
+			}
+		}
 		c := e.cell(k)
 		if c.F != nil {
 			comp := e.ensure(c.F, k.Sheet)
@@ -383,9 +401,19 @@ func (e *Engine) recalc(seeds []Key) []Key {
 	edges := map[Key][]Key{}
 	indeg := map[Key]int{}
 	for i := 0; i < len(queue); i++ {
+		if e.check != nil {
+			if err := e.check(); err != nil {
+				panic(err)
+			}
+		}
 		x := queue[i]
 		local := map[Key]bool{}
 		e.graph.Dependents(x, func(d Key) {
+			if e.check != nil {
+				if err := e.check(); err != nil {
+					panic(err)
+				}
+			}
 			if local[d] {
 				return
 			}
@@ -426,6 +454,11 @@ func (e *Engine) recalc(seeds []Key) []Key {
 			}
 		}
 		for len(ready) > 0 {
+			if e.check != nil {
+				if err := e.check(); err != nil {
+					panic(err)
+				}
+			}
 			wave := ready
 			ready = nil
 			if len(wave) >= parallelWave {
@@ -614,7 +647,7 @@ func (e *Engine) compute(k Key) (model.Cell, bool) {
 	if comp.unparsed {
 		return model.Cell{}, false
 	}
-	ev := eval.Evaluator{R: reader{e}, Sheet: k.Sheet, Row: k.Row, Col: k.Col, Now: e.Now(), Rand: e.Rand}
+	ev := eval.Evaluator{Check: e.check, R: reader{e}, Sheet: k.Sheet, Row: k.Row, Col: k.Col, Now: e.Now(), Rand: e.Rand}
 	return ev.Eval(comp.node).ToCell(), true
 }
 
@@ -665,14 +698,14 @@ func (e *Engine) setValue(k Key, v model.Cell) bool {
 // a validation or conditional format rule. References are read as
 // values.
 func (e *Engine) EvalAt(node ast.Node, sheet, row, col int) eval.Value {
-	ev := eval.Evaluator{R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
+	ev := eval.Evaluator{Check: e.check, R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
 	return ev.Eval(node)
 }
 
 // ReferenceAt evaluates a formula without reading references, so a
 // list source such as $H$1:$H$5 stays a range.
 func (e *Engine) ReferenceAt(node ast.Node, sheet, row, col int) eval.Value {
-	ev := eval.Evaluator{R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
+	ev := eval.Evaluator{Check: e.check, R: reader{e}, Sheet: sheet, Row: row, Col: col, Now: e.Now(), Rand: e.Rand}
 	return ev.Reference(node)
 }
 
@@ -680,6 +713,11 @@ func (e *Engine) ReferenceAt(node ast.Node, sheet, row, col int) eval.Value {
 type reader struct{ e *Engine }
 
 func (r reader) Cell(sheet, row, col int) model.Cell {
+	if r.e.check != nil {
+		if err := r.e.check(); err != nil {
+			panic(err)
+		}
+	}
 	if row < 0 || row >= model.MaxRows || col < 0 || col >= model.MaxCols {
 		return model.Cell{}
 	}
@@ -700,7 +738,16 @@ func (r reader) Each(sheet int, rg model.Range, fn func(row, col int, c model.Ce
 	if sheet < 0 || sheet >= len(r.e.wb.Sheets) {
 		return
 	}
-	r.e.wb.Sheets[sheet].EachInRange(rg, fn)
+	if r.e.check == nil {
+		r.e.wb.Sheets[sheet].EachInRange(rg, fn)
+		return
+	}
+	r.e.wb.Sheets[sheet].EachInRange(rg, func(row, col int, c model.Cell) {
+		if err := r.e.check(); err != nil {
+			panic(err)
+		}
+		fn(row, col, c)
+	})
 }
 
 func (r reader) Used(sheet int) (int, int) {
@@ -725,4 +772,34 @@ func Functions() []FuncInfo {
 		out[i] = FuncInfo{Name: d.Name, Sig: d.Sig, Desc: d.Desc, Category: d.Category}
 	}
 	return out
+}
+
+// RebuildContext applies an import-only calculation budget. Ordinary edits do
+// not pay for atomic accounting. Evaluator recovery keeps worker panics local;
+// the final check rejects the entire import instead of publishing cached errors.
+func (e *Engine) RebuildContext(ctx context.Context) (err error) {
+	var steps atomic.Int64
+	var exhausted atomic.Bool
+	e.check = func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if exhausted.Load() || steps.Add(1) > 50_000_000 {
+			exhausted.Store(true)
+			return fmt.Errorf("匯入公式計算超過安全限制（50000000 steps）")
+		}
+		return nil
+	}
+	defer func() {
+		e.check = nil
+		if p := recover(); p != nil {
+			if x, ok := p.(error); ok {
+				err = x
+			} else {
+				panic(p)
+			}
+		}
+	}()
+	e.Rebuild()
+	return e.check()
 }

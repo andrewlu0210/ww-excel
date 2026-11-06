@@ -369,7 +369,14 @@ func TestDocumentFlow(t *testing.T) {
 	if got := sheets.EditText(bg, 0, 0, 0); got != "hello" {
 		t.Fatalf("opened cell = %q", got)
 	}
-	if rec.events[len(rec.events)-2] != EventDocReset {
+	// Loading events may surround the reset; reset must still precede state.
+	events := []string{}
+	for _, event := range rec.events {
+		if event != EventFileLoading {
+			events = append(events, event)
+		}
+	}
+	if events[len(events)-2] != EventDocReset {
 		t.Fatalf("expected doc:reset before state, got %v", rec.events[len(rec.events)-3:])
 	}
 

@@ -29,6 +29,7 @@ export type {
     ChartSeriesDTO,
     CopyResult,
     DocState,
+    FileLoading,
     FilterValueDTO,
     FindOptionsDTO,
     FontDTO,

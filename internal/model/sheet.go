@@ -295,9 +295,11 @@ func (s *Sheet) BlockCount() int { return len(s.blocks) }
 func (s *Sheet) UsedRange() (rows, cols int) { return s.usedRows, s.usedCols }
 
 type Workbook struct {
-	Sheets []*Sheet
-	Styles *StyleTable
-	Names  []*DefinedName
+	// OpenWindowView is an imported window geometry hint in macOS logical points.
+	OpenWindowView WindowView
+	Sheets         []*Sheet
+	Styles         *StyleTable
+	Names          []*DefinedName
 }
 
 func NewWorkbook() *Workbook {

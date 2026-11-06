@@ -7,10 +7,14 @@ macOS 試算表 App，目標是提供接近 MS Excel 的操作體驗。
 
 ## 目前進度
 
-- 目前階段：**v1.2.9：修正 Excel 圖表互通、尺寸、標籤排版與預設外框**（2026-11-05）。
+- 目前階段：**v1.3.0：改善 Mac Excel 顯示比例、開檔視窗與窄視窗工具列，補強匯入與公式安全性**（2026-11-06）。
+- 2026-11-06 完成 todo 第 16 項：測試 bindings 後端模式檢查、參數／輸出與並行工作限制；一般模式 HUD 隱藏量測按鈕。完整 Go／相關 race、前端 246 項、桌面 300／300 與完整 benchmark 通過；見 `docs/bench-security.md`。
+- 2026-11-06 完成 todo 第 15 項：WWX／XLSX 匯入預算、可取消開檔、過期結果與視窗關閉隔離；完整 Go／相關 race、前端 246 項、桌面 294／294、取消 9／9、樞紐 25／25 通過。限制見 `docs/import-limits.md`，開檔成本見 `docs/perf.md`。
+- 2026-11-06 完成 todo 第 14 項：修正 REPT 溢位、公式 panic 隔離與文件鎖釋放；完整 Go／相關 race、前端 246 項、桌面 294／294 通過，效能短測見 `docs/perf.md`。
+- 2026-11-06 完成 todo 第 13 項：更新 Excelize 並拒絕畸形樞紐 XLSX，完整 Go 回歸、一般桌面 284／284、樞紐專用 25／25 通過；詳見 `docs/security-review-2026-11-06.md`。
 - 操作與限制見 `docs/chart-labels.md`、`docs/chart-axes.md`、`docs/chart-series.md`、`docs/sheet-tab-colors.md`；真正 Excel 互通與原生滑鼠／輸入法仍有待人工驗收的項目。
 - 完成一個版本後，更新此區塊並勾選下方對應項目
-- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.1-0.20260915055537-22f76f9acb94`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
+- 已鎖定版本：Wails `v3.0.0-beta.34`（Go module 與 `@wailsio/runtime` 必須一致）、excelize `v2.11.1-0.20261003002531-6258dcebc4e2`、gopdf `v0.38.2`（PDF 輸出）、Svelte 5、Vite 8、vitest 5
 
 ## 常用指令
 

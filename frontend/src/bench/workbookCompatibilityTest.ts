@@ -1,4 +1,6 @@
 // Read-only display checks for the user-supplied workbook (WW_XLSX_FIXTURE).
+import { importSecuritySelfTest } from './importSecuritySelfTest';
+import { windowWorkbookSelfTest } from './windowWorkbookSelfTest';
 import { benchApi, documentApi, settingsApi, sheetApi } from '../bridge/sheet';
 import { shapeTest5SelfTest } from './shapeTest5SelfTest';
 import { shapeWorkbookSelfTest } from './shapeWorkbookSelfTest';
@@ -17,6 +19,7 @@ import { richTextWorkbookSelfTest } from './richTextWorkbookSelfTest';
 import type Sheet from '../components/Sheet.svelte';
 
 export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>, path: string): Promise<{ markdown: string; failed: number }> {
+  if (path.split(/[/\\]/).at(-1) === 'import-cancel.xlsx') return importSecuritySelfTest(path);
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const check = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
   const step = async () => { await driver.whenIdle(); await new Promise((r) => setTimeout(r, 100)); };
@@ -25,6 +28,7 @@ export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>
   await documentApi.openPath(path);
   await step(); await step();
   const state = await documentApi.state();
+  if (path.split(/[/\\]/).at(-1)?.toLowerCase() === 'test8.xlsx') return windowWorkbookSelfTest(path, step);
   if (state.sheets?.join(',') === '學期,學分,預算,書籍') return tabColorWorkbookSelfTest(driver);
   if (state.sheets?.[0] === '圖表標籤驗收') return chartLabelEditingSelfTest(driver);
   if (state.sheets?.[0] === '樞紐分析表驗收') return pivotEditingSelfTest(driver);

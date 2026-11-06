@@ -5,10 +5,13 @@ package wwx
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"ww-excel/internal/importguard"
 
 	"ww-excel/internal/model"
 )
@@ -146,14 +149,24 @@ func Write(w io.Writer, wb *model.Workbook) error {
 }
 
 func Read(r io.Reader) (*model.Workbook, error) {
-	zr, err := gzip.NewReader(r)
+	return ReadContext(context.Background(), r)
+}
+
+func ReadContext(ctx context.Context, r io.Reader) (*model.Workbook, error) {
+	l := importguard.Policy(ctx)
+	zr, err := gzip.NewReader(importguard.Reader(ctx, r, l.Compressed, "壓縮檔大小"))
 	if err != nil {
 		return nil, fmt.Errorf("not a .wwx file: %w", err)
 	}
 	defer zr.Close()
 
+	snapshot, err := importguard.JSON(ctx, zr)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { snapshot.Close(); os.Remove(snapshot.Name()) }()
 	var doc fileDoc
-	if err := json.NewDecoder(zr).Decode(&doc); err != nil {
+	if err := json.NewDecoder(importguard.Reader(ctx, snapshot, l.Expanded, "WWX 資料大小")).Decode(&doc); err != nil {
 		return nil, fmt.Errorf("decode .wwx: %w", err)
 	}
 	if doc.Format != formatID {
@@ -176,13 +189,27 @@ func Read(r io.Reader) (*model.Workbook, error) {
 		}
 	}
 	nstyles := uint32(wb.StyleTable().Len())
+	if len(doc.Sheets) > l.Sheets {
+		return nil, importguard.Exceeded("工作表數", int64(l.Sheets))
+	}
+	if len(doc.Styles) > 65536 {
+		return nil, importguard.Exceeded("樣式數", 65536)
+	}
+	cells := 0
 	for _, fs := range doc.Sheets {
 		sh := model.NewSheet(fs.Name)
 		sh.Visibility = fs.Visibility
 		if fs.Layout != nil {
 			sh.Layout = readLayout(fs.Layout)
 		}
+		cells += len(fs.Cells)
+		if cells > l.Cells {
+			return nil, importguard.Exceeded("儲存格數", int64(l.Cells))
+		}
 		for _, fc := range fs.Cells {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if fc.R < 0 || fc.R >= model.MaxRows || fc.C < 0 || fc.C >= model.MaxCols {
 				return nil, fmt.Errorf("sheet %q: cell (%d,%d) out of range", fs.Name, fc.R, fc.C)
 			}
@@ -219,6 +246,9 @@ func Read(r io.Reader) (*model.Workbook, error) {
 			n.Scope = wb.Sheets[i]
 		}
 		wb.Names = append(wb.Names, n)
+	}
+	if err := importguard.Workbook(ctx, wb); err != nil {
+		return nil, err
 	}
 	return wb, nil
 }

@@ -2,9 +2,11 @@ package xlsxfile
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 
 	"ww-excel/internal/formula/ast"
 	"ww-excel/internal/formula/parser"
+	"ww-excel/internal/importguard"
 	"ww-excel/internal/model"
 	"ww-excel/internal/numfmt"
 )
@@ -25,19 +28,69 @@ import (
 // as the base for in-place saves: it parses a worksheet only when a
 // save writes to it, so opening a large file stays fast and small.
 func Read(path string) (*model.Workbook, *excelize.File, error) {
-	f, err := excelize.OpenFile(path)
+	return ReadContext(context.Background(), path)
+}
+
+// ReadContext snapshots and validates input before invoking either XLSX parser.
+func ReadContext(ctx context.Context, path string) (*model.Workbook, *excelize.File, error) {
+	in, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
 	}
-	wb, err := load(f, path)
+	defer in.Close()
+	l := importguard.Policy(ctx)
+	snap, err := importguard.TempCopy(ctx, in, l.Compressed, "壓縮檔大小")
 	if err != nil {
-		f.Close()
+		return nil, nil, err
+	}
+	defer func() { snap.Close(); os.Remove(snap.Name()) }()
+	if err = importguard.ZIP(ctx, snap); err != nil {
+		return nil, nil, err
+	}
+	wb, src, err := readXLSX(snap.Name(), func(f *excelize.File, path string) (*model.Workbook, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		wb, err := loadContext(ctx, f, path)
+		if err == nil {
+			err = importguard.Workbook(ctx, wb)
+		}
+		return wb, err
+	})
+	if err == nil {
+		src.Path = path
+	}
+	return wb, src, err
+}
+
+// Keep parser panics inside the import boundary, including command-line opens
+// that run outside Wails binding recovery. Never return a partial workbook.
+func readXLSX(path string, loadWorkbook func(*excelize.File, string) (*model.Workbook, error)) (wb *model.Workbook, src *excelize.File, err error) {
+	var f *excelize.File
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("Excel 檔案格式異常，無法安全開啟：%v", recovered)
+		}
+		if err != nil {
+			if f != nil {
+				_ = f.Close()
+			}
+			wb, src = nil, nil
+		}
+	}()
+	f, err = excelize.OpenFile(path, excelize.Options{UnzipSizeLimit: 512 << 20, UnzipXMLSizeLimit: 16 << 20})
+	if err != nil {
+		return nil, nil, err
+	}
+	wb, err = loadWorkbook(f, path)
+	if err != nil {
 		return nil, nil, err
 	}
 	return wb, f, nil
 }
 
 type reader struct {
+	ctx              context.Context
 	digitWidth       float64
 	tableBorders     map[string]model.BorderLine
 	tableAppearances map[string]*model.TableAppearance
@@ -50,6 +103,10 @@ type reader struct {
 }
 
 func load(f *excelize.File, file string) (*model.Workbook, error) {
+	return loadContext(context.Background(), f, file)
+}
+
+func loadContext(ctx context.Context, f *excelize.File, file string) (*model.Workbook, error) {
 	z, err := zip.OpenReader(file)
 	if err != nil {
 		return nil, err
@@ -64,9 +121,10 @@ func load(f *excelize.File, file string) (*model.Workbook, error) {
 	if defStyle.Font.Name == "" {
 		defStyle.Font = model.DefaultFont
 	}
-	r := &reader{f: f, parts: parts, wb: &model.Workbook{Styles: model.NewStyleTable(defStyle)}, styles: map[int]uint32{0: 0}}
+	r := &reader{ctx: ctx, f: f, parts: parts, wb: &model.Workbook{Styles: model.NewStyleTable(defStyle)}, styles: map[int]uint32{0: 0}}
+	r.wb.OpenWindowView = readWindowView(parts)
 	r.digitWidth = fontDigitWidth(normalColumnFont(parts, defStyle.Font))
-	if r.sst, r.richSST, err = readSharedStrings(parts, f); err != nil {
+	if r.sst, r.richSST, err = readSharedStringsContext(ctx, parts, f); err != nil {
 		return nil, err
 	}
 	sheets, err := sheetList(parts)
@@ -75,6 +133,9 @@ func load(f *excelize.File, file string) (*model.Workbook, error) {
 	}
 	names := f.GetDefinedName()
 	for _, s := range sheets {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		sh, err := r.sheet(s.name, s.part, names)
 		if err != nil {
 			return nil, fmt.Errorf("工作表「%s」：%w", s.name, err)
@@ -169,11 +230,14 @@ func decodePart(parts map[string]*zip.File, name string, v any) error {
 		return err
 	}
 	defer r.Close()
-	return xml.NewDecoder(r).Decode(v)
+	return xml.NewDecoder(importguard.Reader(context.Background(), r, importguard.DefaultLimits().Part, "XML part 大小")).Decode(v)
 }
 
 // readSharedStrings keeps rich runs separately so plain strings stay compact.
 func readSharedStrings(parts map[string]*zip.File, f *excelize.File) ([]string, map[int]*model.RichText, error) {
+	return readSharedStringsContext(context.Background(), parts, f)
+}
+func readSharedStringsContext(ctx context.Context, parts map[string]*zip.File, f *excelize.File) ([]string, map[int]*model.RichText, error) {
 	name := "xl/sharedStrings.xml"
 	if _, ok := parts[name]; !ok {
 		if t := relOfType(parts, "xl/workbook.xml", "/sharedStrings"); t != "" {
@@ -189,7 +253,7 @@ func readSharedStrings(parts map[string]*zip.File, f *excelize.File) ([]string, 
 		return nil, nil, err
 	}
 	defer rc.Close()
-	dec := xml.NewDecoder(rc)
+	dec := xml.NewDecoder(importguard.Reader(ctx, rc, importguard.Policy(ctx).Part, "shared strings XML"))
 	var out []string
 	rich := map[int]*model.RichText{}
 	for {
@@ -286,7 +350,7 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 		return nil, err
 	}
 	defer rc.Close()
-	dec := xml.NewDecoder(rc)
+	dec := xml.NewDecoder(importguard.Reader(r.ctx, rc, importguard.Policy(r.ctx).Part, "worksheet XML"))
 
 	st := &sheetState{ps: model.DefaultPageSetup()}
 	sharedF := map[string]shared{}
@@ -654,6 +718,9 @@ func (r *reader) sheet(name, part string, names []excelize.DefinedName) (*model.
 		}
 	}
 	r.readPivotAppearance(sh, part)
+	if err := r.validatePivotFields(part); err != nil {
+		return nil, err
+	}
 	r.readPivots(sh, part)
 	if st.drawingRID != "" {
 		readDrawing(r.parts, relTarget(r.parts, part, st.drawingRID), sh)

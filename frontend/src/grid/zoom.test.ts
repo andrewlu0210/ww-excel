@@ -39,6 +39,13 @@ describe.each([10, 70, 100, 200, 400])('coordinates at %i%%', (percent) => {
   });
 });
 
+it('matches Mac Excel row heights at the workbook zoom', () => {
+  // test1.xlsx row 2 is 40.5pt and its saved zoom is 125%.
+  const zoom = new ZoomTransform(125);
+  expect(zoom.toScreen(40.5 * 96 / 72)).toBeCloseTo(50.625);
+  expect(zoom.toLogical(50.625)).toBeCloseTo(54);
+});
+
 describe('per-document sheet zoom', () => {
   it('keeps renamed and reordered sheets independent and clears deleted sheets', () => {
     const zooms = new SheetZooms();
@@ -66,9 +73,9 @@ describe('per-document sheet zoom', () => {
 
 describe('fit selection', () => {
   it('uses the limiting dimension and rounds down so borders fit', () => {
-    expect(fitZoom(1004, 504, 800, 1000)).toBe(50);
-    expect(fitZoom(1004, 504, 2000, 100)).toBe(50);
-    expect(fitZoom(1000, 1000, 800, 800)).toBe(124);
+    expect(fitZoom(1004, 504, 800, 1000)).toBe(66);
+    expect(fitZoom(1004, 504, 2000, 100)).toBe(66);
+    expect(fitZoom(1000, 1000, 800, 800)).toBe(166);
   });
   it('limits single-cell and whole-sheet selections to the allowed zoom range', () => {
     expect(fitZoom(1200, 800, 100, 42)).toBe(400);

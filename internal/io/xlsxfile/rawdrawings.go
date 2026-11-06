@@ -2,6 +2,7 @@ package xlsxfile
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/xml"
 	"io"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"ww-excel/internal/importguard"
 	"ww-excel/internal/model"
 )
 
@@ -253,7 +255,7 @@ func readPart(parts map[string]*zip.File, name string) []byte {
 		return nil
 	}
 	defer r.Close()
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(importguard.Reader(context.Background(), r, importguard.DefaultLimits().Part, "drawing part 大小"))
 	if err != nil {
 		return nil
 	}

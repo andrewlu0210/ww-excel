@@ -3,6 +3,7 @@ package functions
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"ww-excel/internal/formula/eval"
 	"ww-excel/internal/model"
@@ -240,7 +241,9 @@ func init() {
 		if err.IsErr() {
 			return err
 		}
-		if n < 0 || len([]rune(s))*n > maxText {
+		// Compare by division so the output-length check cannot overflow.
+		chars := utf8.RuneCountInString(s)
+		if n < 0 || chars > 0 && n > maxText/chars {
 			return errValue
 		}
 		return eval.Text(strings.Repeat(s, n))

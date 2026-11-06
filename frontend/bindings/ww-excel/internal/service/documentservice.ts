@@ -24,6 +24,13 @@ export function AddSheet(index: number): $CancellablePromise<number> {
 }
 
 /**
+ * CancelOpen is independent of the editor queue and the document lock.
+ */
+export function CancelOpen(): $CancellablePromise<boolean> {
+    return $Call.ByID(3170645323);
+}
+
+/**
  * ConfirmClose is called before the window closes. It returns true when
  * it is OK to close.
  */
@@ -92,11 +99,17 @@ export function OpenFile(path: string): $CancellablePromise<boolean> {
 }
 
 /**
- * OpenPath loads path into the calling window without asking about
- * unsaved changes. Errors are also shown to the user.
+ * OpenPath replaces the calling document only after a successful import.
  */
 export function OpenPath(path: string): $CancellablePromise<void> {
     return $Call.ByID(1593076422, path);
+}
+
+/**
+ * Opening also covers imports started before the frontend subscribed.
+ */
+export function Opening(): $CancellablePromise<$models.FileLoading> {
+    return $Call.ByID(2492865611);
 }
 
 /**

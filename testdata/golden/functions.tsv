@@ -455,3 +455,13 @@
 =ERROR.TYPE(1)	#N/A
 =SHEET()	1
 =SHEETS()	2
+
+# REPT output-length limits and integer-overflow regression.
+=REPT("abc",3)	abcabcabc
+=REPT("中",2)	中中
+=REPT("",1000000000000000)	(empty)
+=REPT("x",-1)	#VALUE!
+=REPT("x",0)	(empty)
+=LEN(REPT("中",32767))	32767
+=REPT("x",32768)	#VALUE!
+=REPT(REPT("a",16384)&REPT("a",16384),562949953421312)	#VALUE!

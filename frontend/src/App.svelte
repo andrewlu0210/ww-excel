@@ -20,7 +20,9 @@
     type StyleDTO,
     type ValidationDTO,
   } from './bridge/sheet';
-  import PivotDialog from './components/PivotDialog.svelte';
+  import ImportProgress from "./components/ImportProgress.svelte";
+ import type { FileLoading } from "./bridge/sheet";
+ import PivotDialog from './components/PivotDialog.svelte';
   import type { PivotInfoDTO } from './bridge/sheet';
   import ChartDialog from './components/ChartDialog.svelte';
   import CondFormatDialog from './components/CondFormatDialog.svelte';
@@ -51,7 +53,9 @@
   // Bench and self-test always run on the first sheet.
   const SHEET = 0;
 
-  let info = $state<SheetInfo>();
+  let opening=$state<FileLoading>({id:0,active:false,name:""});
+ function onLoading(state:FileLoading):void {if(state.id>=opening.id) opening=state;}
+ let info = $state<SheetInfo>();
   let sheets = $state<string[]>([]);
   let active = $state(0);
   let hiddenSheets = $state<number[]>([]);
@@ -124,6 +128,7 @@
   // sheet: the event and the call's result arrive in either order).
   let preferIndex: number | null = null;
   let benchBusy = $state(false);
+  let benchAllowed = $state(false);
   let report = $state('');
 
   let grid = $derived(sheetView?.getGrid());
@@ -416,7 +421,7 @@
 
   async function bench(): Promise<string> {
     const g = sheetView?.getGrid();
-    if (!g || !info) return '';
+    if (!benchAllowed || !g || !info) return '';
     benchBusy = true;
     try {
       const data = `${info.usedRows.toLocaleString()} used rows × ${info.usedCols.toLocaleString()} used cols（含邊界標記）`;
@@ -428,7 +433,8 @@
   }
 
   async function onBench(): Promise<void> {
-    report = await bench();
+    try { report = await bench(); }
+    catch (error) { notify(error instanceof Error ? error.message : String(error)); }
   }
 
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -455,6 +461,7 @@
 
   onMount(() => {
     const offs = [
+ documentApi.onLoading(onLoading),
       documentApi.onMenu((action) => {
         if (['preferences', 'insertSheet', 'formatCells', 'sort', 'defineName', 'nameManager', 'dataValidation', 'condFormat', 'condFormatManager', 'insertTable'].includes(action))
           onAppAction(action);
@@ -471,6 +478,7 @@
     ];
 
     void (async () => {
+      onLoading(await documentApi.opening());
       const st = await documentApi.state();
       canUndo = st.canUndo; canRedo = st.canRedo;
       sheets = st.sheets ?? [];
@@ -480,15 +488,18 @@
       names = st.names ?? [];
       await showSheet(SHEET);
 
-      if (await benchApi.benchMode()) {
+      const [benchMode, selfTestMode] = await Promise.all([benchApi.benchMode(), benchApi.selfTestMode()]);
+      benchAllowed = benchMode || selfTestMode;
+      if (benchMode) {
         await wait(1000); // let the first frames settle
         const md = await bench();
         await saveBenchSnapshots();
         await benchApi.report(md);
-      } else if (await benchApi.selfTestMode()) {
+      } else if (selfTestMode) {
         // Report JS errors right away so a broken step does not look like
         // a hang.
-        const fail = (what: string) => void benchApi.report(`# Self-test\n\n❌ JS 錯誤：${what}\n`);
+        // Prevent failed reporting from re-entering the rejection handler.
+        const fail = (what: string) => void benchApi.report(`# Self-test\n\n❌ JS 錯誤：${what}\n`).catch(() => {});
         window.addEventListener('error', (e) => fail(`${e.message} @ ${e.filename}:${e.lineno}`));
         window.addEventListener('unhandledrejection', (e) => fail(`${String(e.reason)}\n${e.reason?.stack ?? ""}`));
         await wait(500);
@@ -564,7 +575,7 @@
         }}
       />
     {/key}
-    <StatusBar {zoom} onzoom={changeZoom} onzoomdialog={() => (zoomDialog = true)} {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} onbench={onBench}>
+    <StatusBar {zoom} onzoom={changeZoom} onzoomdialog={() => (zoomDialog = true)} {mode} {circular} cache={grid?.cache} drawTimes={grid?.drawTimes} {benchBusy} {benchAllowed} onbench={onBench}>
       {#snippet tabs()}
         <SheetTabs
           {sheets}
@@ -831,6 +842,10 @@
     </div>
   {/if}
 </main>
+
+{#if opening.active}
+ {#key opening.id}<ImportProgress name={opening.name} oncancel={documentApi.cancelOpen} />{/key}
+{/if}
 
 <style>
   .app {

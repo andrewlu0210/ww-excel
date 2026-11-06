@@ -22,6 +22,7 @@ docs/selftest-v07.xlsx
 testdata/golden/excel-check.xlsx
 /test.xlsx
 /test_data/
+/my_docs/
 /todo.md
 .DS_Store
 /dist

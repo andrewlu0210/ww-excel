@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"ww-excel/internal/i18n"
 	"ww-excel/internal/recovery"
@@ -51,8 +52,12 @@ type Dialogs interface {
 }
 
 type DocumentService struct {
-	src     Sessions
-	dialogs Dialogs
+	importMu     sync.Mutex
+	imports      map[*Session]*openJob
+	importID     uint64
+	loadDocument func(context.Context, string) (*document.Document, error)
+	src          Sessions
+	dialogs      Dialogs
 
 	// OpenWindow shows a document in a new window. When nil (tests),
 	// New and Open replace the calling window's document.
@@ -78,6 +83,7 @@ func (ds *DocumentService) State(ctx context.Context) DocState {
 
 // New opens an empty workbook in a new window.
 func (ds *DocumentService) New(ctx context.Context) bool {
+	ds.CancelOpen(ctx)
 	if ds.OpenWindow != nil {
 		ds.OpenWindow(document.New())
 		return true
@@ -118,38 +124,12 @@ func (ds *DocumentService) OpenFile(ctx context.Context, path string) bool {
 	if s := ds.at(ctx); s != nil && s.Pristine() {
 		return ds.OpenPath(ctx, path) == nil
 	}
-	doc, err := ds.load(path)
-	if err != nil {
-		return false
-	}
-	ds.OpenWindow(doc)
-	return true
+	return ds.openDocument(ctx, path, false) == nil
 }
 
-func (ds *DocumentService) load(path string) (*document.Document, error) {
-	doc, err := document.Load(path)
-	if err != nil {
-		ds.dialogs.ShowError(fmt.Sprintf("無法開啟「%s」", filepath.Base(path)), err.Error())
-		return nil, err
-	}
-	if ds.Opened != nil {
-		ds.Opened(path)
-	}
-	if w := doc.TakeWarning(); w != "" {
-		go ds.dialogs.ShowWarning(fmt.Sprintf("「%s」未完整載入", filepath.Base(path)), w)
-	}
-	return doc, nil
-}
-
-// OpenPath loads path into the calling window without asking about
-// unsaved changes. Errors are also shown to the user.
+// OpenPath replaces the calling document only after a successful import.
 func (ds *DocumentService) OpenPath(ctx context.Context, path string) error {
-	doc, err := ds.load(path)
-	if err != nil {
-		return err
-	}
-	ds.at(ctx).replace(doc)
-	return nil
+	return ds.openDocument(ctx, path, true)
 }
 
 // Save writes to the current path, asking for one if untitled.

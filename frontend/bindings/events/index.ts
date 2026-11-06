@@ -19,6 +19,11 @@ export const BenchBlock = "bench:block";
 export const CellsChanged = "cells:changed";
 
 /**
+ * Name of the custom event "doc:loading".
+ */
+export const DocLoading = "doc:loading";
+
+/**
  * Name of the custom event "doc:reset".
  */
 export const DocReset = "doc:reset";

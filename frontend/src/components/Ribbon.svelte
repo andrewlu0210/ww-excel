@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RibbonScroller from './RibbonScroller.svelte';
   import type { Snippet } from 'svelte';
   import type { MenuAction } from '../input/keymap';
   import { t } from '../i18n';
@@ -42,6 +43,7 @@
 
   {#each tabs as tab, i}
     <div role="tabpanel" id={`ribbon-panel-${i}`} aria-labelledby={`ribbon-tab-${i}`} hidden={active !== i}>
+      <RibbonScroller>
       {#if i === 0}{@render children()}
       {:else}
         <div class="commands" role="toolbar" aria-label={t(tab)}>
@@ -50,6 +52,7 @@
           {/each}
         </div>
       {/if}
+      </RibbonScroller>
     </div>
   {/each}
 </div>
@@ -68,7 +71,7 @@
   .tabs button[aria-selected='true'] { font-weight:650; }
   .tabs button[aria-selected='true']::after { content:''; position:absolute; bottom:2px; left:12px; right:12px; height:3px; background:var(--accent); border-radius:3px; }
   [hidden] { display:none; }
-  .commands { min-height:88px; display:flex; align-items:center; flex-wrap:wrap; padding:4px 12px; gap:8px; }
-  .commands button { display:flex; flex-direction:column; align-items:center; gap:10px; min-width:90px; padding:10px; font-size:12px; }
+  .commands { height:88px; box-sizing:border-box; display:flex; align-items:center; flex-wrap:nowrap; padding:4px 12px; gap:8px; }
+  .commands button { flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:10px; min-width:90px; padding:10px; font-size:12px; }
   .commands button span { font-size:26px; line-height:28px; color:var(--accent); }
 </style>

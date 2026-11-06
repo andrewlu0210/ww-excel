@@ -102,6 +102,7 @@ type Emitter func(name string, data any)
 
 // Session owns the open document. Both services share it.
 type Session struct {
+	closed             bool
 	confirmedSaveRisks map[string]bool
 	mu                 sync.RWMutex
 	formatSample       *document.FormatSample
@@ -111,6 +112,9 @@ type Session struct {
 	// OnState is called after every state change, e.g. to update the
 	// window title and menu labels. Optional.
 	OnState func(DocState)
+
+	// ApplyWindowView applies imported window geometry when replacing a document.
+	ApplyWindowView func(model.WindowView)
 
 	// Number of styles already sent with diff events.
 	stylesSent int
@@ -195,15 +199,21 @@ func (s *Session) sheetNamesLocked() []string {
 // for it: one diff per touched sheet, layout or sheet-list changes, and
 // the new document state.
 func (s *Session) change(selectAfter bool, fn func(d *document.Document) (document.Change, bool)) bool {
-	s.mu.Lock()
-	ch, ok := fn(s.doc)
+	var ch document.Change
+	var ok bool
 	var diffs []CellsChanged
 	var state DocState
-	if ok {
-		diffs = s.diffsLocked(ch, selectAfter)
-		state = s.stateLocked()
-	}
-	s.mu.Unlock()
+	func() {
+		s.mu.Lock()
+		// Release on unexpected failures, but never hold the lock while emitting
+		// events: event handlers may synchronously query the session again.
+		defer s.mu.Unlock()
+		ch, ok = fn(s.doc)
+		if ok {
+			diffs = s.diffsLocked(ch, selectAfter)
+			state = s.stateLocked()
+		}
+	}()
 
 	if !ok {
 		return false
@@ -315,7 +325,16 @@ func (s *Session) diffsLocked(ch document.Change, selectAfter bool) []CellsChang
 
 // replace swaps in a new document and tells the frontend to reload.
 func (s *Session) replace(doc *document.Document) {
+	s.replaceIf(doc, nil)
+}
+
+func (s *Session) replaceIf(doc *document.Document, accept func() bool) bool {
 	s.mu.Lock()
+	if s.closed || accept != nil && !accept() {
+		s.mu.Unlock()
+		doc.Close()
+		return false
+	}
 	old := s.doc
 	s.doc = doc
 	s.confirmedSaveRisks = nil
@@ -325,8 +344,12 @@ func (s *Session) replace(doc *document.Document) {
 	s.mu.Unlock()
 	old.Close()
 
+	if size := doc.Workbook().OpenWindowView; size.Valid() && s.ApplyWindowView != nil {
+		s.ApplyWindowView(size)
+	}
 	s.emit(EventDocReset, state)
 	s.publishState(state)
+	return true
 }
 
 func (s *Session) publishState(state DocState) {
@@ -377,6 +400,7 @@ func (s *Session) Dirty() bool {
 func (s *Session) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.closed = true
 	s.doc.Close()
 }
 

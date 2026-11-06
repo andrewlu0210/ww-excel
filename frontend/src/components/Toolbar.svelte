@@ -5,6 +5,7 @@
   import type { FormatPatch, StyleDTO } from '../bridge/sheet';
   import { FONT_CHOICES, fontFamilies, fontLabel } from '../stores/fonts';
   import type { MenuAction } from '../input/keymap';
+  import ToolbarPopup from './ToolbarPopup.svelte';
   import ColorPicker from './ColorPicker.svelte';
 
   interface Props {
@@ -135,8 +136,10 @@
         <span class="letter">A</span><span class="bar" style:background="#{lastFont}"></span>
       </button><button class="caret" tabindex="-1" title={t('選擇字型色彩')} onpointerdown={keep} onclick={() => toggleMenu('font')}>▾</button>
       {#if open === 'font'}
+        <ToolbarPopup onclose={() => open = null}>
         <ColorPicker resetLabel={t('自動')} onclose={() => (open = null)}
           onpick={(c) => { if (c) lastFont = c; onformat({ fontColor: c, label: t('字型色彩') }); }} />
+        </ToolbarPopup>
       {/if}
     </div>
     <div class="menu-host">
@@ -144,8 +147,10 @@
         <span class="bucket">▧</span><span class="bar" style:background="#{lastFill}"></span>
       </button><button class="caret" tabindex="-1" title={t('選擇填滿色彩')} onpointerdown={keep} onclick={() => toggleMenu('fill')}>▾</button>
       {#if open === 'fill'}
+        <ToolbarPopup onclose={() => open = null}>
         <ColorPicker resetLabel={t('無填滿')} onclose={() => (open = null)}
           onpick={(c) => { if (c) lastFill = c; onformat({ fill: c, label: t('填滿色彩') }); }} />
+        </ToolbarPopup>
       {/if}
     </div>
     <div class="menu-host">
@@ -156,12 +161,14 @@
         </svg>
       </button><button class="caret" tabindex="-1" title={t('選擇框線')} onpointerdown={keep} onclick={() => toggleMenu('border')}>▾</button>
       {#if open === 'border'}
+        <ToolbarPopup onclose={() => open = null}>
         <ul class="menu" role="menu">
           {#each borders as b (b.value)}
             <li><button role="menuitem" tabindex="-1" onpointerdown={keep}
                 onclick={() => { lastBorder = b.value; onformat({ border: b.value, label: t('框線') }); open = null; }}>{b.label}</button></li>
           {/each}
         </ul>
+        </ToolbarPopup>
       {/if}
     </div>
   </div>
@@ -223,11 +230,13 @@
     <div class="menu-host">
       <button class="text" tabindex="-1" title={t('清除')} onpointerdown={keep} onclick={() => toggleMenu('clear')}>{t('清除 ▾')}</button>
       {#if open === 'clear'}
+        <ToolbarPopup onclose={() => open = null}>
         <ul class="menu" role="menu">
           <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('all'); open = null; }}>{t('全部清除')}</button></li>
           <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('formats'); open = null; }}>{t('清除格式')}</button></li>
           <li><button role="menuitem" tabindex="-1" onpointerdown={keep} onclick={() => { onclear('contents'); open = null; }}>{t('清除內容')}</button></li>
         </ul>
+        </ToolbarPopup>
       {/if}
     </div>
   </div>
@@ -248,19 +257,18 @@
   .numbers .group { gap:1px; }
   .editing { width:170px; border-right:0; }
   .editing .controls { gap:1px; }
-  @media (max-width:800px) { .ribbon-group { padding:5px 8px 3px; } }
   .toolbar {
     display: flex;
     align-items: stretch;
     gap: 0;
-    min-height: 88px;
+    height: 88px;
+    box-sizing: border-box;
+    width: max-content;
     padding: 0 8px;
     background: var(--chrome-bg);
     border-bottom: none;
     font-size: 12px;
-    /* Wrap instead of scrolling: overflow other than visible would clip
-       the color palettes and menus that drop down from the toolbar. */
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     flex-shrink: 0;
     position: relative;
     z-index: 25;
@@ -359,11 +367,7 @@
     display: inline-flex;
   }
   .menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    z-index: 30;
-    margin: 4px 0 0;
+    margin: 0;
     padding: 4px 0;
     list-style: none;
     min-width: 120px;

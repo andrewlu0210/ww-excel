@@ -3,6 +3,7 @@
 package document
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -98,13 +99,25 @@ func Recovered(wb *model.Workbook, title string) *Document {
 
 // Load opens a .xlsx, .wwx or .csv file.
 func Load(path string) (*Document, error) {
+	return LoadContext(context.Background(), path)
+}
+
+// LoadContext publishes no document until parsing and calculation succeed.
+func LoadContext(ctx context.Context, path string) (*Document, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch FormatForPath(path) {
 	case FormatXLSX:
-		wb, src, err := xlsxfile.Read(path)
+		wb, src, err := xlsxfile.ReadContext(ctx, path)
 		if err != nil {
 			return nil, err
 		}
-		d := FromWorkbook(wb, path)
+		d, err := fromImportedWorkbook(ctx, wb, path)
+		if err != nil {
+			src.Close()
+			return nil, err
+		}
 		d.xlsx = src
 		d.importedCharts = map[*model.Sheet]map[int]bool{}
 		for _, sh := range wb.Sheets {
@@ -126,11 +139,11 @@ func Load(path string) (*Document, error) {
 		return nil, err
 	}
 	defer f.Close()
-	wb, err := wwx.Read(f)
+	wb, err := wwx.ReadContext(ctx, f)
 	if err != nil {
 		return nil, err
 	}
-	return FromWorkbook(wb, path), nil
+	return fromImportedWorkbook(ctx, wb, path)
 }
 
 func loadCSV(path string) (*Document, error) {
@@ -419,4 +432,13 @@ func shiftPositions(set map[[2]int]bool, s command.Shift) map[[2]int]bool {
 		}
 	}
 	return out
+}
+
+func fromImportedWorkbook(ctx context.Context, wb *model.Workbook, path string) (*Document, error) {
+	d := &Document{wb: wb, history: command.NewHistory(0), calc: formula.New(wb), path: path, Now: time.Now}
+	if err := d.calc.RebuildContext(ctx); err != nil {
+		return nil, err
+	}
+	d.resetChanges()
+	return d, nil
 }

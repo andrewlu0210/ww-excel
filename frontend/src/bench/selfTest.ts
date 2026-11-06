@@ -11,6 +11,8 @@ import { single, type CellPos, type Selection } from '../grid/selection';
 import { cellAddress } from '../grid/layout';
 import { ribbonSelfTest } from './ribbonSelfTest';
 import { sheetTabsIntegrationTest, sheetTabsSelfTest } from './sheetTabsSelfTest';
+import { benchSecuritySelfTest } from './benchSecuritySelfTest';
+import { formulaSecuritySelfTest } from './formulaSecuritySelfTest';
 import { zoomSelfTest } from './zoomSelfTest';
 import { formatPainterSelfTest } from './formatPainterSelfTest';
 import type { BlockCache } from '../stores/viewportCache';
@@ -318,6 +320,10 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await sheetTabsSelfTest(expect);
   progressPhase='sheetTabsIntegrationTest';
   await sheetTabsIntegrationTest(step, expect);
+  progressPhase='benchSecuritySelfTest';
+  await benchSecuritySelfTest(expect);
+  progressPhase='formulaSecuritySelfTest';
+  await formulaSecuritySelfTest(sheet, step, expect);
 
   // Show a formula being edited, with reference boxes, for the snapshot.
   await goTo(12, 2);

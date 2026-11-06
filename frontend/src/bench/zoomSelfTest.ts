@@ -18,6 +18,17 @@ export async function zoomSelfTest(
   step: () => Promise<void>,
   expect: (name: string, ok: boolean, detail: string) => void,
 ): Promise<void> {
+  // The generated XLSX fixture stores 14805 x 8010 twips; the minimum height is 480.
+  const openedSize = await benchApi.windowSize();
+  expect('開檔套用 XLSX 視窗大小', openedSize.width === 740 && openedSize.height === 480, JSON.stringify(openedSize));
+  // The fixture also records (0, 0); the menu bar / Dock work area takes priority.
+  const openedPosition = await benchApi.windowPosition();
+  const area = (await benchApi.windowScreen()).WorkArea;
+  expect('螢幕可用範圍使用邏輯點', area.Width === window.screen.availWidth && area.Height === window.screen.availHeight, JSON.stringify({ area, width: window.screen.availWidth, height: window.screen.availHeight }));
+  expect('開檔套用 XLSX 視窗位置並避開系統介面', openedPosition.x === Math.max(0, area.X) && openedPosition.y === Math.max(0, area.Y), JSON.stringify({ openedPosition, area }));
+  // Coordinate tests need a fixed viewport, independent of the imported opening hint.
+  await benchApi.setWindowSize(1280, 800);
+  await step();
   const slider = () => document.querySelector<HTMLInputElement>('.zoom .slider')!;
   const percentage = () => document.querySelector<HTMLButtonElement>('.zoom .percentage')!;
   const grid = () => sheet.getGrid() as unknown as GridView;
@@ -44,13 +55,19 @@ export async function zoomSelfTest(
   await step();
   grid().scrollIntoView(pos);
   await step();
+  await setZoom(100);
   const base = grid().cellRect(pos);
   const initial = await documentApi.state();
 
-  for (const zoom of [10, 70, 100, 200, 400]) {
+  for (const zoom of [10, 70, 100, 125, 200, 400]) {
     const anchor = grid().topLeft();
+    const before = grid().cellRect(anchor);
+    const ratio = zoom / Number(slider().value);
     await setZoom(zoom);
-    expect(`縮放 ${zoom}%：保留捲動錨點`, sameCell(anchor, grid().topLeft()), JSON.stringify(grid().topLeft()));
+    const after = grid().cellRect(anchor);
+    // Native scroll rounding can expose a fraction of the adjacent row at 10%.
+    const subpixel = Math.abs(after.x - before.x * ratio) <= 1 && Math.abs(after.y - before.y * ratio) <= 1;
+    expect(`縮放 ${zoom}%：保留捲動錨點`, sameCell(anchor, grid().topLeft()) || subpixel, JSON.stringify({ anchor: grid().topLeft(), before, after }));
     grid().scrollIntoView(pos);
     await step();
     const rc = grid().cellRect(pos);
@@ -59,10 +76,13 @@ export async function zoomSelfTest(
     expect(`縮放 ${zoom}%：命中儲存格`, sameCell(pos, hit), JSON.stringify(hit));
     const scroller = document.querySelector<HTMLElement>('.scroller')!;
     const host = scroller.getBoundingClientRect();
-    scroller.dispatchEvent(new MouseEvent('contextmenu', { clientX: host.left + rc.x + rc.w / 2, clientY: host.top + rc.y + rc.h / 2, bubbles: true, cancelable: true }));
+    // WebKit quantizes synthetic MouseEvent coordinates to integer CSS pixels.
+    const clientX = Math.round(host.left + rc.x + rc.w / 2);
+    const clientY = Math.round(host.top + rc.y + rc.h / 2);
+    scroller.dispatchEvent(new MouseEvent('contextmenu', { clientX, clientY, bubbles: true, cancelable: true }));
     await step();
     expect(`縮放 ${zoom}%：滑鼠座標選格`, sameCell(sheet.getSelection().active, pos), JSON.stringify(sheet.getSelection().active));
-    scroller.dispatchEvent(new MouseEvent('dblclick', { clientX: host.left + rc.x + rc.w / 2, clientY: host.top + rc.y + rc.h / 2, bubbles: true }));
+    scroller.dispatchEvent(new MouseEvent('dblclick', { clientX, clientY, bubbles: true }));
     await step();
     expect(`縮放 ${zoom}%：雙擊進入正確儲存格`, sameCell(sheet.getEditing()?.pos ?? { row: -1, col: -1 }, pos), JSON.stringify(sheet.getEditing()));
     const editor = document.querySelector<HTMLTextAreaElement>('.cell-editor')!;
@@ -71,7 +91,7 @@ export async function zoomSelfTest(
     expect(`縮放 ${zoom}%：編輯框位置`, Math.abs(parseFloat(editor.style.left) - (editorRect.x - 1)) < 0.01 && Math.abs(parseFloat(editor.style.top) - (editorRect.y - 1)) < 0.01, editor.style.cssText);
     sheet.pressKey('Escape');
     await step();
-    expect(`縮放 ${zoom}%：文字大小`, Math.abs(parseFloat(getComputedStyle(editor).fontSize) - 11 * 4 / 3 * zoom / 100) < 0.1, getComputedStyle(editor).fontSize);
+    expect(`縮放 ${zoom}%：文字大小`, Math.abs(parseFloat(getComputedStyle(editor).fontSize) - 11 * zoom / 100) < 0.1, getComputedStyle(editor).fontSize);
     if ([70, 200, 400].includes(zoom)) await benchApi.snapshot(`selftest-zoom-${zoom}`, grid().snapshot());
   }
   const after = await documentApi.state();
@@ -131,7 +151,7 @@ export async function zoomSelfTest(
   await setZoom(200);
   const chart = sheet.getObjects().find((o) => o.kind === 'chart');
   const chartCanvas = document.querySelector<HTMLCanvasElement>('.object canvas');
-  expect('圖表隨比例縮放', !!chart && !!chartCanvas && Math.abs(parseFloat(chartCanvas.style.width) - chart.w * 2) < 0.01, chartCanvas?.style.cssText ?? '');
+  expect('圖表隨比例縮放', !!chart && !!chartCanvas && Math.abs(parseFloat(chartCanvas.style.width) - chart.w * 1.5) < 0.01, chartCanvas?.style.cssText ?? '');
   await setZoom(70);
   const originalName = (await documentApi.state()).sheets?.[0] ?? '';
   await documentApi.renameSheet(0, '縮放測試');

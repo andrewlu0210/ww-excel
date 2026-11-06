@@ -29,31 +29,32 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// Use PNG for runtime Dock/About images; ICNS is reserved for bundle resources.
+// 執行時的 Dock 與 About 圖示使用 PNG；ICNS 僅用於 App bundle 資源。
 //
 //go:embed build/appicon.png
 var appIcon []byte
 
-// Set at build time (scripts/package.sh) with -ldflags "-X main.version=…".
+// 建置時由 scripts/package.sh 透過 -ldflags "-X main.version=…" 設定。
 var (
-	version = "1.2.9"
-	// updateRepo is the GitHub repository whose releases are checked.
+	version = "1.3.0"
+	// updateRepo 指定檢查 Releases 更新時使用的 GitHub repository。
 	updateRepo = "andrewlu0210/ww-excel"
 )
 
 func init() {
-	// Registered events get strongly typed TS bindings.
+	// 註冊事件，以產生具備強型別的 TypeScript bindings。
 	application.RegisterEvent[service.BenchEvent](service.BenchEventName)
 	application.RegisterEvent[service.CellsChanged](service.EventCellsChanged)
 	application.RegisterEvent[service.LayoutChanged](service.EventLayoutChanged)
 	application.RegisterEvent[service.DocState](service.EventSheetsChanged)
 	application.RegisterEvent[service.DocState](service.EventDocState)
 	application.RegisterEvent[service.DocState](service.EventDocReset)
+	application.RegisterEvent[service.FileLoading](service.EventFileLoading)
 	application.RegisterEvent[string](service.EventMenuAction)
 	application.RegisterEvent[service.UISettings](service.EventSettingsChanged)
 }
 
-// docApp owns the document windows: one session and window per document.
+// docApp 管理文件視窗，每份文件各自擁有一個 session 與視窗。
 type docApp struct {
 	app      *application.App
 	hub      *service.Hub
@@ -66,28 +67,27 @@ type docApp struct {
 	mu      sync.Mutex
 	windows map[uint]*docWindow
 	nextID  int
-	// Set once the user agreed to quit with unsaved changes.
+	// 使用者同意捨棄未儲存的變更並結束程式後，才設為 true。
 	quitApproved atomic.Bool
 }
 
 type docWindow struct {
 	win      *application.WebviewWindow
 	session  *service.Session
-	approved atomic.Bool // the user agreed to close it
+	approved atomic.Bool // 使用者已同意關閉此視窗
 }
 
 func main() {
 	a := &docApp{hub: service.NewHub(), windows: map[uint]*docWindow{}}
-	// The unattended modes must not touch the user's preferences, recent
-	// files or recovery snapshots.
+	// 自動量測與測試模式不得修改使用者的偏好設定、最近使用的檔案或復原快照。
 	settingsPath, recoveryDir, recentPath := settings.DefaultPath(), recovery.DefaultDir(), service.DefaultRecentPath()
 	preferred := preferredLanguages()
 	if unattended() {
 		tmp, _ := os.MkdirTemp("", "ww-excel-test")
 		settingsPath, recoveryDir = filepath.Join(tmp, "settings.json"), filepath.Join(tmp, "Recovery")
 		recentPath = filepath.Join(tmp, "recent.json")
-		// The checks compare Chinese UI text; WW_LANG=en previews the
-		// English UI (the checks on text then fail).
+		// 測試會比對中文 UI 文字；WW_LANG=en 可預覽英文 UI，
+		// 但依賴中文文字的檢查將無法通過。
 		preferred = []string{"zh-Hant-TW"}
 		if l := os.Getenv("WW_LANG"); l != "" {
 			preferred = []string{l}
@@ -117,17 +117,15 @@ func main() {
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
-			// Print previews are PDFs rendered on demand; fonts the page
-			// cannot use directly are served from CoreText.
+			// 列印預覽會按需產生 PDF；網頁無法直接使用的字型則由 CoreText 提供。
 			Middleware: application.ChainMiddleware(service.PrintHandler, service.FontHandler),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
-		// ⌘Q does not pass through the windows' closing hooks, so ask
-		// about each unsaved document here, then quit.
+		// ⌘Q 不會經過視窗的 closing hooks，因此在此逐一確認未儲存的文件後再結束程式。
 		ShouldQuit: a.shouldQuit,
-		// A normal quit leaves no recovery snapshots behind.
+		// 正常結束程式時，清除所有復原快照。
 		OnShutdown: func() {
 			for _, s := range a.hub.All() {
 				a.autosave.Forget(s)
@@ -151,20 +149,20 @@ func main() {
 	}, stopAutosave)
 
 	a.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		// Finder cannot supply a bundle icon for direct executable launches.
-		// Reapply after Cocoa finishes launching so it does not reset the Dock image.
+		// 直接啟動執行檔時，Finder 無法提供 App bundle 圖示。
+		// 等 Cocoa 啟動完成後重新套用，避免 Dock 圖示被重設。
 		a.app.SetIcon(appIcon)
 		onMain(func() { setApplicationDisplayName(applicationDisplayName()) })
 		setAppearance(a.settings.Get().Appearance)
-		// Offer the snapshots of a session that crashed.
+		// 若上次 session 異常結束，提供快照復原。
 		go service.Recover(a.docs, service.WindowContext(first.win), a.autosave.Store)
 		if a.settings.Get().CheckUpdates && !unattended() {
 			go a.checkUpdates(false)
 		}
 	})
 
-	// Files from the command line or from Finder (double-click, drop on
-	// the Dock icon) open like 檔案 > 開啟.
+	// 從命令列或 Finder（雙擊檔案、拖到 Dock 圖示）開檔時，
+	// 使用與「檔案 > 開啟」相同的流程。
 	if len(os.Args) > 1 {
 		paths := os.Args[1:]
 		a.app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
@@ -186,7 +184,7 @@ func main() {
 	}
 }
 
-// openWindow shows a document in a new window.
+// openWindow 建立新視窗以顯示文件。
 func (a *docApp) openWindow(doc *document.Document) *docWindow {
 	a.mu.Lock()
 	a.nextID++
@@ -217,6 +215,23 @@ func (a *docApp) openWindow(doc *document.Document) *docWindow {
 	a.windows[id] = w
 	a.mu.Unlock()
 
+	w.session.ApplyWindowView = func(view model.WindowView) {
+		onMain(func() {
+			screen, _ := w.win.GetScreen()
+			areas := windowWorkAreas(screen, a.app.Screen.GetAll())
+			if len(areas) == 0 {
+				return
+			}
+			x, y := w.win.Position()
+			width, height := w.win.Size()
+			bounds := view.Place(model.WindowBounds{X: x, Y: y, Width: width, Height: height}, areas)
+			w.win.SetSize(bounds.Width, bounds.Height)
+			w.win.SetPosition(bounds.X, bounds.Y)
+		})
+	}
+	if view := doc.Workbook().OpenWindowView; view.Valid() {
+		w.session.ApplyWindowView(view)
+	}
 	w.session.CloseWindow = w.win.Close
 	w.session.OnState = func(st service.DocState) {
 		w.win.SetTitle(windowTitle(st))
@@ -228,9 +243,8 @@ func (a *docApp) openWindow(doc *document.Document) *docWindow {
 		a.updateMenus(w.session.State())
 	})
 
-	// Ask about unsaved changes before closing. The hook runs on the UI
-	// thread, so the dialog is shown from a goroutine and the close is
-	// retried once the user decides.
+	// 關閉前先確認未儲存的變更。hook 在 UI thread 執行，
+	// 因此改由 goroutine 顯示對話框，等使用者確認後再關閉視窗。
 	w.win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if w.approved.Load() || a.quitApproved.Load() || !w.session.Dirty() {
 			a.forget(id)
@@ -248,29 +262,29 @@ func (a *docApp) openWindow(doc *document.Document) *docWindow {
 }
 
 func (a *docApp) forget(id uint) {
-	a.hub.Remove(id)
 	a.mu.Lock()
 	w := a.windows[id]
 	delete(a.windows, id)
 	a.mu.Unlock()
 	if w != nil {
+		a.docs.CancelOpen(service.WindowContext(w.win))
+		a.hub.Remove(id)
 		a.autosave.Forget(w.session)
 		w.session.Close()
 	}
 }
 
-// onMain runs a menu change on the main thread. Menu changes must not
-// overlap: Menu.Update rebuilds every NSMenuItem, and a label set from
-// another goroutine at the same time would write to a released item
-// (SIGSEGV). Running them all on the main thread serializes them; on
-// the main thread itself fn runs inline.
+// onMain 將操作交由 main thread 執行，避免選單更新互相重疊。
+// Menu.Update 會重建所有 NSMenuItem；若另一個 goroutine 同時設定標籤，
+// 可能寫入已釋放的項目並觸發 SIGSEGV。統一交由 main thread 依序執行；
+// 若呼叫端已在 main thread，則直接執行 fn。
 func onMain(fn func()) { application.InvokeSync(fn) }
 
-// setMenus rebuilds the menu bar in the current language.
+// setMenus 依目前語系重建選單列。
 func (a *docApp) setMenus() { onMain(a.buildMenus) }
 
-// buildMenus creates the menu bar. Called directly only before the app
-// runs, when there is no main-thread loop to dispatch to yet.
+// buildMenus 建立選單列。僅在 App 啟動前直接呼叫，
+// 因為此時尚無 main thread event loop 可供派送操作。
 func (a *docApp) buildMenus() {
 	a.menus = buildMenu(a)
 	a.app.Menu.Set(a.menus.root)
@@ -278,12 +292,12 @@ func (a *docApp) buildMenus() {
 	setApplicationDisplayName(applicationDisplayName())
 }
 
-// updateMenus shows a document's undo/redo state in the menu bar.
+// updateMenus 將文件的 undo／redo 狀態顯示在選單列。
 func (a *docApp) updateMenus(st service.DocState) {
 	onMain(func() { a.menus.update(st) })
 }
 
-// settingsChanged applies new preferences to the app and every window.
+// settingsChanged 將新的偏好設定套用至 App 與所有視窗。
 func (a *docApp) settingsChanged(old, cur service.UISettings) {
 	if old.Appearance != cur.Appearance {
 		setAppearance(cur.Appearance)
@@ -305,12 +319,12 @@ func (a *docApp) settingsChanged(old, cur service.UISettings) {
 	a.app.Event.Emit(service.EventSettingsChanged, cur)
 }
 
-// checkUpdates looks for a newer release. At launch (manual false) it
-// stays quiet unless there is one; from the menu it always answers.
+// checkUpdates 檢查是否有新版本。啟動時（manual 為 false）只在有更新時提示；
+// 從選單手動檢查時，則一律回覆檢查結果。
 func (a *docApp) checkUpdates(manual bool) {
 	rel, err := update.Latest(context.Background(), http.DefaultClient, updateRepo)
 	if errors.Is(err, update.ErrNoRelease) {
-		// Nothing published yet: the running version is the newest.
+		// 尚無已發布的版本，將目前執行的版本視為最新版本。
 		rel, err = update.Release{Version: version}, nil
 	}
 	if err != nil {
@@ -325,7 +339,7 @@ func (a *docApp) checkUpdates(manual bool) {
 		}
 		return
 	}
-	// Dialogs are shown from this goroutine, like service.WailsDialogs.
+	// 與 service.WailsDialogs 相同，由此 goroutine 顯示對話框。
 	d := a.app.Dialog.Question().
 		SetTitle(fmt.Sprintf(T("有新版本：WW Excel %s"), rel.Version)).
 		SetMessage(fmt.Sprintf(T("您目前使用的是 %s。要前往下載頁面嗎？"), version))
@@ -335,8 +349,8 @@ func (a *docApp) checkUpdates(manual bool) {
 	d.Show()
 }
 
-// unattended reports the bench and self-test modes, which must not
-// touch the user's settings or show unexpected dialogs.
+// unattended 判斷是否處於 benchmark 或 self-test 模式；
+// 這些模式不得修改使用者設定或顯示非預期的對話框。
 func unattended() bool {
 	return os.Getenv("WW_SELFTEST") == "1" || os.Getenv("WW_BENCH") == "1"
 }
@@ -390,7 +404,7 @@ func (a *docApp) focusPath(path string) bool {
 	return true
 }
 
-// currentContext addresses the focused document window (or the newest).
+// currentContext 取得目前聚焦文件視窗的 context，未聚焦時則使用最新視窗。
 func (a *docApp) currentContext() context.Context {
 	if w := a.app.Window.Current(); w != nil {
 		return service.WindowContext(w)
@@ -398,7 +412,7 @@ func (a *docApp) currentContext() context.Context {
 	return service.WindowContext(nil)
 }
 
-// sendToCurrent forwards a menu action to the focused document window.
+// sendToCurrent 將選單操作轉送至目前聚焦的文件視窗。
 func (a *docApp) sendToCurrent(action string) {
 	w, ok := a.app.Window.Current().(*application.WebviewWindow)
 	if !ok || w == nil {
@@ -413,8 +427,8 @@ func (a *docApp) sendToCurrent(action string) {
 	}
 }
 
-// initialDocument is empty, except in bench mode or when fake data is
-// requested via WW_FAKE_ROWS / WW_FAKE_COLS.
+// initialDocument 預設建立空白文件；benchmark 模式或透過
+// WW_FAKE_ROWS／WW_FAKE_COLS 指定模擬資料時，則填入測試資料。
 func initialDocument() *document.Document {
 	rows, cols := envInt("WW_FAKE_ROWS", 0), envInt("WW_FAKE_COLS", 0)
 	if os.Getenv("WW_BENCH") == "1" {
@@ -441,10 +455,9 @@ type appMenus struct {
 	recent     *application.Menu
 }
 
-// buildMenu creates the menu bar. Custom items forward an action to the
-// focused window, which commits any in-progress edit before acting; the
-// clipboard items use native roles so text fields keep working (the
-// grid handles the resulting copy/cut/paste events).
+// buildMenu 建立選單列。自訂項目會將操作轉送至聚焦視窗，
+// 由視窗先提交進行中的編輯，再執行操作。剪貼簿項目使用 native roles，
+// 確保文字輸入欄位可正常運作；格線則處理對應的 copy／cut／paste 事件。
 func buildMenu(a *docApp) *appMenus {
 	send := func(action string) func(*application.Context) {
 		return func(*application.Context) { a.sendToCurrent(action) }
@@ -566,7 +579,7 @@ func buildMenu(a *docApp) *appMenus {
 	return m
 }
 
-// setRecent rebuilds 最近使用的檔案; it must run on the main thread.
+// setRecent 重建「最近使用的檔案」選單，必須在 main thread 執行。
 func (m *appMenus) setRecent(a *docApp, files []string) {
 	m.recent.Clear()
 	if len(files) == 0 {
@@ -588,8 +601,8 @@ func (m *appMenus) setRecent(a *docApp, files []string) {
 	m.root.Update()
 }
 
-// update must run on the main thread (docApp.updateMenus). The items
-// change in place, so the menu is not rebuilt.
+// update 必須由 docApp.updateMenus 在 main thread 呼叫。
+// 直接修改既有項目，不重建選單。
 func (m *appMenus) update(st service.DocState) {
 	m.undo.SetLabel(withAction("復原", st.UndoLabel)).SetEnabled(st.CanUndo)
 	m.redo.SetLabel(withAction("重做", st.RedoLabel)).SetEnabled(st.CanRedo)
@@ -604,7 +617,7 @@ func withAction(verb, label string) string {
 
 func applicationDisplayName() string { return T("旺-Sheet") }
 
-// T translates a UI string (menus are rebuilt when the language changes).
+// T 翻譯 UI 字串；切換語系時會重建選單。
 func T(s string) string { return i18n.T(s) }
 
 func envInt(key string, def int) int {

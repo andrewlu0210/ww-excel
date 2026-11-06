@@ -1,4 +1,8 @@
 // View zoom never changes workbook geometry or stored object sizes.
+// Workbook geometry uses 96-DPI pixels; Excel for Mac displays at 72 DPI.
+// Apply this only to the view so file sizes and print output stay unchanged.
+export const WORKSHEET_DISPLAY_SCALE = 72 / 96;
+
 export const MIN_ZOOM = 10;
 export const MAX_ZOOM = 400;
 
@@ -14,14 +18,14 @@ export function parseZoom(text: string, previous: number): number {
 // Include headers/frozen panes in logical dimensions and leave room for borders.
 export function fitZoom(viewportWidth: number, viewportHeight: number, width: number, height: number): number {
   if (width <= 0 || height <= 0) return 100;
-  return normalizeZoom(Math.floor(Math.min((viewportWidth - 4) / width, (viewportHeight - 4) / height) * 100));
+  return normalizeZoom(Math.floor(Math.min((viewportWidth - 4) / width, (viewportHeight - 4) / height) * 100 / WORKSHEET_DISPLAY_SCALE));
 }
 
 export class ZoomTransform {
   readonly scale: number;
 
   constructor(percent: number) {
-    this.scale = normalizeZoom(percent) / 100;
+    this.scale = normalizeZoom(percent) / 100 * WORKSHEET_DISPLAY_SCALE;
   }
 
   toScreen(value: number): number { return value * this.scale; }

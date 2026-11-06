@@ -14,6 +14,7 @@ declare module "@wailsio/runtime" {
         interface CustomEvents {
             "bench:block": service$0.BenchEvent;
             "cells:changed": service$0.CellsChanged;
+            "doc:loading": service$0.FileLoading;
             "doc:reset": service$0.DocState;
             "doc:state": service$0.DocState;
             "layout:changed": service$0.LayoutChanged;

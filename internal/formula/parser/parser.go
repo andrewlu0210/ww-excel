@@ -38,18 +38,25 @@ const (
 )
 
 type parser struct {
-	toks []lexer.Token
-	pos  int
+	depth int
+	toks  []lexer.Token
+	pos   int
 }
 
 // Parse parses formula text without the leading "=". Missing closing
 // parentheses at the end are added, as Excel does.
 func Parse(src string) (ast.Node, error) {
+	if len(src) > 64<<10 {
+		return nil, &Error{Msg: "公式長度超過安全限制（65536 bytes）"}
+	}
 	toks, err := lexer.Tokenize(src)
 	if err != nil {
 		if le, ok := err.(*lexer.Error_); ok {
 			return nil, &Error{Pos: le.Pos, Msg: le.Error()}
 		}
+		return nil, err
+	}
+	if err := checkTokens(toks); err != nil {
 		return nil, err
 	}
 	p := &parser{toks: toks}
@@ -107,6 +114,11 @@ func infixBP(t lexer.Token) int {
 }
 
 func (p *parser) expr(rbp int) (ast.Node, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > 128 {
+		return nil, &Error{Msg: "公式巢狀深度超過安全限制（128）"}
+	}
 	left, err := p.prefix()
 	if err != nil {
 		return nil, err
@@ -304,4 +316,32 @@ func (p *parser) arrayElement() (ast.Node, error) {
 		return ast.Error{Code: t.Text}, nil
 	}
 	return nil, p.errf(t, "陣列常數只能包含數字、文字、邏輯值或錯誤值")
+}
+
+// CheckResources bounds parser and AST work even for unsupported formulas.
+func CheckResources(src string) error {
+	if len(src) > 64<<10 {
+		return &Error{Msg: "公式長度超過安全限制（65536 bytes）"}
+	}
+	toks, _ := lexer.Tokenize(src)
+	return checkTokens(toks)
+}
+
+func checkTokens(toks []lexer.Token) error {
+	if len(toks) > 4096 {
+		return &Error{Msg: "公式 token 數超過安全限制（4096）"}
+	}
+	depth := 0
+	for _, t := range toks {
+		switch t.Kind {
+		case lexer.LParen, lexer.LBrace:
+			depth++
+		case lexer.RParen, lexer.RBrace:
+			depth--
+		}
+		if depth > 128 {
+			return &Error{Msg: "公式巢狀深度超過安全限制（128）"}
+		}
+	}
+	return nil
 }
