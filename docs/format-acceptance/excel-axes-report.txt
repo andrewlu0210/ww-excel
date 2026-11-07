@@ -1,0 +1,6 @@
+Excel 16.114.3
+O1048576 fill=2552550, font=Arial, italic=true
+O900001 fill=2552550, font=Arial, italic=true
+XFD146 fill=017680, font=Calibri, italic=false
+O146 fill=017680, font=Arial, italic=true
+J141 fill=2551920, font=Calibri, italic=false

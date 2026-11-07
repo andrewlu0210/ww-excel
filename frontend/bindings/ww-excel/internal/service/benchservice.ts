@@ -5,6 +5,7 @@
  * BenchService exposes IPC probes used by the v0.1 performance harness.
  * Bench mode is enabled with WW_BENCH=1; results are written to
  * WW_BENCH_OUT (default docs/perf-latest.md) and the app quits.
+ * Normal windows may query modes; all probes and outputs require a test mode.
  * @module
  */
 

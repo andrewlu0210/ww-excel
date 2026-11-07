@@ -1,3 +1,5 @@
+import { paintCellFill } from './cellFills';
+import { BORDER_WIDTH, BORDER_DASH, slantedBorderSegments } from './borders';
 import type { BorderLineDTO } from '../../bindings/ww-excel/internal/service/models';
 import { styleStore, type StyleRender } from '../stores/styles';
 import type { BlockCache, CellView } from '../stores/viewportCache';
@@ -229,18 +231,6 @@ function contrastText(fill: string): string {
   return lum > 0.55 ? '#1f1f1f' : '#f2f2f2';
 }
 
-const BORDER_WIDTH: Record<string, number> = { medium: 2, thick: 3, double: 3, mediumDashed: 2, mediumDashDot: 2, mediumDashDotDot: 2 };
-const BORDER_DASH: Record<string, number[]> = {
-  dashed: [3, 2],
-  dotted: [1, 1],
-  hair: [1, 1],
-  mediumDashed: [6, 2],
-  dashDot: [6, 2, 2, 2],
-  mediumDashDot: [6, 2, 2, 2],
-  dashDotDot: [6, 2, 2, 2, 2, 2],
-  mediumDashDotDot: [6, 2, 2, 2, 2, 2],
-  slantDashDot: [6, 2, 2, 2],
-};
 
 export class GridRenderer extends Layer {
   private richLines = new Map<string, RichLine[]>();
@@ -472,7 +462,9 @@ export class GridRenderer extends Layer {
         const left = xs[c - vr.c0];
         const right = xs[c - vr.c0 + 1];
         const st = styleStore.get(this.styleAt(r, c));
-        if (st?.fill) {
+        if (st?.dto.fillSpec?.kind) {
+          paintCellFill(ctx,st.dto.fillSpec,left,top,right-left,bottom-top);
+        } else if (st?.fill) {
           ctx.fillStyle = st.fill;
           this.fillBackground(left, top, right - left, bottom - top);
         }
@@ -485,7 +477,8 @@ export class GridRenderer extends Layer {
       const st = styleStore.get(this.styleAt(m.r0, m.c0));
       ctx.fillStyle = st?.fill ?? this.theme.gridBg;
       // Explicit fills cover outer gridlines as well as the merged interior.
-      if (st?.fill) this.fillBackground(rc.x, rc.y, rc.w, rc.h);
+      if (st?.dto.fillSpec?.kind) paintCellFill(ctx,st.dto.fillSpec,rc.x,rc.y,rc.w,rc.h);
+      else if (st?.fill) this.fillBackground(rc.x, rc.y, rc.w, rc.h);
       else ctx.fillRect(rc.x, rc.y, rc.w - 1, rc.h - 1);
     }
   }
@@ -497,6 +490,15 @@ export class GridRenderer extends Layer {
     ctx.strokeStyle = b.color ? `#${b.color}` : this.theme.cellText;
     ctx.lineWidth = b.style === 'double' ? 1 : width;
     ctx.setLineDash(BORDER_DASH[b.style] ?? []);
+    if (b.style === 'slantDashDot') {
+      ctx.beginPath();
+      for (const [ax, ay, bx, by] of slantedBorderSegments(x0, y0, x1, y1)) {
+        ctx.moveTo(ax, ay); ctx.lineTo(bx, by);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
     const horizontal = y0 === y1;
     const draw = (offset: number) => {
       ctx.beginPath();
@@ -504,6 +506,9 @@ export class GridRenderer extends Layer {
         const y = this.snap(y0 + offset);
         ctx.moveTo(x0, y);
         ctx.lineTo(x1, y);
+      } else if (x0 !== x1) {
+        const length=Math.hypot(x1-x0,y1-y0),nx=-(y1-y0)/length,ny=(x1-x0)/length;
+        ctx.moveTo(x0+nx*offset,y0+ny*offset);ctx.lineTo(x1+nx*offset,y1+ny*offset);
       } else {
         const x = this.snap(x0 + offset);
         ctx.moveTo(x, y0);
@@ -528,6 +533,8 @@ export class GridRenderer extends Layer {
     this.line(d.bottom, left - 1, bottom - 1, right, bottom - 1);
     this.line(d.left, left - 1, top - 1, left - 1, bottom);
     this.line(d.right, right - 1, top - 1, right - 1, bottom);
+    if(d.diagonalUp && d.diagonal) this.line(d.diagonal,left, bottom,right,top);
+    if(d.diagonalDown && d.diagonal) this.line(d.diagonal,left,top,right,bottom);
   }
 
   private drawBorders(vr: VisibleRange, xs: number[], ys: number[], covered: Set<number>, merges: Range[], sx: number, sy: number): void {
@@ -541,7 +548,7 @@ export class GridRenderer extends Layer {
         if (id === 0) continue;
         const st = styleStore.get(id);
         const d = st?.dto;
-        if (!d || !(d.top.style || d.bottom.style || d.left.style || d.right.style)) continue;
+        if (!d || !(d.top.style || d.bottom.style || d.left.style || d.right.style || d.diagonalUp || d.diagonalDown)) continue;
         this.cellBorders(st, xs[c - vr.c0], top, xs[c - vr.c0 + 1], bottom);
       }
     }

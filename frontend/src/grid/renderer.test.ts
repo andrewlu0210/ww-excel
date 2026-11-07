@@ -8,8 +8,8 @@ import type {BlockCache,CellView} from '../stores/viewportCache';
 function renderCell(overrides:Partial<CellView>,merged=false,columnWidth=120) {
  vi.stubGlobal('document',{documentElement:{}});
  vi.stubGlobal('getComputedStyle',()=>({getPropertyValue:()=> '#202020'}));
- const texts:string[]=[],fills:string[]=[];
- const target={fillStyle:'',measureText:(s:string)=>({width:s.length*7}),fillText:(s:string)=>texts.push(s),fill(){fills.push(this.fillStyle)},fillRect(){fills.push(this.fillStyle)}};
+ const texts:string[]=[],fills:string[]=[],segments:number[][]=[];let lastPoint=[0,0];
+ const target={moveTo:(x:number,y:number)=>{lastPoint=[x,y]},lineTo:(x:number,y:number)=>segments.push([...lastPoint,x,y]),fillStyle:'',measureText:(s:string)=>({width:s.length*7}),fillText:(s:string)=>texts.push(s),fill(){fills.push(this.fillStyle)},fillRect(){fills.push(this.fillStyle)}};
  const ctx=new Proxy(target,{get(t,k){return k in t ? t[k as keyof typeof t] : ()=>{}}}) as unknown as CanvasRenderingContext2D;
  const canvas={getContext:()=>ctx,style:{}} as unknown as HTMLCanvasElement;
  const cell:CellView={text:'42',numeric:true,center:false,style:0,color:null,bar:null,...overrides};
@@ -18,7 +18,7 @@ function renderCell(overrides:Partial<CellView>,merged=false,columnWidth=120) {
  if(merged) renderer.look.merges=[{r0:0,c0:0,r1:0,c1:1}];
  renderer.resize((merged?2:1)*columnWidth+50,60,1);
  renderer.draw(0,0,single({row:0,col:0}));
- return {texts,fills};
+ return {texts,fills,segments};
 }
 
 afterEach(()=>vi.unstubAllGlobals());
@@ -83,4 +83,52 @@ it.each(ICON_SETS)('shows or hides values correctly for $id, including merged an
  expect(renderCell({hideValue:true,icon:{set:id,index:0}},true).texts).not.toContain('42');
  const narrow=renderCell({hideValue:false,icon:{set:id,index:0}},false,20).texts;
  expect(narrow).not.toContain('42');expect(narrow.some(s=>s.includes('#'))).toBe(false);
+});
+
+import {styleStore} from '../stores/styles';
+import type {StyleDTO} from '../bridge/sheet';
+it.each([
+ ['double',1,[],2],['thick',3,[],1],['dotted',1,[1,1],1],['mediumDashDot',2,[6,2,2,2],1],
+] as const)('draws edited %s borders with the chosen color and stroke', (style,width,dash,count)=>{
+ vi.stubGlobal('document',{documentElement:{}});
+ vi.stubGlobal('getComputedStyle',()=>({getPropertyValue:()=> '#202020'}));
+ const strokes:{color:string;width:number;dash:number[]}[]=[];
+ const target={strokeStyle:'',lineWidth:1,dash:[] as number[],measureText:(s:string)=>({width:s.length*7}),setLineDash(d:number[]){this.dash=[...d]},stroke(){if(this.strokeStyle==='#A1B2C3')strokes.push({color:this.strokeStyle,width:this.lineWidth,dash:[...this.dash]})}};
+ const ctx=new Proxy(target,{get(t,k){return k in t?t[k as keyof typeof t]:()=>{}}}) as unknown as CanvasRenderingContext2D;
+ const canvas={getContext:()=>ctx,style:{}} as unknown as HTMLCanvasElement;
+ const dto:StyleDTO={id:201,font:{name:'',size:11},top:{},bottom:{style,color:'A1B2C3'},left:{},right:{}};
+ styleStore.merge([dto]);
+ const cell:CellView={text:'',numeric:false,center:false,style:201,color:null,bar:null};
+ const cache={blockRows:64,blockCols:32,ensure(){},cell:(r:number,c:number)=>r===0&&c===0?cell:undefined} as unknown as BlockCache;
+ const renderer=new GridRenderer(canvas,new AxisLayout(1,30),new AxisLayout(1,100),cache);
+ renderer.resize(160,90,1);renderer.draw(0,0,single({row:0,col:0}));
+ expect(strokes).toHaveLength(count);
+ expect(strokes.every(s=>s.width===width&&JSON.stringify(s.dash)===JSON.stringify(dash))).toBe(true);
+});
+
+it.each(['112233','FFFFFF',''])('draws solid fill %s independently of the grid background', fill=>{
+ styleStore.merge([{id:202,font:{name:'',size:11},fill,top:{},bottom:{},left:{},right:{}}]);
+ for(const merged of [false,true]) {
+  const result=renderCell({style:202},merged);
+  if(fill)expect(result.fills).toContain(`#${fill}`);
+  else expect(result.fills).not.toContain('#FFFFFF');
+ }
+});
+
+
+it.each([false,true])('draws both diagonal directions across the complete logical cell (merged=%s)',merged=>{
+ styleStore.merge([{id:303,font:{name:'',size:11},top:{},bottom:{},left:{},right:{},diagonal:{style:'thin',color:'FF0000'},diagonalUp:true,diagonalDown:true}]);
+ const {segments}=renderCell({style:303},merged);
+ const width=merged?240:120;
+ expect(segments.some(([x,y,a,b])=>Math.abs(a-x)===width && b-y===30)).toBe(true);
+ expect(segments.some(([x,y,a,b])=>Math.abs(a-x)===width && b-y===-30)).toBe(true);
+});
+
+it('keeps double diagonal strokes separated perpendicular to the line',()=>{
+ styleStore.merge([{id:304,font:{name:'',size:11},top:{},bottom:{},left:{},right:{},diagonal:{style:'double'},diagonalDown:true}]);
+ const strokes=renderCell({style:304}).segments.filter(([x,y,a,b])=>Math.abs(a-x-120)<1e-6 && Math.abs(b-y-30)<1e-6);
+ expect(strokes).toHaveLength(2);
+ const [a,b]=strokes,dx=b[0]-a[0],dy=b[1]-a[1];
+ expect(Math.hypot(dx,dy)).toBeCloseTo(2);
+ expect(dx*120+dy*30).toBeCloseTo(0);
 });

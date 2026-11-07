@@ -1,6 +1,7 @@
 // Workbook style table, synced from Go: styles arrive with block fetches,
 // layout fetches and diff events, and are never removed while a document
 // is open. Render info (CSS font, colors) is derived once per style.
+import { representativeFill } from '../grid/cellFills';
 import type { StyleDTO } from '../bridge/sheet';
 import { ensureFont, onFontsLoaded } from './fontLoader';
 import { fontFamilies } from './fonts';
@@ -66,7 +67,7 @@ export class StyleStore {
         font: css,
         fontPx: px,
         color: s.font.color ? `#${s.font.color}` : null,
-        fill: s.fill ? `#${s.fill}` : null,
+        fill: s.fill ? `#${s.fill}` : representativeFill(s.fillSpec),
       };
     }
     this.version++;

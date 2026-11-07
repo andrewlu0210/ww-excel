@@ -1,9 +1,16 @@
 <script lang="ts">
   import { t, language } from './i18n';
+  import type { SelectionFormatDTO } from '../bindings/ww-excel/internal/service/models';
   import { languageSelfTest } from './bench/languageSelfTest';
   import { onMount, tick } from 'svelte';
   import { runBench } from './bench/runBench';
   import { runSelfTest, selfTestTimeoutReport } from './bench/selfTest';
+  import { cellFormatDialogSelfTest } from './bench/cellFormatDialogSelfTest';
+  import { borderDialogSelfTest } from './bench/borderDialogSelfTest';
+  import { fillDialogSelfTest } from './bench/fillDialogSelfTest';
+  import { mixedFormatSelfTest } from './bench/mixedFormatSelfTest';
+  import { advancedFormatSelfTest } from './bench/advancedFormatSelfTest';
+  import { formatAcceptanceSelfTest } from './bench/formatAcceptanceSelfTest';
   import { workbookCompatibilityTest } from './bench/workbookCompatibilityTest';
   import {
     benchApi,
@@ -101,6 +108,8 @@
   let canRedo = $state(false);
   let circular = $state('');
   let numberDialog = $state(false);
+  let numberDialogFormat = $state<SelectionFormatDTO | null>(null);
+  let numberDialogRequest = 0;
   let findPanel = $state<{ replace: boolean } | null>(null);
   let sortDialog = $state<{ range: RangeDTO; header: boolean } | null>(null);
   let pasteDialog = $state(false);
@@ -188,7 +197,7 @@
         void addSheet();
         break;
       case 'formatCells':
-        numberDialog = true;
+        void openNumberDialog();
         break;
       case 'find':
       case 'replace':
@@ -414,6 +423,21 @@
     notify(await sheetView?.applyFormat(patch));
   }
 
+  async function openNumberDialog(): Promise<void> {
+    const request = ++numberDialogRequest;
+    const view = sheetView;
+    if (!view) return;
+    await view.whenIdle();
+    const selection = view.getSelection(), targetSheet = active;
+    try {
+      const summary = await sheetApi.selectionFormat(targetSheet, selection.ranges.map(r => ({ r0: r.r0, c0: r.c0, r1: r.r1, c1: r.c1 })));
+      if (request !== numberDialogRequest || view !== sheetView || targetSheet !== active || selection !== view.getSelection()) return;
+      if (!summary) return;
+      numberDialogFormat = summary;
+      numberDialog = true;
+    } catch (error) { notify(error instanceof Error ? error.message : String(error)); }
+  }
+
   async function previewFormat(code: string): Promise<string> {
     const pos = sheetView?.getSelection().active ?? { row: 0, col: 0 };
     return sheetApi.previewFormat(active, pos.row, pos.col, code);
@@ -505,7 +529,8 @@
         await wait(500);
         // Watchdog: a hung step must still produce a report and quit.
         // A run takes about 45s; the first run after a build is slower.
-        const timeout = wait(120_000).then(selfTestTimeoutReport);
+        let timedOut = false;
+        const timeout = wait(120_000).then(() => { timedOut = true; return selfTestTimeoutReport(); });
         // Sheet operations remount the sheet view; the driver always
         // talks to the current one.
         const driver = new Proxy({} as NonNullable<typeof sheetView>, {
@@ -517,9 +542,17 @@
         });
         const fixture = await benchApi.fixturePath();
         const result = await Promise.race([fixture ? workbookCompatibilityTest(driver, fixture) : language() !== 'zh-TW' ? languageSelfTest(() => onAppAction('preferences')) : runSelfTest(driver, SHEET), timeout]);
+        if (timedOut) { await benchApi.report(result.markdown); return; }
         const g = sheetView!.getGrid()!;
         await benchApi.snapshot('selftest', g.snapshot());
-        await benchApi.report(result.markdown);
+        const formatReport = !fixture && language() === 'zh-TW' ? await cellFormatDialogSelfTest(driver, active) : '';
+        const borderReport = !fixture && language() === 'zh-TW' ? await borderDialogSelfTest(driver, active) : '';
+        if (borderReport) await benchApi.snapshot('selftest-borders', sheetView!.getGrid()!.snapshot());
+        const fillReport = !fixture && language() === 'zh-TW' ? await fillDialogSelfTest(driver, active) : '';
+        const mixedReport = !fixture && language() === 'zh-TW' ? await mixedFormatSelfTest(driver, active) : '';
+        const acceptanceReport = !fixture && language() === 'zh-TW' ? await formatAcceptanceSelfTest(driver, active) : '';
+        const advancedReport = !fixture && language() === 'zh-TW' ? await advancedFormatSelfTest(driver, active) : '';
+        await benchApi.report(result.markdown + formatReport + borderReport + fillReport + mixedReport + acceptanceReport + advancedReport);
       }
     })();
 
@@ -544,7 +577,7 @@
       onformat={(p) => void format(p)}
       onmerge={(center) => void sheetView?.mergeCells(center).then(notify)}
       onclear={(m) => void sheetView?.clearRanges(m)}
-      onnumberdialog={() => (numberDialog = true)}
+      onnumberdialog={() => void openNumberDialog()}
     />
     </Ribbon>
     {#key generation}
@@ -629,11 +662,15 @@
 
   {#if numberDialog}
     <NumberFormatDialog
-      code={activeStyle?.numFmt ?? ''}
+      style={numberDialogFormat?.style ?? null}
+      mixed={numberDialogFormat?.mixed ?? []}
+      borderOriginal={numberDialogFormat?.borders}
+      selection={sheetView?.getSelection().ranges ?? []}
+      merges={sheetView?.getGrid()?.mergedRanges() ?? []}
       preview={previewFormat}
-      onapply={(code) => {
+      onapply={(patch) => {
         numberDialog = false;
-        void format({ numFmt: code, label: t('數值格式') });
+        void format(patch);
       }}
       onclose={() => {
         numberDialog = false;

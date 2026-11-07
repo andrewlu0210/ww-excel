@@ -118,6 +118,7 @@ func loadContext(ctx context.Context, f *excelize.File, file string) (*model.Wor
 	}
 	def, _ := f.GetStyle(0)
 	defStyle := fromExcelize(f, def)
+	readCellFill(f, 0, &defStyle)
 	if defStyle.Font.Name == "" {
 		defStyle.Font = model.DefaultFont
 	}
@@ -171,6 +172,7 @@ func (r *reader) style(id int) uint32 {
 	var st model.Style
 	if err == nil {
 		st = fromExcelize(r.f, xs)
+		readCellFill(r.f, id, &st)
 	}
 	def := r.wb.Styles.Default()
 	if st.Font.Name == "" {

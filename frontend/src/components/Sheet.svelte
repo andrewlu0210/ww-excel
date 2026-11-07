@@ -41,6 +41,9 @@
   import { HEADER_H, metrics, REF_COLORS, type Highlight } from '../grid/renderer';
   import { LINE_HEIGHT, TextCache } from '../grid/text';
   import { styleStore } from '../stores/styles';
+  import { ensureFont } from '../stores/fontLoader';
+  import { fontFamilies } from '../stores/fonts';
+  import { measureFormatRows } from '../grid/formatRows';
   import { drawShape } from '../shapes/render';
   import {
     clampPos,
@@ -350,6 +353,8 @@
   // The active cell's style, for the toolbar.
   $effect(() => {
     void styleTick;
+    // A fetched cache block arrives after the style table notification.
+    void viewTick;
     const { row, col } = selection.active;
     const id = grid?.styleAt(row, col) ?? 0;
     void richTick;
@@ -1254,6 +1259,7 @@
     void refreshObjects();
   }
 
+  let disposed = false;
   onMount(() => {
     const offs = [
       sheetApi.onCellsChanged(onCellsChanged),
@@ -1288,7 +1294,7 @@
         startEditing('edit', ce.pos, ce.text, ce.caret);
       }
     }
-    return () => offs.forEach((off) => off());
+    return () => { disposed = true; offs.forEach((off) => off()); };
   });
 
   // ---- Clipboard, fill, structure, sort & filter (v0.5) ----
@@ -1664,8 +1670,41 @@
       else if (e.area === 'col') setSelection(selectCols(selection, e.pos.col, e.pos.col, lim, false, selection.active.row));
       else if (e.area === 'cell') setSelection(singleAt(e.pos));
     }
-    const base = root.getBoundingClientRect();
-    contextMenu = { x: e.x - base.left, y: e.y - base.top, area: e.area };
+    contextMenu = { x: e.x, y: e.y, area: e.area };
+  }
+
+  // Keep the menu outside the clipped sheet and within the WebView viewport.
+  function placeContextMenu(node: HTMLUListElement, at: { x: number; y: number }) {
+    document.body.appendChild(node);
+    const place = () => {
+      const bounds = node.getBoundingClientRect();
+      node.style.left = `${Math.max(4, Math.min(at.x, window.innerWidth - bounds.width - 4))}px`;
+      node.style.top = `${Math.max(4, Math.min(at.y, window.innerHeight - bounds.height - 4))}px`;
+    };
+    const close = () => { contextMenu = null; focus(); };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+    };
+    const wheel = (event: Event) => {
+      if (event.target instanceof Node && node.contains(event.target)) return;
+      close();
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(node);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', key, true);
+    document.addEventListener('wheel', wheel, true);
+    return {
+      update(next: { x: number; y: number }) { at = next; place(); },
+      destroy() {
+        observer.disconnect();
+        window.removeEventListener('resize', close);
+        window.removeEventListener('keydown', key, true);
+        document.removeEventListener('wheel', wheel, true);
+        node.remove();
+      },
+    };
   }
 
   type MenuItem = { label: string; action: MenuAction; key?: string } | null;
@@ -1861,13 +1900,22 @@
       return null;
     }
     if (editing) commit('stay');
-    const ranges = selection.ranges.map(toDTO);
+    const ranges = selection.ranges.map(toDTO), targetSheet = sheet;
     let err: string | null = null;
     await enqueue(async () => {
-      err = await sheetApi.format(sheet, ranges, patch);
+      if (disposed) return;
+      try {
+        let submitted = patch;
+        if (['fontName', 'fontSize', 'bold', 'italic', 'wrap', 'numFmt'].some(key => key in patch)) {
+          const rows = await sheetApi.formatRows(targetSheet, ranges, patch);
+          const names = new Set(rows.flatMap(row => (row.cells ?? []).flatMap(cell => [cell.style.font.name, ...(cell.runs ?? []).map(run => run.font.name)])));
+          await Promise.all([...names].flatMap(name => fontFamilies(name).map(ensureFont)));
+          const autoRows = measureFormatRows(rows, (font, text) => measurer().width(font, text));
+          submitted = { ...patch, autoRows };
+        }
+        if (!disposed) err = await sheetApi.format(targetSheet, ranges, submitted);
+      } catch (error) { err = error instanceof Error ? error.message : String(error); }
     });
-    // Bigger fonts and wrapping make rows taller, as in Excel.
-    if (!err && (patch.fontSize || patch.wrap || patch.fontName)) await autofitRowsOf(selection.ranges, true);
     focus();
     return err;
   }
@@ -2209,7 +2257,7 @@
         contextMenu = null;
       }}
     ></div>
-    <ul class="context-menu" role="menu" style:left="{contextMenu.x}px" style:top="{contextMenu.y}px">
+    <ul class="context-menu" role="menu" use:placeContextMenu={contextMenu}>
       {#each contextItems as item, i (i)}
         {#if item}
           <li role="none">
@@ -2601,9 +2649,13 @@
     z-index: 20;
   }
   .context-menu {
-    position: absolute;
-    z-index: 21;
-    min-width: 200px;
+    position: fixed;
+    z-index: 100;
+    min-width: min(200px, calc(100vw - 8px));
+    max-width: calc(100vw - 8px);
+    max-height: calc(100vh - 8px);
+    box-sizing: border-box;
+    overflow: auto;
     margin: 0;
     padding: 4px;
     list-style: none;

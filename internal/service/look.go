@@ -18,9 +18,9 @@ type sheetLook struct {
 }
 
 type lookKey struct {
-	base uint32
-	over model.CFFormat
-	head bool
+	base            uint32
+	over            model.CFFormat
+	conditionalFill bool
 }
 
 // Table style colors: header fill and banded row fill.
@@ -82,7 +82,7 @@ func (l *sheetLook) areas() []model.Range {
 // style returns the style ID to show at a cell, with a data bar.
 func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, bar float64, barColor string, any bool, visual *document.CFResult) {
 	var over model.CFFormat
-	head := false
+	conditionalFill := false
 	for _, t := range l.tables {
 		if !t.Range.Contains(row, col) {
 			continue
@@ -91,7 +91,9 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 			// Apply only properties supplied by the custom table style.
 			if a := t.Appearance; a != nil {
 				st := l.wb.StyleTable().Get(base)
-				st.Fill = a.FillAt(t, row, st.Fill)
+				if !st.HasFill() {
+					st.Fill = a.FillAt(t, row, st.Fill)
+				}
 				st.Font = a.Whole.Resolve(st.Font)
 				if t.FirstColumn && col == t.Range.C0 {
 					st.Font = a.First.Resolve(st.Font)
@@ -123,7 +125,6 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 		switch {
 		case row == t.Range.R0:
 			over = model.CFFormat{Fill: p.header, Color: "FFFFFF", Bold: true}
-			head = true
 		case t.TotalsRow && row == t.Range.R1:
 			over = model.CFFormat{Bold: true}
 		case !t.NoBands && (row-t.Range.R0)%2 == 1:
@@ -143,6 +144,7 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 			}
 			// Conditional formats win over the table style.
 			if cf.Fill != "" {
+				conditionalFill = true
 				over.Fill = cf.Fill
 			}
 			if cf.Color != "" {
@@ -158,15 +160,16 @@ func (l *sheetLook) style(row, col int, c model.Cell, base uint32) (st uint32, b
 	if !any || over == (model.CFFormat{}) {
 		return base, bar, barColor, any, visual
 	}
-	key := lookKey{base: base, over: over, head: head}
+	key := lookKey{base: base, over: over, conditionalFill: conditionalFill}
 	if id, ok := l.cache[key]; ok {
 		return id, bar, barColor, true, visual
 	}
 	s := l.wb.StyleTable().Get(base)
 	// Table styles sit under direct formatting; conditional formats
-	// and header colors are applied over it.
-	if over.Fill != "" && (s.Fill == "" || !head) {
+	// are applied over it.
+	if over.Fill != "" && (!s.HasFill() || conditionalFill) {
 		s.Fill = over.Fill
+		s.FillSpec = model.FillSpec{}
 	}
 	if over.Color != "" {
 		s.Font.Color = over.Color

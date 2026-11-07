@@ -45,7 +45,7 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	full := map[*model.Sheet]bool{}
 	if f == nil {
 		f = excelize.NewFile()
-		styleID, err := f.NewStyle(toExcelize(wb.StyleTable().Default()))
+		styleID, err := newCellStyle(f, wb.StyleTable().Default())
 		if err != nil {
 			return nil, err
 		}
@@ -109,6 +109,9 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	if err := preserveConditionalDetails(tmpName, wb); err != nil {
 		return nil, err
 	}
+	if err := w.writeAxisStyles(tmpName); err != nil {
+		return nil, err
+	}
 	if err := w.writeTabColors(tmpName); err != nil {
 		return nil, err
 	}
@@ -128,10 +131,12 @@ func Save(path string, wb *model.Workbook, src *excelize.File, ch Changes) (*exc
 	for _, sh := range wb.Sheets {
 		sh.SourceName = sh.Name
 	}
+	f.Path = path
 	return f, nil
 }
 
 type writer struct {
+	axisStyles map[*model.Sheet]axisStylePlan
 	tabColors  map[string]string
 	digitWidth float64
 	f          *excelize.File
@@ -309,7 +314,7 @@ func (w *writer) style(id uint32) (int, error) {
 	if x, ok := w.styles[id]; ok {
 		return x, nil
 	}
-	x, err := w.f.NewStyle(toExcelize(w.wb.StyleTable().Get(id)))
+	x, err := newCellStyle(w.f, w.wb.StyleTable().Get(id))
 	if err != nil {
 		return 0, err
 	}
@@ -515,51 +520,52 @@ func (w *writer) layout(sh *model.Sheet, old model.Layout) error {
 			return err
 		}
 	}
-	for _, run := range columnStyleRuns(old.ColStyles, l.ColStyles) {
-		x, err := w.style(run.style)
+	if w.axisStyles == nil {
+		w.axisStyles = map[*model.Sheet]axisStylePlan{}
+	}
+	plan := axisStylePlan{columns: map[int]int{}, rows: map[int]*int{}}
+	for col := range union(old.ColStyles, l.ColStyles) {
+		x, err := w.style(l.ColStyles[col])
 		if err != nil {
 			return err
 		}
-		name, _ := excelize.ColumnNumberToName(run.first + 1)
-		if run.last != run.first {
-			end, _ := excelize.ColumnNumberToName(run.last + 1)
-			name += ":" + end
-		}
-		if err := f.SetColStyle(sh.Name, name, x); err != nil {
-			return err
-		}
+		plan.columns[col] = x
 	}
 	for row := range union(old.RowStyles, l.RowStyles) {
-		x, err := w.style(l.RowStyles[row])
+		id, exists := l.RowStyles[row]
+		if !exists {
+			plan.rows[row] = nil
+			continue
+		}
+		if id == 0 {
+			id = w.wb.StyleTable().InternExplicit(w.wb.StyleTable().Get(0))
+		}
+		x, err := w.style(id)
 		if err != nil {
 			return err
 		}
-		if err := f.SetRowStyle(sh.Name, row+1, row+1, x); err != nil {
-			return err
+		plan.rows[row] = &x
+	}
+	w.axisStyles[sh] = plan
+	// Project inheritance onto existing cells only; never format blank coordinates
+	// merely because they precede a distant cell in the worksheet.
+	var axisErr error
+	sh.EachInRange(model.Range{R1: model.MaxRows - 1, C1: model.MaxCols - 1}, func(row, col int, c model.Cell) {
+		_, columnChanged := plan.columns[col]
+		_, rowChanged := plan.rows[row]
+		if axisErr != nil || !columnChanged && !rowChanged {
+			return
 		}
-	}
-	// Excelize's row/column style setters also overwrite existing cells.
-	// Restore explicit formats so painting default styles survives saving.
-	changedCols, changedRows := union(old.ColStyles, l.ColStyles), union(old.RowStyles, l.RowStyles)
-	var styleErr error
-	if len(changedCols) > 0 || len(changedRows) > 0 {
-		sh.EachInRange(model.Range{R1: model.MaxRows - 1, C1: model.MaxCols - 1}, func(row, col int, c model.Cell) {
-			_, colChanged := changedCols[col]
-			_, rowChanged := changedRows[row]
-			if styleErr != nil || c.S == 0 || !colChanged && !rowChanged {
-				return
-			}
-			x, err := w.style(c.S)
-			if err != nil {
-				styleErr = err
-				return
-			}
-			name, _ := excelize.CoordinatesToCellName(col+1, row+1)
-			styleErr = f.SetCellStyle(sh.Name, name, name, x)
-		})
-	}
-	if styleErr != nil {
-		return styleErr
+		x, err := w.style(sh.EffectiveStyle(row, col))
+		if err != nil {
+			axisErr = err
+			return
+		}
+		name, _ := excelize.CoordinatesToCellName(col+1, row+1)
+		axisErr = f.SetCellStyle(sh.Name, name, name, x)
+	})
+	if axisErr != nil {
+		return axisErr
 	}
 	cellName := func(r, c int) string { n, _ := excelize.CoordinatesToCellName(c+1, r+1); return n }
 	isIn := func(list []model.Range, m model.Range) bool {

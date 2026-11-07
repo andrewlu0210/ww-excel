@@ -535,6 +535,11 @@
     return cols.size(col);
   }
 
+  // Current merge geometry for range-aware formatting controls.
+  export function mergedRanges(): Range[] {
+    return look.merges;
+  }
+
   // Style ID in effect at a position (cell, row or column style).
   export function styleAt(row: number, col: number): number {
     return gridLayer?.styleAt(row, col) ?? 0;

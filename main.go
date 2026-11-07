@@ -36,7 +36,7 @@ var appIcon []byte
 
 // 建置時由 scripts/package.sh 透過 -ldflags "-X main.version=…" 設定。
 var (
-	version = "1.3.1"
+	version = "1.3.2"
 	// updateRepo 指定檢查 Releases 更新時使用的 GitHub repository。
 	updateRepo = "andrewlu0210/ww-excel"
 )

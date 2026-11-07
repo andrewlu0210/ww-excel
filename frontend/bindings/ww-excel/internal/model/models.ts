@@ -139,6 +139,23 @@ export interface ChartShadow {
 }
 
 /**
+ * FillSpec is comparable, including its canonical JSON stop list, so full
+ * styles remain safe map keys. The zero value keeps legacy solid fills intact.
+ */
+export interface FillSpec {
+    "kind"?: string;
+    "pattern"?: string;
+    "foreground"?: string;
+    "background"?: string;
+    "degree"?: number;
+    "left"?: number;
+    "right"?: number;
+    "top"?: number;
+    "bottom"?: number;
+    "stops"?: string;
+}
+
+/**
  * PathCmd is a custom geometry path command: moveTo, lnTo, cubicBezTo,
  * quadBezTo or close, with its points as x,y pairs.
  */

@@ -266,6 +266,10 @@ func (w *writer) pageSetup(sh *model.Sheet, old, cur *model.PageSetup) error {
 		scale := uint(ps.Scale)
 		opts.AdjustTo = &scale
 	}
+	fitToPage := ps.FitWide > 0 || ps.FitTall > 0
+	if err := w.f.SetSheetProps(sh.Name, &excelize.SheetPropsOptions{FitToPage: &fitToPage}); err != nil {
+		return err
+	}
 	if err := w.f.SetPageLayout(sh.Name, opts); err != nil {
 		return err
 	}

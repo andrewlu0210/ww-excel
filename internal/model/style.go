@@ -23,6 +23,8 @@ type BorderLine struct {
 
 type Borders struct {
 	Left, Right, Top, Bottom BorderLine
+	Diagonal                 BorderLine
+	DiagonalUp, DiagonalDown bool
 }
 
 // Align: H is left/center/right/fill/justify/... and V is
@@ -37,11 +39,12 @@ type Align struct {
 // Style is a complete cell format. It is comparable so identical styles
 // share one ID in the style table.
 type Style struct {
-	Font   Font
-	Fill   string // solid fill color, "" = none
-	Border Borders
-	Align  Align
-	NumFmt string // number format code, "" = General
+	Font     Font
+	Fill     string // solid fill color, "" = none
+	FillSpec FillSpec
+	Border   Borders
+	Align    Align
+	NumFmt   string // number format code, "" = General
 }
 
 // DefaultFont is Excel's default for new workbooks.

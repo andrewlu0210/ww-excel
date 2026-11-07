@@ -1,0 +1,20 @@
+Excel 16.114.3
+B3 pattern=pattern gray 75, diagonalUp=dash dot, diagonalDown=dash dot
+B4 pattern=pattern gray 50, diagonalUp=dash dot, diagonalDown=dash dot
+B5 pattern=pattern gray 25, diagonalUp=dash dot, diagonalDown=dash dot
+B6 pattern=pattern gray 16, diagonalUp=dash dot, diagonalDown=dash dot
+B7 pattern=pattern gray 8, diagonalUp=dash dot, diagonalDown=dash dot
+B8 pattern=pattern horizontal, diagonalUp=dash dot, diagonalDown=dash dot
+B9 pattern=pattern vertical, diagonalUp=dash dot, diagonalDown=dash dot
+B10 pattern=pattern down, diagonalUp=dash dot, diagonalDown=dash dot
+B11 pattern=pattern up, diagonalUp=dash dot, diagonalDown=dash dot
+B12 pattern=pattern checker, diagonalUp=dash dot, diagonalDown=dash dot
+B13 pattern=pattern semi gray 75, diagonalUp=dash dot, diagonalDown=dash dot
+B14 pattern=pattern light horizontal, diagonalUp=dash dot, diagonalDown=dash dot
+B15 pattern=pattern light vertical, diagonalUp=dash dot, diagonalDown=dash dot
+B16 pattern=pattern light down, diagonalUp=dash dot, diagonalDown=dash dot
+B17 pattern=pattern light up, diagonalUp=dash dot, diagonalDown=dash dot
+B18 pattern=pattern grid, diagonalUp=dash dot, diagonalDown=dash dot
+B19 pattern=pattern criss cross, diagonalUp=dash dot, diagonalDown=dash dot
+B20 pattern=pattern linear gradient, diagonalUp=dash dot, diagonalDown=dash dot
+B21 pattern=pattern rectangular gradient, diagonalUp=dash dot, diagonalDown=dash dot

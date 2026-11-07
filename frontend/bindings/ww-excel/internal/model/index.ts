@@ -16,6 +16,7 @@ export type {
     ChartPlotArea,
     ChartPointStyle,
     ChartShadow,
+    FillSpec,
     PathCmd,
     Pivot,
     PivotButton,

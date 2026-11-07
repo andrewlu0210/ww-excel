@@ -179,6 +179,11 @@ func ReadContext(ctx context.Context, r io.Reader) (*model.Workbook, error) {
 		return nil, fmt.Errorf(".wwx has no sheets")
 	}
 
+	for _, st := range doc.Styles {
+		if _, err := model.NormalizeFillSpec(st.FillSpec); err != nil {
+			return nil, err
+		}
+	}
 	wb := &model.Workbook{}
 	if len(doc.Styles) > 0 {
 		wb.Styles = model.NewStyleTable(doc.Styles[0])

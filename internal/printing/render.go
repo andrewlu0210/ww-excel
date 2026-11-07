@@ -8,6 +8,7 @@ import (
 	_ "image/gif" // picture decoders
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -62,15 +63,16 @@ func findFont(paths []string) string {
 }
 
 type renderer struct {
-	pdf     *gopdf.GoPdf
-	sh      *model.Sheet
-	plan    *Plan
-	src     Source
-	info    Info
-	bold    bool // a Latin bold face is available
-	italic  bool
-	current string // font key in use
-	size    float64
+	pdf        *gopdf.GoPdf
+	sh         *model.Sheet
+	plan       *Plan
+	src        Source
+	info       Info
+	bold       bool // a Latin bold face is available
+	italic     bool
+	current    string // font key in use
+	fillImages map[fillImageKey]image.Image
+	size       float64
 }
 
 // Render draws the planned pages to PDF.
@@ -175,15 +177,15 @@ func (r *renderer) page(pg Page) {
 	}
 	// Fills, then gridlines, borders and text.
 	for key, v := range views {
-		if v.Style.Fill == "" || covered[key] {
+		if !v.Style.HasFill() || covered[key] {
 			continue
 		}
-		r.fill(v.Style.Fill, g.x(key[1]), g.y(key[0]), g.x(key[1]+1), g.y(key[0]+1))
+		r.styleFill(v.Style, g.x(key[1]), g.y(key[0]), g.x(key[1]+1), g.y(key[0]+1))
 	}
 	for _, m := range merges {
-		if v, ok := r.src.View(m.R0, m.C0); ok && v.Style.Fill != "" {
+		if v, ok := r.src.View(m.R0, m.C0); ok && v.Style.HasFill() {
 			x0, y0, x1, y1 := r.mergeRect(g, m)
-			r.fill(v.Style.Fill, x0, y0, x1, y1)
+			r.styleFill(v.Style, x0, y0, x1, y1)
 		}
 	}
 	if p.Setup.Gridlines {
@@ -306,7 +308,13 @@ func (r *renderer) gridlines(g geometry, covered map[[2]int]bool) {
 	}
 }
 
-var borderWidth = map[string]float64{"medium": 1.25, "thick": 2, "double": 0.5}
+var borderWidth = map[string]float64{"medium": 1.25, "thick": 2, "double": 0.5, "mediumDashed": 1.25, "mediumDashDot": 1.25, "mediumDashDotDot": 1.25}
+
+var borderDash = map[string][]float64{
+	"dashed": {3, 2}, "dotted": {1, 1}, "hair": {1, 1}, "mediumDashed": {6, 2},
+	"dashDot": {6, 2, 2, 2}, "mediumDashDot": {6, 2, 2, 2},
+	"dashDotDot": {6, 2, 2, 2, 2, 2}, "mediumDashDotDot": {6, 2, 2, 2, 2, 2},
+}
 
 func (r *renderer) borders(st model.Style, x0, y0, x1, y1 float64) {
 	b := st.Border
@@ -324,17 +332,34 @@ func (r *renderer) borders(st model.Style, x0, y0, x1, y1 float64) {
 			w = 0.5
 		}
 		r.pdf.SetLineWidth(w)
-		switch {
-		case strings.Contains(strings.ToLower(l.Style), "dash"):
-			r.pdf.SetLineType("dashed")
-		case l.Style == "dotted" || l.Style == "hair":
-			r.pdf.SetLineType("dotted")
-		default:
+		if dash := borderDash[l.Style]; len(dash) > 0 {
+			r.pdf.SetCustomLineType(dash, 0)
+		} else {
 			r.pdf.SetLineType("solid")
 		}
-		r.pdf.Line(ax, ay, bx, by)
+		if l.Style == "slantDashDot" {
+			dx, dy := bx-ax, by-ay
+			length := math.Hypot(dx, dy)
+			if length > 0 {
+				ux, uy := dx/length, dy/length
+				nx, ny := -uy, ux
+				if math.Abs(dy) > math.Abs(dx) {
+					nx, ny = uy, -ux
+				}
+				for start := 0.0; start < length; start += 4.5 {
+					end := min(start+3, length)
+					r.pdf.Line(ax+ux*start+nx*.75, ay+uy*start+ny*.75, ax+ux*end-nx*.75, ay+uy*end-ny*.75)
+				}
+			}
+		} else {
+			r.pdf.Line(ax, ay, bx, by)
+		}
 		if l.Style == "double" {
-			if ay == by {
+			if ay != by && ax != bx {
+				length := math.Hypot(bx-ax, by-ay)
+				nx, ny := -(by-ay)/length*1.5, (bx-ax)/length*1.5
+				r.pdf.Line(ax+nx, ay+ny, bx+nx, by+ny)
+			} else if ay == by {
 				r.pdf.Line(ax, ay+1.5, bx, by+1.5)
 			} else {
 				r.pdf.Line(ax+1.5, ay, bx+1.5, by)
@@ -346,6 +371,12 @@ func (r *renderer) borders(st model.Style, x0, y0, x1, y1 float64) {
 	line(b.Bottom, x0, y1, x1, y1)
 	line(b.Left, x0, y0, x0, y1)
 	line(b.Right, x1, y0, x1, y1)
+	if b.DiagonalUp {
+		line(b.Diagonal, x0, y1, x1, y0)
+	}
+	if b.DiagonalDown {
+		line(b.Diagonal, x0, y0, x1, y1)
+	}
 }
 
 // latin1 reports whether a Latin face can show the text.

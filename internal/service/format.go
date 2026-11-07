@@ -1,7 +1,10 @@
 package service
 
 import (
+	"errors"
+	"regexp"
 	"sort"
+	"strings"
 	"ww-excel/internal/command"
 	"ww-excel/internal/model"
 	"ww-excel/internal/numfmt"
@@ -23,27 +26,31 @@ type BorderLineDTO struct {
 }
 
 type StyleDTO struct {
-	ID     uint32        `json:"id"`
-	Font   FontDTO       `json:"font"`
-	Fill   string        `json:"fill,omitempty"`
-	Left   BorderLineDTO `json:"left"`
-	Right  BorderLineDTO `json:"right"`
-	Top    BorderLineDTO `json:"top"`
-	Bottom BorderLineDTO `json:"bottom"`
-	AlignH string        `json:"alignH,omitempty"`
-	AlignV string        `json:"alignV,omitempty"`
-	Wrap   bool          `json:"wrap,omitempty"`
-	Indent int           `json:"indent,omitempty"`
-	NumFmt string        `json:"numFmt,omitempty"`
+	ID           uint32         `json:"id"`
+	Font         FontDTO        `json:"font"`
+	Fill         string         `json:"fill,omitempty"`
+	FillSpec     model.FillSpec `json:"fillSpec,omitempty"`
+	Diagonal     BorderLineDTO  `json:"diagonal,omitempty"`
+	DiagonalUp   bool           `json:"diagonalUp,omitempty"`
+	DiagonalDown bool           `json:"diagonalDown,omitempty"`
+	Left         BorderLineDTO  `json:"left"`
+	Right        BorderLineDTO  `json:"right"`
+	Top          BorderLineDTO  `json:"top"`
+	Bottom       BorderLineDTO  `json:"bottom"`
+	AlignH       string         `json:"alignH,omitempty"`
+	AlignV       string         `json:"alignV,omitempty"`
+	Wrap         bool           `json:"wrap,omitempty"`
+	Indent       int            `json:"indent,omitempty"`
+	NumFmt       string         `json:"numFmt,omitempty"`
 }
 
 func styleDTO(id uint32, st model.Style) StyleDTO {
 	line := func(l model.BorderLine) BorderLineDTO { return BorderLineDTO{Style: l.Style, Color: l.Color} }
 	f := st.Font
 	return StyleDTO{
-		ID:     id,
-		Font:   FontDTO{Name: f.Name, Size: f.Size, Bold: f.Bold, Italic: f.Italic, Underline: f.Underline, Strike: f.Strike, Color: f.Color},
-		Fill:   st.Fill,
+		ID:   id,
+		Font: FontDTO{Name: f.Name, Size: f.Size, Bold: f.Bold, Italic: f.Italic, Underline: f.Underline, Strike: f.Strike, Color: f.Color},
+		Fill: st.Fill, FillSpec: st.FillSpec, Diagonal: line(st.Border.Diagonal), DiagonalUp: st.Border.DiagonalUp, DiagonalDown: st.Border.DiagonalDown,
 		Left:   line(st.Border.Left),
 		Right:  line(st.Border.Right),
 		Top:    line(st.Border.Top),
@@ -66,21 +73,102 @@ func stylesSince(wb *model.Workbook, from int) []StyleDTO {
 	return out
 }
 
+// BorderPatchDTO distinguishes omitted edges from explicit clearing ({}).
+type BorderPatchDTO struct {
+	Top     *BorderLineDTO `json:"top,omitempty"`
+	Bottom  *BorderLineDTO `json:"bottom,omitempty"`
+	Left    *BorderLineDTO `json:"left,omitempty"`
+	Right   *BorderLineDTO `json:"right,omitempty"`
+	InsideH *BorderLineDTO `json:"insideH,omitempty"`
+	InsideV *BorderLineDTO `json:"insideV,omitempty"`
+}
+
+var borderColorPattern = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
+
+func (p *BorderPatchDTO) model() (command.BorderPatch, error) {
+	out := command.BorderPatch{}
+	for _, pair := range []struct {
+		in  *BorderLineDTO
+		out **model.BorderLine
+	}{
+		{p.Top, &out.Top}, {p.Bottom, &out.Bottom}, {p.Left, &out.Left}, {p.Right, &out.Right}, {p.InsideH, &out.InsideH}, {p.InsideV, &out.InsideV},
+	} {
+		if pair.in == nil {
+			continue
+		}
+		line := pair.in
+		switch line.Style {
+		case "", "thin", "medium", "thick", "dashed", "dotted", "double", "hair", "mediumDashed", "dashDot", "mediumDashDot", "dashDotDot", "mediumDashDotDot", "slantDashDot":
+		default:
+			return out, errors.New("不支援的框線樣式")
+		}
+		if line.Color != "" && !borderColorPattern.MatchString(line.Color) {
+			return out, errors.New("框線色彩必須是六位十六進位色碼")
+		}
+		next := model.BorderLine{Style: line.Style, Color: strings.ToUpper(line.Color)}
+		if next.Style == "" {
+			next.Color = ""
+		}
+		*pair.out = &next
+	}
+	return out, nil
+}
+
+// presetBorderPatch keeps toolbar operations consistent with dialog edits.
+func presetBorderPatch(preset, color string) *BorderPatchDTO {
+	thin := &BorderLineDTO{Style: "thin", Color: color}
+	empty := &BorderLineDTO{}
+	switch preset {
+	case "none":
+		return &BorderPatchDTO{Top: empty, Bottom: empty, Left: empty, Right: empty, InsideH: empty, InsideV: empty}
+	case "all":
+		return &BorderPatchDTO{Top: thin, Bottom: thin, Left: thin, Right: thin, InsideH: thin, InsideV: thin}
+	case "outside", "thickOutside":
+		if preset == "thickOutside" {
+			thin.Style = "medium"
+		}
+		return &BorderPatchDTO{Top: thin, Bottom: thin, Left: thin, Right: thin}
+	case "top":
+		return &BorderPatchDTO{Top: thin}
+	case "left":
+		return &BorderPatchDTO{Left: thin}
+	case "right":
+		return &BorderPatchDTO{Right: thin}
+	case "bottom", "thickBottom", "doubleBottom":
+		if preset == "thickBottom" {
+			thin.Style = "medium"
+		}
+		if preset == "doubleBottom" {
+			thin.Style = "double"
+		}
+		return &BorderPatchDTO{Bottom: thin}
+	}
+	return nil
+}
+
 // FormatPatch is a formatting change from the toolbar; nil fields are
 // left as they are.
 type FormatPatch struct {
-	FontName  *string  `json:"fontName,omitempty"`
-	FontSize  *float64 `json:"fontSize,omitempty"`
-	Bold      *bool    `json:"bold,omitempty"`
-	Italic    *bool    `json:"italic,omitempty"`
-	Underline *bool    `json:"underline,omitempty"`
-	Strike    *bool    `json:"strike,omitempty"`
-	FontColor *string  `json:"fontColor,omitempty"`
-	Fill      *string  `json:"fill,omitempty"`
-	AlignH    *string  `json:"alignH,omitempty"`
-	AlignV    *string  `json:"alignV,omitempty"`
-	Wrap      *bool    `json:"wrap,omitempty"`
-	NumFmt    *string  `json:"numFmt,omitempty"`
+	RestyleBorders *string         `json:"restyleBorders,omitempty"`
+	RecolorBorders *string         `json:"recolorBorders,omitempty"`
+	FillSpec       *model.FillSpec `json:"fillSpec,omitempty"`
+	Diagonal       *BorderLineDTO  `json:"diagonal,omitempty"`
+	DiagonalUp     *bool           `json:"diagonalUp,omitempty"`
+	DiagonalDown   *bool           `json:"diagonalDown,omitempty"`
+	AutoRows       []SizeDTO       `json:"autoRows,omitempty"`
+	Borders        *BorderPatchDTO `json:"borders,omitempty"`
+	FontName       *string         `json:"fontName,omitempty"`
+	FontSize       *float64        `json:"fontSize,omitempty"`
+	Bold           *bool           `json:"bold,omitempty"`
+	Italic         *bool           `json:"italic,omitempty"`
+	Underline      *bool           `json:"underline,omitempty"`
+	Strike         *bool           `json:"strike,omitempty"`
+	FontColor      *string         `json:"fontColor,omitempty"`
+	Fill           *string         `json:"fill,omitempty"`
+	AlignH         *string         `json:"alignH,omitempty"`
+	AlignV         *string         `json:"alignV,omitempty"`
+	Wrap           *bool           `json:"wrap,omitempty"`
+	NumFmt         *string         `json:"numFmt,omitempty"`
 	// Decimals adds (+) or removes (-) decimal places.
 	Decimals int `json:"decimals,omitempty"`
 	// Border applies a preset: bottom, top, left, right, all, outside,
@@ -92,7 +180,7 @@ type FormatPatch struct {
 	Label string `json:"label,omitempty"`
 }
 
-func (p FormatPatch) apply(st model.Style, at command.At) model.Style {
+func (p FormatPatch) apply(st model.Style, _ command.At) model.Style {
 	set := func(dst *bool, v *bool) {
 		if v != nil {
 			*dst = *v
@@ -113,6 +201,35 @@ func (p FormatPatch) apply(st model.Style, at command.At) model.Style {
 	}
 	if p.Fill != nil {
 		st.Fill = *p.Fill
+		st.FillSpec = model.FillSpec{}
+	}
+	if p.FillSpec != nil {
+		st.FillSpec = *p.FillSpec
+		st.Fill = ""
+	}
+	if p.Diagonal != nil {
+		st.Border.Diagonal = model.BorderLine{Style: p.Diagonal.Style, Color: strings.ToUpper(p.Diagonal.Color)}
+	}
+	set(&st.Border.DiagonalUp, p.DiagonalUp)
+	set(&st.Border.DiagonalDown, p.DiagonalDown)
+	if st.Border.Diagonal.Style == "" {
+		st.Border.DiagonalUp = false
+		st.Border.DiagonalDown = false
+	}
+	if !st.Border.DiagonalUp && !st.Border.DiagonalDown {
+		st.Border.Diagonal = model.BorderLine{}
+	}
+	if p.RecolorBorders != nil || p.RestyleBorders != nil {
+		for _, line := range []*model.BorderLine{&st.Border.Top, &st.Border.Bottom, &st.Border.Left, &st.Border.Right, &st.Border.Diagonal} {
+			if line.Style != "" {
+				if p.RecolorBorders != nil {
+					line.Color = *p.RecolorBorders
+				}
+				if p.RestyleBorders != nil {
+					line.Style = *p.RestyleBorders
+				}
+			}
+		}
 	}
 	if p.AlignH != nil {
 		st.Align.H = *p.AlignH
@@ -127,70 +244,7 @@ func (p FormatPatch) apply(st model.Style, at command.At) model.Style {
 	if p.Decimals != 0 {
 		st.NumFmt = numfmt.AdjustDecimals(st.NumFmt, p.Decimals)
 	}
-	if p.Border != "" {
-		st.Border = borderPreset(st.Border, p.Border, p.BorderColor, at)
-	}
 	return st
-}
-
-// borderPreset applies an Excel border button to one position. Edge
-// presets only touch cells on that edge of the range.
-func borderPreset(b model.Borders, preset, color string, at command.At) model.Borders {
-	thin := model.BorderLine{Style: "thin", Color: color}
-	r := at.Range
-	// Whole rows/columns: Row or Col is -1, treat as on every edge
-	// along that axis.
-	top := at.Row == r.R0 || at.Row < 0
-	bottom := at.Row == r.R1 || at.Row < 0
-	left := at.Col == r.C0 || at.Col < 0
-	right := at.Col == r.C1 || at.Col < 0
-	switch preset {
-	case "none":
-		return model.Borders{}
-	case "all":
-		return model.Borders{Left: thin, Right: thin, Top: thin, Bottom: thin}
-	case "outside", "thickOutside":
-		line := thin
-		if preset == "thickOutside" {
-			line.Style = "medium"
-		}
-		if top {
-			b.Top = line
-		}
-		if bottom {
-			b.Bottom = line
-		}
-		if left {
-			b.Left = line
-		}
-		if right {
-			b.Right = line
-		}
-	case "bottom", "thickBottom", "doubleBottom":
-		line := thin
-		switch preset {
-		case "thickBottom":
-			line.Style = "medium"
-		case "doubleBottom":
-			line.Style = "double"
-		}
-		if bottom {
-			b.Bottom = line
-		}
-	case "top":
-		if top {
-			b.Top = thin
-		}
-	case "left":
-		if left {
-			b.Left = thin
-		}
-	case "right":
-		if right {
-			b.Right = thin
-		}
-	}
-	return b
 }
 
 // display renders a cell with its number format; color is the format's

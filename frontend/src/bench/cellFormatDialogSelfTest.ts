@@ -1,0 +1,100 @@
+import { benchApi, documentApi, sheetApi } from '../bridge/sheet';
+import type { SheetDriver } from './selfTest';
+
+// Exercise the real App modal and backend through the desktop WebView.
+export async function cellFormatDialogSelfTest(sheet: SheetDriver, sheetIndex: number): Promise<string> {
+  const lines = ['\n## 儲存格格式視窗', '', '| | 項目 |', '| --- | --- |'];
+  let passed = 0, total = 0;
+  const expect = (name: string, ok: boolean) => {
+    total++;
+    if (ok) passed++;
+    lines.push(`| ${ok ? '✅' : '❌'} | ${name} |`);
+    if (!ok) console.error(`Cell format dialog: ${name}`);
+  };
+  const step = async () => { await sheet.whenIdle(); await new Promise(r => setTimeout(r, 100)); };
+  const modal = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="儲存格格式"]')!;
+  const button = (text: string) => Array.from(modal().querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent?.trim() === text)!;
+  const tab = async (name: string) => { button(name).click(); await step(); };
+  const read = async () => {
+    const data = await sheetApi.getBlocks(sheetIndex, [{ row: 0, col: 0 }], 0);
+    const cell = data.blocks?.[0]?.cells?.find(c => c.r === 49 && c.c === 0);
+    return { value: cell?.v, style: data.styles?.find(s => s.id === (cell?.st ?? 0)) };
+  };
+  const open = async () => { sheet.focus(); sheet.pressKey('1', { metaKey: true }); await step(); };
+  const escape = async () => {
+    (document.activeElement ?? modal()).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await step();
+  };
+  sheet.pressKey('Escape');
+  await sheet.goToName('A50');
+  await sheetApi.setCell(sheetIndex, 49, 0, '1234.5');
+  await sheet.applyFormat({ numFmt: '', bold: false, italic: false, fill: '', alignH: '', wrap: false });
+  await step();
+  await open();
+  expect('⌘1 開啟五分頁共用視窗', !!modal() && modal().querySelectorAll('[role="tab"]').length === 5);
+  const code = modal().querySelector<HTMLInputElement>('input')!;
+  code.value = '#,##0.00'; code.dispatchEvent(new Event('input', { bubbles: true }));
+  await tab('字型');
+  const bold = modal().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  bold.click();
+  await tab('對齊');
+  const align = modal().querySelector<HTMLSelectElement>('select')!;
+  align.value = 'center'; align.dispatchEvent(new Event('change', { bubbles: true }));
+  await tab('填滿');
+  const fillButton = Array.from(modal().querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent?.includes('填滿色彩'))!;
+  fillButton.click(); await step();
+  const yellow = modal().querySelector<HTMLButtonElement>('[aria-label="#FFFF00"]')!;
+  yellow.focus(); yellow.click(); await step();
+  expect('色盤選色後焦點回到色彩按鈕', document.activeElement === fillButton);
+  expect('色盤選色不會提前提交', !!modal() && !(await read()).style?.fill);
+  await tab('數值');
+  expect('切換分頁保留格式碼與 Go 預覽', modal().querySelector<HTMLInputElement>('input')?.value === '#,##0.00' && modal().querySelector('.value')?.textContent === '1,234.50');
+  expect('草稿尚未修改文件', (await read()).value === '1234.5' && !(await read()).style?.font.bold);
+  button('確定').click(); await step();
+  const applied = await read();
+  expect('確定套用跨分頁草稿', !modal() && applied.value === '1,234.50' && !!applied.style?.font.bold && applied.style.alignH === 'center' && applied.style.fill === 'FFFF00');
+  const beforeNoop = await documentApi.state();
+  await open(); button('確定').click(); await step();
+  expect('未修改直接確定不新增復原紀錄', JSON.stringify(await documentApi.state()) === JSON.stringify(beforeNoop));
+  await open(); await tab('字型');
+  const size = modal().querySelector<HTMLInputElement>('input[type="number"]')!;
+  const oldSize = size.value;
+  size.value = ''; size.dispatchEvent(new Event('input', { bubbles: true }));
+  await tab('對齊');
+  expect('無效字級跨分頁仍阻止提交', button('確定').disabled);
+  await tab('字型');
+  const restoredSize = modal().querySelector<HTMLInputElement>('input[type="number"]')!;
+  restoredSize.value = oldSize; restoredSize.dispatchEvent(new Event('input', { bubbles: true }));
+  modal().querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+  button('取消').click(); await step();
+  expect('取消保留文件原格式', !!(await read()).style?.font.bold && !modal());
+  await open(); await escape();
+  expect('Esc 關閉視窗且不修改文件', !modal() && !!(await read()).style?.font.bold);
+  const scroller = document.querySelector<HTMLElement>('.scroller')!;
+  const rect = scroller.getBoundingClientRect();
+  scroller.dispatchEvent(new MouseEvent('contextmenu', { clientX: rect.left + 60, clientY: rect.top + 60, bubbles: true, cancelable: true }));
+  await step();
+  Array.from(document.querySelectorAll<HTMLButtonElement>('.context-menu button')).find(b => b.textContent?.includes('儲存格格式'))!.click();
+  await step();
+  expect('右鍵開啟同一個五分頁視窗', !!modal() && modal().querySelectorAll('[role="tab"]').length === 5);
+  await tab('數值');
+  button('數值').focus();
+  button('數值').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+  await step();
+  expect('方向鍵切換分頁並移動焦點', document.activeElement?.textContent === '字型' && document.activeElement?.getAttribute('aria-selected') === 'true');
+  const submit = button('確定'); submit.focus();
+  submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  expect('Tab 焦點循環留在視窗內', modal().contains(document.activeElement) && document.activeElement !== submit);
+  const original = await benchApi.windowSize();
+  try {
+    await benchApi.setWindowSize(500, 360); await step();
+    await tab('數值');
+    const body = modal().querySelector<HTMLElement>('.scroll-body')!;
+    body.scrollTop = body.scrollHeight;
+    const bounds = modal().getBoundingClientRect();
+    expect('小視窗內容可捲動且確定按鈕留在畫面內', body.scrollHeight > body.clientHeight && body.scrollTop > 0 && bounds.top >= 0 && bounds.bottom <= innerHeight && button('確定').getBoundingClientRect().bottom <= innerHeight);
+  } finally { await benchApi.setWindowSize(original.width, original.height); await step(); }
+  await escape();
+  lines.splice(2, 0, `- 結果：${passed} / ${total} 通過`, '');
+  return lines.join('\n') + '\n';
+}

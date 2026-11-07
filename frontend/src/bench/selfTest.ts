@@ -14,6 +14,7 @@ import { sheetTabsIntegrationTest, sheetTabsSelfTest } from './sheetTabsSelfTest
 import { benchSecuritySelfTest } from './benchSecuritySelfTest';
 import { formulaSecuritySelfTest } from './formulaSecuritySelfTest';
 import { zoomSelfTest } from './zoomSelfTest';
+import { contextMenuSelfTest } from './contextMenuSelfTest';
 import { formatPainterSelfTest } from './formatPainterSelfTest';
 import type { BlockCache } from '../stores/viewportCache';
 
@@ -316,6 +317,8 @@ export async function runSelfTest(sheet: SheetDriver, sheetIndex: number): Promi
   await zoomSelfTest(sheet, step, expect);
   progressPhase='ribbonSelfTest';
   await ribbonSelfTest(sheet, step, expect);
+  progressPhase='contextMenuSelfTest';
+  await contextMenuSelfTest(sheet, step, expect);
   progressPhase='sheetTabsSelfTest';
   await sheetTabsSelfTest(expect);
   progressPhase='sheetTabsIntegrationTest';

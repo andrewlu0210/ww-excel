@@ -43,6 +43,18 @@ export interface BorderLineDTO {
     "color"?: string;
 }
 
+/**
+ * BorderPatchDTO distinguishes omitted edges from explicit clearing ({}).
+ */
+export interface BorderPatchDTO {
+    "top"?: BorderLineDTO | null;
+    "bottom"?: BorderLineDTO | null;
+    "left"?: BorderLineDTO | null;
+    "right"?: BorderLineDTO | null;
+    "insideH"?: BorderLineDTO | null;
+    "insideV"?: BorderLineDTO | null;
+}
+
 export interface CFRuleDTO {
     "dataBar"?: model$0.CFDataBar | null;
     "iconSet"?: model$0.CFIconSet | null;
@@ -274,11 +286,26 @@ export interface FontDTO {
     "color"?: string;
 }
 
+export interface FormatMeasureDTO {
+    "text": string;
+    "style": StyleDTO;
+    "runs"?: TextRunDTO[] | null;
+    "width": number;
+}
+
 /**
  * FormatPatch is a formatting change from the toolbar; nil fields are
  * left as they are.
  */
 export interface FormatPatch {
+    "restyleBorders"?: string | null;
+    "recolorBorders"?: string | null;
+    "fillSpec"?: model$0.FillSpec | null;
+    "diagonal"?: BorderLineDTO | null;
+    "diagonalUp"?: boolean | null;
+    "diagonalDown"?: boolean | null;
+    "autoRows"?: SizeDTO[] | null;
+    "borders"?: BorderPatchDTO | null;
     "fontName"?: string | null;
     "fontSize"?: number | null;
     "bold"?: boolean | null;
@@ -312,6 +339,15 @@ export interface FormatPatch {
      * Label names the change in the Undo menu.
      */
     "label"?: string;
+}
+
+/**
+ * FormatRowDTO supplies projected text metrics before an atomic format commit.
+ */
+export interface FormatRowDTO {
+    "row": number;
+    "minimum": number;
+    "cells": FormatMeasureDTO[] | null;
 }
 
 export interface HitDTO {
@@ -466,6 +502,16 @@ export interface RangeDTO {
     "c1": number;
 }
 
+/**
+ * SelectionFormatDTO contains editable base values and per-property mixed flags.
+ * Border values describe the selected ranges, including their internal seams.
+ */
+export interface SelectionFormatDTO {
+    "style": StyleDTO;
+    "mixed": string[] | null;
+    "borders": BorderPatchDTO;
+}
+
 export interface SeriesDataDTO {
     "labels"?: string[] | null;
     "name": string;
@@ -547,6 +593,10 @@ export interface StyleDTO {
     "id": number;
     "font": FontDTO;
     "fill"?: string;
+    "fillSpec"?: model$0.FillSpec;
+    "diagonal"?: BorderLineDTO;
+    "diagonalUp"?: boolean;
+    "diagonalDown"?: boolean;
     "left": BorderLineDTO;
     "right": BorderLineDTO;
     "top": BorderLineDTO;

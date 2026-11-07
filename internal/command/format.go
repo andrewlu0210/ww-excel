@@ -29,7 +29,15 @@ func ApplyStyle(wb *model.Workbook, sheet int, ranges []model.Range, name string
 	styles := wb.StyleTable()
 	var cur model.Range
 	restyleAt := func(id uint32, row, col int) uint32 {
-		return styles.Intern(patch(styles.Get(id), At{Row: row, Col: col, Range: cur}))
+		next := patch(styles.Get(id), At{Row: row, Col: col, Range: cur})
+		if next == styles.Get(id) {
+			return id
+		}
+		result := styles.Intern(next)
+		if result == 0 && row >= 0 && col >= 0 && sh.Layout.StyleAt(row, col) != 0 {
+			result = styles.InternExplicit(next)
+		}
+		return result
 	}
 
 	layout := sh.Layout.Clone()
@@ -79,8 +87,18 @@ func ApplyStyle(wb *model.Workbook, sheet int, ranges []model.Range, name string
 		fullRows := rg.C0 == 0 && rg.C1 == model.MaxCols-1
 		switch {
 		case fullCols:
+			if !fullRows {
+				total += len(sh.Layout.RowStyles) * (rg.C1 - rg.C0 + 1)
+				if total > MaxFillCells {
+					return nil, ErrFillTooLarge
+				}
+			}
 			for c := rg.C0; c <= rg.C1; c++ {
-				layout.ColStyles[c] = restyleAt(sh.Layout.ColStyles[c], -1, c)
+				old, exists := sh.Layout.ColStyles[c]
+				next := restyleAt(old, -1, c)
+				if exists || styles.Get(next) != styles.Get(old) {
+					layout.ColStyles[c] = next
+				}
 			}
 			// Rows with their own style intersect these columns: their
 			// cells get explicit styles so the column format shows.
@@ -96,8 +114,22 @@ func ApplyStyle(wb *model.Workbook, sheet int, ranges []model.Range, name string
 			layoutChanged = true
 			sh.EachInRange(rg, func(row, col int, _ model.Cell) { touch(row, col) })
 		case fullRows:
+			total += len(sh.Layout.ColStyles) * (rg.R1 - rg.R0 + 1)
+			if total > MaxFillCells {
+				return nil, ErrFillTooLarge
+			}
+			// Preserve column-inherited formatting at row/column intersections.
+			for c := range sh.Layout.ColStyles {
+				for r := rg.R0; r <= rg.R1; r++ {
+					touch(r, c)
+				}
+			}
 			for r := rg.R0; r <= rg.R1; r++ {
-				layout.RowStyles[r] = restyleAt(sh.Layout.StyleAt(r, -1), r, -1)
+				old, exists := sh.Layout.RowStyles[r]
+				next := restyleAt(old, r, -1)
+				if exists || styles.Get(next) != styles.Get(old) {
+					layout.RowStyles[r] = next
+				}
 			}
 			layoutChanged = true
 			sh.EachInRange(rg, func(row, col int, _ model.Cell) { touch(row, col) })

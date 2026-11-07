@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
+	"strings"
 
 	"ww-excel/internal/command"
 	"ww-excel/internal/document"
@@ -217,6 +219,19 @@ func (s *SheetService) Layout(ctx context.Context, sheet int, knownStyles int) L
 	return out
 }
 
+// CellStyle returns the editable base style, without table or conditional overlays.
+func (s *SheetService) CellStyle(ctx context.Context, sheet, row, col int) *StyleDTO {
+	var out *StyleDTO
+	s.at(ctx).read(func(d *document.Document) {
+		if sh := sheetAt(d, sheet); sh != nil && validCell(row, col) {
+			id := sh.EffectiveStyle(row, col)
+			value := styleDTO(id, d.Workbook().StyleTable().Get(id))
+			out = &value
+		}
+	})
+	return out
+}
+
 // EditText returns the text to show when editing a cell (F2).
 func (s *SheetService) EditText(ctx context.Context, sheet, row, col int) string {
 	var text string
@@ -346,6 +361,54 @@ func (s *SheetService) Clear(ctx context.Context, sheet int, ranges []RangeDTO, 
 
 // Format applies a formatting change to the ranges.
 func (s *SheetService) Format(ctx context.Context, sheet int, ranges []RangeDTO, patch FormatPatch) error {
+	if patch.FillSpec != nil {
+		next, err := model.NormalizeFillSpec(*patch.FillSpec)
+		if err != nil {
+			return err
+		}
+		patch.FillSpec = &next
+	}
+	if patch.Diagonal != nil {
+		if _, err := (&BorderPatchDTO{Top: patch.Diagonal}).model(); err != nil {
+			return err
+		}
+	}
+
+	if patch.Border == "none" {
+		patch.Diagonal = &BorderLineDTO{}
+	}
+	if patch.RestyleBorders != nil {
+		if *patch.RestyleBorders == "" {
+			return errors.New("不支援的框線樣式")
+		}
+		if _, err := (&BorderPatchDTO{Top: &BorderLineDTO{Style: *patch.RestyleBorders}}).model(); err != nil {
+			return err
+		}
+	}
+	if patch.RecolorBorders != nil {
+		color := strings.ToUpper(*patch.RecolorBorders)
+		if _, err := (&BorderPatchDTO{Top: &BorderLineDTO{Style: "thin", Color: color}}).model(); err != nil {
+			return err
+		}
+		patch.RecolorBorders = &color
+	}
+	borderDTO := patch.Borders
+	if borderDTO == nil {
+		borderDTO = presetBorderPatch(patch.Border, patch.BorderColor)
+	}
+	var borders command.BorderPatch
+	if borderDTO != nil {
+		var err error
+		borders, err = borderDTO.model()
+		if err != nil {
+			return err
+		}
+		patch.Border = ""
+	}
+	if patch.RecolorBorders != nil {
+		borders.Recolor = patch.RecolorBorders
+	}
+	borders.Restyle = patch.RestyleBorders
 	label := patch.Label
 	if label == "" {
 		label = "格式設定"
@@ -355,9 +418,42 @@ func (s *SheetService) Format(ctx context.Context, sheet int, ranges []RangeDTO,
 		if sheetAt(d, sheet) == nil {
 			return document.Change{}, false
 		}
+		selected := command.ExpandFormatRanges(toModelRanges(ranges), d.Workbook().Sheets[sheet].Layout.Merges)
 		var cmd command.Command
-		if cmd, err = command.ApplyStyle(d.Workbook(), sheet, toModelRanges(ranges), label, patch.apply); err != nil || cmd == nil {
+		if borderDTO != nil || patch.RecolorBorders != nil || patch.RestyleBorders != nil {
+			cmd, err = command.ApplyBorderStyle(d.Workbook(), sheet, selected, label, patch.apply, borders)
+		} else {
+			cmd, err = command.ApplyStyle(d.Workbook(), sheet, selected, label, patch.apply)
+		}
+		if err != nil {
 			return document.Change{}, false
+		}
+		cmd = command.PruneFormat(d.Workbook(), cmd)
+		if cmd == nil {
+			return document.Change{}, false
+		}
+		if len(patch.AutoRows) > 512 {
+			err = command.ErrFillTooLarge
+			return document.Change{}, false
+		}
+		batch := &command.Batch{Name: label, Cmds: []command.Command{cmd}}
+		for _, size := range patch.AutoRows {
+			valid := validCell(size.I, 0) && !math.IsNaN(size.Px) && !math.IsInf(size.Px, 0) && size.Px > 0 && size.Px <= 546
+			rowSelected := false
+			for _, r := range selected {
+				if size.I >= r.R0 && size.I <= r.R1 {
+					rowSelected = true
+					break
+				}
+			}
+			if !valid || !rowSelected {
+				err = command.ErrFillTooLarge
+				return document.Change{}, false
+			}
+			batch.Cmds = append(batch.Cmds, command.GrowAutomaticRow(sheet, size.I, size.Px))
+		}
+		if len(batch.Cmds) > 1 {
+			cmd = batch
 		}
 		return d.Exec(cmd)
 	})

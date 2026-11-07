@@ -5,11 +5,12 @@
   interface Props {
     // Label of the reset entry: 自動 (text) or 無填滿 (fill).
     resetLabel: string;
+    tabindex?: number;
     onpick: (color: string) => void; // "RRGGBB" or "" for reset
     onclose: () => void;
   }
 
-  let { resetLabel, onpick, onclose }: Props = $props();
+  let { resetLabel, onpick, onclose, tabindex = -1 }: Props = $props();
 
   const theme = [
     ['FFFFFF', '000000', 'E7E6E6', '44546A', '4472C4', 'ED7D31', 'A5A5A5', 'FFC000', '5B9BD5', '70AD47'],
@@ -30,14 +31,14 @@
 <svelte:window onkeydown={(e) => e.key === 'Escape' && onclose()} />
 
 <div class="picker" role="dialog" aria-label={t('色彩')}>
-  <button class="reset" tabindex="-1" onpointerdown={(e) => e.preventDefault()} onclick={() => pick('')}>{resetLabel}</button>
+  <button type="button" class="reset" {tabindex} onpointerdown={(e) => e.preventDefault()} onclick={() => pick('')}>{resetLabel}</button>
   <div class="label">{t('佈景主題色彩')}</div>
   <div class="grid">
     {#each theme as row, i (i)}
       {#each row as c (c)}
-        <button
+        <button type="button"
           class="swatch"
-          tabindex="-1"
+          {tabindex}
           title={`#${c}`}
           style:background="#{c}"
           onpointerdown={(e) => e.preventDefault()}
@@ -50,9 +51,9 @@
   <div class="label">{t('標準色彩')}</div>
   <div class="grid">
     {#each standard as c (c)}
-      <button
+      <button type="button"
         class="swatch"
-        tabindex="-1"
+        {tabindex}
         title={`#${c}`}
         style:background="#{c}"
         onpointerdown={(e) => e.preventDefault()}

@@ -47,7 +47,10 @@ build() { # arch output
 }
 
 echo "==> Go"
-rm -rf "$OUT" && mkdir -p "$OUT"
+# Preserve DMGs from earlier releases when rebuilding the app bundle.
+mkdir -p "$OUT"
+rm -rf "$APP"
+rm -f "$OUT/ww-excel" "$OUT/ww-excel-arm64" "$OUT/ww-excel-amd64"
 if [ "${UNIVERSAL:-}" = "1" ]; then
   build arm64 "$OUT/ww-excel-arm64"
   build amd64 "$OUT/ww-excel-amd64"

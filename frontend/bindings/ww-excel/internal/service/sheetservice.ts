@@ -43,6 +43,13 @@ export function CaptureFormats(sheet: number, area: $models.RangeDTO): $Cancella
 }
 
 /**
+ * CellStyle returns the editable base style, without table or conditional overlays.
+ */
+export function CellStyle(sheet: number, row: number, col: number): $CancellablePromise<$models.StyleDTO | null> {
+    return $Call.ByID(3438674418, sheet, row, col);
+}
+
+/**
  * ChartData evaluates a chart's series for drawing.
  */
 export function ChartData(sheet: number, id: number): $CancellablePromise<$models.ChartDataDTO> {
@@ -180,6 +187,14 @@ export function FindNext(sheet: number, row: number, col: number, opt: $models.F
  */
 export function Format(sheet: number, ranges: $models.RangeDTO[] | null, patch: $models.FormatPatch): $CancellablePromise<void> {
     return $Call.ByID(3015178646, sheet, ranges, patch);
+}
+
+/**
+ * FormatRows projects the edited fonts/wrapping without changing the document.
+ * Match the existing automatic-row scope: at most 500 rows per selected range.
+ */
+export function FormatRows(sheet: number, ranges: $models.RangeDTO[] | null, patch: $models.FormatPatch): $CancellablePromise<$models.FormatRowDTO[] | null> {
+    return $Call.ByID(274379099, sheet, ranges, patch);
 }
 
 /**
@@ -342,6 +357,10 @@ export function Replace(sheet: number, opt: $models.FindOptionsDTO, $with: strin
  */
 export function RowTexts(sheet: number, row: number): $CancellablePromise<$models.TextSample[] | null> {
     return $Call.ByID(897558681, sheet, row);
+}
+
+export function SelectionFormat(sheet: number, ranges: $models.RangeDTO[] | null): $CancellablePromise<$models.SelectionFormatDTO | null> {
+    return $Call.ByID(1740847230, sheet, ranges);
 }
 
 /**

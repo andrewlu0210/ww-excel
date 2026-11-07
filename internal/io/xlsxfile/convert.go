@@ -85,6 +85,12 @@ func fromExcelize(f *excelize.File, xs *excelize.Style) model.Style {
 			line.Color = ""
 		}
 		switch b.Type {
+		case "diagonalUp":
+			st.Border.Diagonal = line
+			st.Border.DiagonalUp = true
+		case "diagonalDown":
+			st.Border.Diagonal = line
+			st.Border.DiagonalDown = true
 		case "left":
 			st.Border.Left = line
 		case "right":
@@ -159,6 +165,18 @@ func toExcelize(st model.Style) *excelize.Style {
 		name string
 		line model.BorderLine
 	}{{"left", st.Border.Left}, {"right", st.Border.Right}, {"top", st.Border.Top}, {"bottom", st.Border.Bottom}}
+	if st.Border.DiagonalUp {
+		sides = append(sides, struct {
+			name string
+			line model.BorderLine
+		}{"diagonalUp", st.Border.Diagonal})
+	}
+	if st.Border.DiagonalDown {
+		sides = append(sides, struct {
+			name string
+			line model.BorderLine
+		}{"diagonalDown", st.Border.Diagonal})
+	}
 	for _, s := range sides {
 		if s.line.Style == "" {
 			continue

@@ -134,6 +134,10 @@ export const sheetApi = {
     return SheetService.Layout(sheet, knownStyles);
   },
 
+  selectionFormat: (sheet: number, ranges: RangeDTO[]) => SheetService.SelectionFormat(sheet, ranges),
+  formatRows: async (sheet: number, ranges: RangeDTO[], patch: FormatPatch) => (await SheetService.FormatRows(sheet, ranges, patch)) ?? [],
+  cellStyle: (sheet: number, row: number, col: number): Promise<StyleDTO | null> => SheetService.CellStyle(sheet, row, col),
+
   editText: (sheet: number, row: number, col: number): Promise<string> => SheetService.EditText(sheet, row, col),
 
   // Edits resolve to null, or to a message for the user when Go rejects

@@ -1,0 +1,19 @@
+Excel 16.114.3
+B4 value=1234.5, font=Arial, size=14, bold=true, fill=2552550, number=#,##0.00
+A8 size=20, merge=missing value
+B11 pattern=pattern none, fill=255255255
+B12 pattern=pattern solid, fill=255255255
+B13 pattern=pattern solid, fill=2551920
+G2 line=continuous, weight=border weight thin, color=0112192
+G3 line=continuous, weight=border weight medium, color=0112192
+G4 line=dash, weight=border weight thin, color=0112192
+G5 line=dot, weight=border weight thin, color=0112192
+G6 line=continuous, weight=border weight thick, color=0112192
+G7 line=double, weight=border weight thick, color=0112192
+G8 line=continuous, weight=border weight hairline, color=0112192
+G9 line=dash, weight=border weight medium, color=0112192
+G10 line=dash dot, weight=border weight thin, color=0112192
+G11 line=dash dot, weight=border weight medium, color=0112192
+G12 line=dash dot dot, weight=border weight thin, color=0112192
+G13 line=dash dot dot, weight=border weight medium, color=0112192
+G14 line=slant dash dot, weight=border weight medium, color=0112192
