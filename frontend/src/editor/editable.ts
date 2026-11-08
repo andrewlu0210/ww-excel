@@ -30,7 +30,7 @@ export class RichEditor {
   element.addEventListener('paste',this.paste);
  }
  destroy(){this.element.removeEventListener('beforeinput',this.beforeInput);this.element.removeEventListener('paste',this.paste);}
- attach(draft:RichDraft){this.draft=draft;this.render();}
+ attach(draft:RichDraft,preserveDOM=false){this.draft=draft;if(!preserveDOM)this.render();}
  get value(){return this.draft.text;}
  set value(text:string){this.draft.reconcile(text);this.render();}
  get style(){return this.element.style;}

@@ -13,7 +13,7 @@
   import { RichDraft, type Run } from '../editor/draft';
   import { RichEditor } from '../editor/editable';
   import { layoutRichText, styledRuns } from '../grid/richtext';
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import {
     documentApi,
     sheetApi,
@@ -159,7 +159,7 @@
   // toolbar state.
   let styleTick = $state(0);
   let editing = $state<{ mode: EditMode; pos: CellPos } | null>(null);
-  let activeInput: 'cell' | 'bar' = 'cell';
+  let activeInput = $state<'cell' | 'bar'>('cell');
   // Mirror of the text being edited, for highlights and popups.
   let editText = $state('');
   let used = untrack(() => ({ rows: info.usedRows, cols: info.usedCols }));
@@ -176,6 +176,19 @@
   let funcByName = new Map<string, FuncInfo>();
   let suggestions = $state<FuncInfo[]>([]);
   let suggestIndex = $state(0);
+  let suggestionList = $state<HTMLUListElement>();
+  const suggestionKeyUps = new Set<string>();
+  $effect(() => {
+    const list = suggestionList;
+    const index = suggestIndex;
+    void suggestions;
+    const item = list?.children[index] as HTMLElement | undefined;
+    if (!list || !item) return;
+    // Scroll only the suggestions, keeping the sheet and formula bar in place.
+    const top = item.offsetTop, bottom = top + item.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
+  });
   let hint = $state<{ info: FuncInfo; arg: number } | null>(null);
   let editError = $state<string | null>(null);
   let popupPos = $state({ x: 0, y: 0 });
@@ -397,6 +410,12 @@
   }
 
   export function focus(): void {
+    if (editing && activeInput === 'bar') {
+      bar?.focus({ preventScroll: true });
+      return;
+    }
+    // Restore the idle cell editor synchronously, before Svelte's next update.
+    if (editor) { editor.element.contentEditable = 'true'; editor.element.tabIndex = 0; }
     editor?.focus({ preventScroll: true });
   }
 
@@ -670,7 +689,13 @@
     let runs: Run[] = m === 'edit' ? (cached?.runs ?? []) : [];
     if (value.startsWith("'") && runs.map(r => r.text).join('') === value.slice(1)) runs = [{ text: "'", font: base }, ...runs];
     draft = new RichDraft(value, base, runs);
-    editor.attach(draft); bar.attach(draft);
+    // Keep the formula bar's DOM intact during focus: WebKit is still using
+    // the clicked text node to place the caret after the focus event returns.
+    const control = input();
+    editor.element.contentEditable = control === bar ? 'false' : 'true';
+    editor.element.tabIndex = control === bar ? -1 : 0;
+    control.attach(draft, control === bar && text === undefined);
+    (control === bar ? editor : bar).attach(draft);
     if (text !== undefined) setText(text, caret ?? text.length);
     else syncFrom(input());
     if (!remote) grid?.scrollIntoView(pos);
@@ -884,6 +909,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent): void {
+    suggestionKeyUps.delete(e.key);
     if (paintMode !== 'off' && e.key === 'Escape') {
       e.preventDefault();
       oncancelpaint?.();
@@ -892,6 +918,7 @@
     if (editing) {
       if (input().isComposing) return;
       if (suggestions.length > 0 && handleSuggestionKey(e)) {
+        suggestionKeyUps.add(e.key);
         e.preventDefault();
         return;
       }
@@ -945,6 +972,10 @@
     else void enqueue(() => perform(a));
   }
 
+  function onEditorKeyUp(event: KeyboardEvent): void {
+    if (!suggestionKeyUps.delete(event.key)) updateAssist();
+  }
+
   // Typing while idle starts Enter mode with the typed text, replacing
   // the cell content. Typing while pointing fixes the pointed reference.
   function onInput(event?: Event): void {
@@ -973,6 +1004,11 @@
   }
 
   function onEditorFocus(): void {
+    // The cell is only a preview while the formula bar owns the draft.
+    if (editing && activeInput === 'bar') {
+      bar.focus({ preventScroll: true });
+      return;
+    }
     activeInput = 'cell';
   }
 
@@ -980,7 +1016,32 @@
   function onBarFocus(): void {
     if (shapeEditing !== null) { void commitShapeText().then(()=>bar.focus()); return; }
     activeInput = 'bar';
-    if (!editing) startEditing('edit', selection.active, bar.value, bar.selectionStart);
+    const domSelection = window.getSelection();
+    if (editor.element.contains(domSelection?.anchorNode ?? null)) domSelection?.removeAllRanges();
+    editor.element.contentEditable = 'false';
+    editor.element.tabIndex = -1;
+    if (!editing) {
+      startEditing('edit', selection.active);
+      updateAssist();
+    }
+  }
+
+  function onBarSelectionUpdate(event: KeyboardEvent | PointerEvent): void {
+    if (bar.isComposing) return;
+    const start = bar.selectionStart, end = bar.selectionEnd;
+    const session = editing;
+    // Suggestion navigation already ran on keydown. Rebuilding on keyup
+    // would reset the selected item or reopen a list dismissed with Escape.
+    if (!(event instanceof KeyboardEvent && suggestionKeyUps.delete(event.key))) updateAssist();
+    // Restore the native selection after the reactive toolbar/popup updates.
+    void tick().then(() => {
+      if (session && editing === session) {
+        bar.render();
+        activeInput = 'bar';
+        bar.focus({ preventScroll: true });
+        bar.setSelectionRange(start, end);
+      }
+    });
   }
 
   // ---- Autocomplete and parameter hints ----
@@ -1003,7 +1064,7 @@
     const nameItems: FuncInfo[] = names
       .filter((n) => n.toUpperCase().startsWith(prefix))
       .map((n) => ({ name: n, sig: '', desc: t('名稱'), category: NAME_CATEGORY }));
-    const next = w ? [...nameItems, ...functions.filter((f) => f.name.startsWith(prefix))].slice(0, 10) : [];
+    const next = w ? [...nameItems, ...functions.filter((f) => f.name.startsWith(prefix))] : [];
     const exact = next.length === 1 && next[0].name.toUpperCase() === prefix;
     suggestions = exact ? [] : next;
     suggestIndex = 0;
@@ -2152,8 +2213,8 @@
       onfocus={onBarFocus}
       onkeydown={onKeyDown}
       oninput={onInput}
-      onkeyup={updateAssist}
-      onpointerup={updateAssist}
+      onkeyup={onBarSelectionUpdate}
+      onpointerup={onBarSelectionUpdate}
       oncompositionstart={onCompositionStart}
       oncompositionend={onCompositionEnd}
     ></div>
@@ -2217,19 +2278,21 @@
     {/if}
     <div
       use:attachEditor={'cell'}
-      contenteditable="true"
+      contenteditable={activeInput === 'cell'}
       role="textbox"
-      tabindex="0"
+      tabindex={activeInput === 'cell' ? 0 : -1}
+      aria-readonly={activeInput === 'bar'}
       aria-multiline="true"
       class="cell-editor"
       class:active={editing !== null}
+      class:preview={editing !== null && activeInput === 'bar'}
       spellcheck="false"
       autocapitalize="off"
       aria-label={t('儲存格編輯器')}
       onfocus={onEditorFocus}
       onkeydown={onKeyDown}
       oninput={onInput}
-      onkeyup={updateAssist}
+      onkeyup={onEditorKeyUp}
       onpointerup={updateAssist}
       oncompositionstart={onCompositionStart}
       oncompositionend={onCompositionEnd}
@@ -2386,7 +2449,7 @@
         </div>
       {/if}
       {#if suggestions.length > 0 && !editError}
-        <ul class="popup suggestions" role="listbox" aria-label={t('函數')}>
+        <ul bind:this={suggestionList} class="popup suggestions" role="listbox" aria-label={t('函數')}>
           {#each suggestions as f, i (f.name)}
             <li
               role="option"
@@ -2495,6 +2558,10 @@
     pointer-events: auto;
     box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
   }
+  .cell-editor.preview {
+    caret-color: transparent;
+    pointer-events: none;
+  }
   .popups {
     position: absolute;
     z-index: 10;
@@ -2529,11 +2596,13 @@
     color: var(--error-fg);
   }
   .suggestions {
+    position: relative;
     list-style: none;
     margin: 0;
     padding: 4px 0;
     max-height: 240px;
     overflow: auto;
+    overscroll-behavior: contain;
   }
   .suggestions li {
     display: flex;
