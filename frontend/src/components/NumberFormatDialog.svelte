@@ -11,6 +11,7 @@
   import { validCellFill } from '../grid/cellFills';
   import DiagonalPreview from './DiagonalPreview.svelte';
   import AdvancedFillEditor from './AdvancedFillEditor.svelte';
+  import { NUMBER_FORMAT_CATEGORIES, numberFormatCategory } from './numberFormatCategories';
   import type { Range } from '../grid/selection';
 
   interface Props {
@@ -65,22 +66,17 @@
   let dialog: HTMLFormElement;
   let input = $state<HTMLInputElement>();
   const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
-  const categories: { label: string; code: string }[] = [
-    { label: t('通用格式'), code: '' },
-    { label: t('數值'), code: '#,##0.00' },
-    { label: t('貨幣'), code: '"$"#,##0.00_);[Red]\\("$"#,##0.00\\)' },
-    { label: t('會計專用'), code: '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)' },
-    { label: t('日期'), code: 'yyyy/m/d' },
-    { label: t('日期（中文）'), code: 'yyyy"年"m"月"d"日"' },
-    { label: t('民國年'), code: '[$-404]e/m/d' },
-    { label: t('民國年（中文）'), code: '[$-404]gge"年"m"月"d"日"' },
-    { label: t('時間'), code: 'h:mm:ss' },
-    { label: t('上午／下午'), code: '上午/下午 h"時"mm"分"' },
-    { label: t('百分比'), code: '0.00%' },
-    { label: t('分數'), code: '# ?/?' },
-    { label: t('科學記號'), code: '0.00E+00' },
-    { label: t('文字'), code: '@' },
-  ];
+  let numberCategory = $state<string | null>(untrack(() => mixed.includes('numFmt') ? null : numberFormatCategory(initial.numFmt)));
+  const currentCategory = $derived(NUMBER_FORMAT_CATEGORIES.find(category => category.id === numberCategory));
+  function chooseNumberCategory(id: string): void {
+    numberCategory=id;
+    const types=NUMBER_FORMAT_CATEGORIES.find(category => category.id === id)?.types ?? [];
+    if (types.length && (isMixed('numFmt') || !types.some(type => type.code === draft.numFmt))) change('numFmt',types[0].code);
+  }
+  function editNumberCode(code: string): void {
+    change('numFmt',code);
+    numberCategory=numberFormatCategory(code);
+  }
 
 
   onMount(() => {
@@ -166,12 +162,17 @@
         {#if tab === 0}
           <div class="body">
             <ul class="list" aria-label={t('類別')}>
-              {#each categories as c (c.label)}
-                <li><button type="button" class:selected={!isMixed('numFmt') && c.code === draft.numFmt} aria-pressed={!isMixed('numFmt') && c.code === draft.numFmt} onclick={() => change('numFmt', c.code)}>{c.label}</button></li>
+              {#each NUMBER_FORMAT_CATEGORIES as category (category.id)}
+                <li><button type="button" data-number-category={category.id} class:selected={category.id === numberCategory} aria-pressed={category.id === numberCategory} onclick={() => chooseNumberCategory(category.id)}>{t(category.label)}</button></li>
               {/each}
             </ul>
             <div class="right">
-              <label>{t('格式碼')}<input bind:this={input} value={isMixed('numFmt') ? '' : draft.numFmt} oninput={(e) => change('numFmt', e.currentTarget.value)} spellcheck="false" placeholder={isMixed('numFmt') ? t('混合') : t('通用格式')} /></label>
+              {#if currentCategory && currentCategory.types.length > 1}
+                <label>{t('類型')}<select class="number-types" aria-label={t('類型')} size={Math.min(8,currentCategory.types.length)} value={draft.numFmt} onchange={e=>change('numFmt',e.currentTarget.value)}>
+                  {#each currentCategory.types as type (type.code)}<option value={type.code}>{type.example ? `${type.example} — ${t(type.label)}` : t(type.label)}</option>{/each}
+                </select></label>
+              {/if}
+              <label>{t('格式碼')}<input bind:this={input} value={isMixed('numFmt') ? '' : draft.numFmt} oninput={(e) => editNumberCode(e.currentTarget.value)} spellcheck="false" placeholder={isMixed('numFmt') ? t('混合') : t('通用格式')} /></label>
               <div class="preview" aria-live="polite"><span class="muted">{t('範例')}</span><span class="value">{previewError ? t('無法取得預覽') : preview}</span></div>
             </div>
           </div>
@@ -236,7 +237,7 @@
         {/if}
       </div>
     </div>
-    <div class="actions"><button type="button" onclick={(e) => { draft = { ...initial, borders: {} }; edited = {}; borderColorEdited = false; borderStyleEdited = false; borderReset++; palette = null; e.currentTarget.focus(); }}>{t('重設變更')}</button><button type="button" onclick={onclose}>{t('取消')}</button><button class="primary" type="submit" disabled={!sizeValid || !fillValid}>{t('確定')}</button></div>
+    <div class="actions"><button type="button" onclick={(e) => { draft = { ...initial, borders: {} }; edited = {}; borderColorEdited = false; borderStyleEdited = false; borderReset++; numberCategory = mixedFields.includes('numFmt') ? null : numberFormatCategory(initial.numFmt); palette = null; e.currentTarget.focus(); }}>{t('重設變更')}</button><button type="button" onclick={onclose}>{t('取消')}</button><button class="primary" type="submit" disabled={!sizeValid || !fillValid}>{t('確定')}</button></div>
   </form>
   </div>
 </div>
@@ -255,6 +256,8 @@
   .list { width:170px; max-height:280px; margin:0; padding:4px 0; overflow:auto; list-style:none; border:1px solid var(--chrome-border); border-radius:6px; flex-shrink:0; }
   .list button { width:100%; padding:4px 10px; text-align:left; border:0; background:none; }
   .list button.selected { background:var(--popup-active); }
+  .number-types { min-height:100px; max-width:100%; }
+  .number-types option { padding:5px 8px; }
   .right { flex:1; min-width:0; display:flex; flex-direction:column; gap:12px; }
   label { display:flex; flex-direction:column; gap:5px; }
   .fields { display:grid; grid-template-columns:2fr 1fr; gap:16px; }

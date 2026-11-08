@@ -95,6 +95,36 @@ export async function cellFormatDialogSelfTest(sheet: SheetDriver, sheetIndex: n
     expect('小視窗內容可捲動且確定按鈕留在畫面內', body.scrollHeight > body.clientHeight && body.scrollTop > 0 && bounds.top >= 0 && bounds.bottom <= innerHeight && button('確定').getBoundingClientRect().bottom <= innerHeight);
   } finally { await benchApi.setWindowSize(original.width, original.height); await step(); }
   await escape();
+  await sheet.goToName('A50');await sheetApi.setCell(sheetIndex,49,0,'40982');await sheet.applyFormat({numFmt:''});await step();
+  await open();
+  const category=(id:string)=>modal().querySelector<HTMLButtonElement>(`[data-number-category="${id}"]`)!;
+  expect('數值分頁只保留日期與時間分類',modal().querySelectorAll('[data-number-category="date"]').length===1 && modal().querySelectorAll('[data-number-category="time"]').length===1 && !modal().querySelector('.list')?.textContent?.includes('民國年'));
+  category('date').click();await step();
+  const types=modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')!;
+  expect('日期右側類型包含西元與民國格式',types.options.length===10 && Array.from(types.options).some(o=>o.value==='[$-404]e/m/d'));
+  types.value='[$-404]gge"年"m"月"d"日"';types.dispatchEvent(new Event('change',{bubbles:true}));await step();
+  expect('選擇民國中文類型同步格式碼及預覽',modal().querySelector<HTMLInputElement>('input')?.value==='[$-404]gge"年"m"月"d"日"' && modal().querySelector('.value')?.textContent==='民國101年3月14日');
+  await tab('字型');await tab('數值');expect('切換分頁保留日期分類與類型',category('date').getAttribute('aria-pressed')==='true' && modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')?.value==='[$-404]gge"年"m"月"d"日"');
+  button('確定').click();await step();expect('日期類型確定後實際套用',(await read()).style?.numFmt==='[$-404]gge"年"m"月"d"日"' && (await read()).value==='民國101年3月14日');
+  await open();expect('重新開啟自動選回日期與原民國類型',category('date').getAttribute('aria-pressed')==='true' && modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')?.value==='[$-404]gge"年"m"月"d"日"');
+  category('time').click();await step();expect('上午下午類型收在時間分類',Array.from(modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')!.options).some(o=>o.value==='上午/下午 h"時"mm"分"'));button('取消').click();await step();
+  expect('取消時間類型草稿保留原日期',(await read()).style?.numFmt==='[$-404]gge"年"m"月"d"日"');
+  await open();category('date').click();await step();
+  for (const [format,want] of [
+    ['m"月"d"日"','3月14日'],
+    ['[DBNum1][$-404]yyyy"年"m"月"d"日"','二○一二年三月十四日'],
+    ['[DBNum1][$-404]m"月"d"日"','三月十四日'],
+    ['[$-404]dddd','星期三'],
+    ['[$-404]ddd','週三'],
+  ]) {
+    const list=modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')!;
+    list.value=format;list.dispatchEvent(new Event('change',{bubbles:true}));await step();
+    expect(`日期類型預覽：${want}`,modal().querySelector('.value')?.textContent===want);
+  }
+  button('確定').click();await step();expect('星期類型實際套用為週三',(await read()).value==='週三' && (await read()).style?.numFmt==='[$-404]ddd');
+  await open();expect('重開保留星期類型',category('date').getAttribute('aria-pressed')==='true' && modal().querySelector<HTMLSelectElement>('[aria-label="類型"]')?.value==='[$-404]ddd');button('取消').click();await step();
+  await sheet.applyFormat({numFmt:'"ID-"00000'});await step();await open();expect('未列出的格式歸自訂且保留原碼',category('custom').getAttribute('aria-pressed')==='true' && modal().querySelector<HTMLInputElement>('input')?.value==='"ID-"00000');
+  const noChange=JSON.stringify(await documentApi.state());button('確定').click();await step();expect('僅檢視自訂分類不增加修改紀錄',JSON.stringify(await documentApi.state())===noChange);
   lines.splice(2, 0, `- 結果：${passed} / ${total} 通過`, '');
   return lines.join('\n') + '\n';
 }

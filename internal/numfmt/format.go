@@ -39,8 +39,11 @@ type section struct {
 	hasText bool
 	// color is a [Red]-style color as "RRGGBB", "" for none.
 	color string
-	// roc: Taiwan locale ([$-404]); "e" is the ROC year and "g" the era.
+	// roc: Taiwan locale ([$-404]); "e"/"g" are the ROC year/era,
+	// and weekday names use Traditional Chinese.
 	roc bool
+	// DBNum1 dates use Chinese year digits and month/day numerals.
+	dbNum1 bool
 }
 
 var namedColors = map[string]string{
@@ -306,6 +309,8 @@ func (s *section) bracket(content string) {
 		if n, err := strconv.Atoi(lower[5:]); err == nil && n >= 1 && n <= len(paletteColors) {
 			s.color = paletteColors[n-1]
 		}
+	case lower == "dbnum1":
+		s.dbNum1 = true
 	case strings.HasPrefix(content, "$"):
 		// [$NT$-404]: currency symbol and/or locale.
 		sym, loc, _ := strings.Cut(content[1:], "-")
@@ -316,7 +321,7 @@ func (s *section) bracket(content string) {
 			s.roc = true
 		}
 	default:
-		// Other tags (e.g. [DBNum1]) are not supported yet.
+		// Other extension tags are ignored.
 	}
 }
 
@@ -606,11 +611,14 @@ func formatDate(v float64, sec *section) string {
 		}
 		switch c := t.text; {
 		case c[0] == 'y':
+			year := strconv.Itoa(y)
 			if len(c) <= 2 {
-				b.WriteString(pad2(y % 100))
-			} else {
-				b.WriteString(strconv.Itoa(y))
+				year = pad2(y % 100)
 			}
+			if sec.dbNum1 {
+				year = chineseDateDigits(year)
+			}
+			b.WriteString(year)
 		case c[0] == 'm' && isMinute(toks, i):
 			if len(c) == 1 {
 				b.WriteString(strconv.Itoa(mi))
@@ -618,6 +626,10 @@ func formatDate(v float64, sec *section) string {
 				b.WriteString(pad2(mi))
 			}
 		case c[0] == 'm':
+			if sec.dbNum1 && len(c) <= 2 {
+				b.WriteString(chineseDateInteger(mo))
+				continue
+			}
 			switch len(c) {
 			case 1:
 				b.WriteString(strconv.Itoa(mo))
@@ -631,6 +643,18 @@ func formatDate(v float64, sec *section) string {
 				b.WriteString(monthNames[mo-1])
 			}
 		case c[0] == 'd':
+			if len(c) >= 3 && sec.roc {
+				prefix := "星期"
+				if len(c) == 3 {
+					prefix = "週"
+				}
+				b.WriteString(prefix + string([]rune("日一二三四五六")[Weekday(v)]))
+				continue
+			}
+			if sec.dbNum1 && len(c) <= 2 {
+				b.WriteString(chineseDateInteger(d))
+				continue
+			}
 			switch len(c) {
 			case 1:
 				b.WriteString(strconv.Itoa(d))
