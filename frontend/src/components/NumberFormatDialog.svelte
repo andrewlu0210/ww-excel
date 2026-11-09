@@ -60,7 +60,10 @@
   let sizeValid = $derived(!edited.fontSize || (Number.isFinite(draft.fontSize) && draft.fontSize >= 1 && draft.fontSize <= 409));
   let fillValid = $derived(!edited.fillSpec || validCellFill(draft.fillSpec));
   let palette = $state<'fontColor' | 'fill' | 'borderColor' | null>(null);
+  const dropdownPalette = $derived(palette === 'borderColor' || palette === 'fill');
   let paletteTrigger: HTMLButtonElement | null = null;
+  let paletteElement = $state<HTMLDivElement>();
+  let palettePosition = $state({ left: 0, top: 0 });
   let preview = $state('');
   let previewError = $state(false);
   let dialog: HTMLFormElement;
@@ -113,9 +116,20 @@
     }
   }
 
-  function togglePalette(name: NonNullable<typeof palette>, trigger: HTMLButtonElement): void {
+  async function togglePalette(name: NonNullable<typeof palette>, trigger: HTMLButtonElement): Promise<void> {
     paletteTrigger = trigger;
     palette = palette === name ? null : name;
+    if (dropdownPalette) {
+      const rect = trigger.getBoundingClientRect();
+      palettePosition = { left: rect.left, top: rect.bottom + 4 };
+      await tick();
+      if (palette !== name || !paletteElement) return;
+      const popup = paletteElement.getBoundingClientRect();
+      palettePosition = {
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - popup.width - 8)),
+        top: Math.max(8, rect.bottom + popup.height + 12 <= window.innerHeight ? rect.bottom + 4 : rect.top - popup.height - 4),
+      };
+    }
   }
 
   async function closePalette(): Promise<void> {
@@ -142,6 +156,10 @@
   }
 </script>
 
+<svelte:window onresize={() => { if (dropdownPalette) palette = null; }} onpointerdown={(e) => {
+  if (dropdownPalette && e.target instanceof Node && !paletteElement?.contains(e.target) && !paletteTrigger?.contains(e.target)) palette = null;
+}} />
+
 <div class="backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && onclose()}>
   <div class="dialog" role="dialog" aria-modal="true" aria-label={t('儲存格格式')} tabindex="-1" onkeydown={keydown}>
   <form bind:this={dialog} onsubmit={(e) => { e.preventDefault(); apply(); }}>
@@ -157,7 +175,7 @@
           }}>{t(label)}</button>
       {/each}
     </div>
-    <div class="scroll-body">
+    <div class="scroll-body" onscroll={() => { if (dropdownPalette) palette = null; }}>
       <div class="panel" role="tabpanel" id={`cell-format-panel-${tab}`} aria-labelledby={`cell-format-tab-${tab}`} tabindex="0">
         {#if tab === 0}
           <div class="body">
@@ -214,6 +232,7 @@
           <label class="check"><input type="checkbox" use:mixedCheck={isMixed('wrap')} checked={!isMixed('wrap') && draft.wrap} onchange={(e) => change('wrap', e.currentTarget.checked)} />{t('自動換行')}{#if isMixed('wrap')}<span class="muted">{t('混合')}</span>{/if}</label>
         {:else if tab === 3}
           <BorderEditor bind:value={draft.borders} bind:lineStyle={draft.borderStyle} color={draft.borderColor} original={previewStyle} originalEdges={previewEdges} mixedEdges={mixedFields} {selection} {merges} resetKey={borderReset} styleMixed={!borderStyleEdited && initialBrush.styleMixed} onstylechange={()=>borderStyleEdited=true} onleave={()=>{borderColorEdited=false;borderStyleEdited=false;draft.borderColor=initial.borderColor;draft.borderStyle=initial.borderStyle;}} onclear={()=>{change('diagonalUp',false);change('diagonalDown',false);change('diagonal',{});}} />
+          <div class="diagonal-layout">
           <div class="diagonal-controls">
             {#each ['diagonalUp','diagonalDown'] as key}
               <label class="check"><input type="checkbox" aria-label={key==='diagonalUp'?t('斜線 ╱'):t('斜線 ╲')} use:mixedCheck={isMixed(key as 'diagonalUp')} checked={!isMixed(key as 'diagonalUp') && draft[key as 'diagonalUp']} onchange={e=>{change(key as 'diagonalUp',e.currentTarget.checked);if(e.currentTarget.checked)change('diagonal',{style:draft.borderStyle,color:draft.borderColor});}}/>{key==='diagonalUp'?t('斜線 ╱'):t('斜線 ╲')}</label>
@@ -221,16 +240,30 @@
             <button type="button" onclick={()=>{change('diagonal',{style:draft.borderStyle,color:draft.borderColor});}}>{t('套用斜線線型／色彩')}</button>
           </div>
           <DiagonalPreview line={colorOnly ? {...draft.diagonal,...(borderColorEdited?{color:draft.borderColor}:{}),...(borderStyleEdited?{style:draft.borderStyle}:{})} : draft.diagonal} up={draft.diagonalUp} down={draft.diagonalDown} mixedUp={isMixed('diagonalUp')} mixedDown={isMixed('diagonalDown')} />
-          <button type="button" onclick={(e) => togglePalette('borderColor', e.currentTarget)}>{t('線條顏色')} <span class="swatch" style:background={draft.borderColor ? `#${draft.borderColor}` : 'currentColor'}></span> {!borderColorEdited && initialBrush.mixed ? t('混合') : draft.borderColor ? `#${draft.borderColor}` : t('自動')}</button>
+          </div>
+          <div class="color-field">
+            <span id="border-color-label">{t('線條顏色')}</span>
+            <button class="color-select" type="button" aria-labelledby="border-color-label border-color-value" aria-haspopup="dialog" aria-expanded={palette === 'borderColor'} onclick={(e) => togglePalette('borderColor', e.currentTarget)} onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (palette !== 'borderColor') void togglePalette('borderColor', e.currentTarget).then(() => paletteElement?.querySelector('button')?.focus()); } }}>
+              <span class="swatch" class:mixed-swatch={!borderColorEdited && initialBrush.mixed} style:background={!borderColorEdited && initialBrush.mixed ? undefined : draft.borderColor ? `#${draft.borderColor}` : 'currentColor'}></span>
+              <span id="border-color-value">{!borderColorEdited && initialBrush.mixed ? t('混合') : draft.borderColor ? `#${draft.borderColor}` : t('自動')}</span>
+              <svg class="dropdown-arrow" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="m3 5 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+            </button>
+          </div>
         {:else}
-          <button type="button" onclick={(e) => togglePalette('fill', e.currentTarget)}>{t('填滿色彩')} <span class="swatch" class:mixed-swatch={isMixed('fill')} style:background={isMixed('fill') ? undefined : draft.fill ? `#${draft.fill}` : 'transparent'}></span> {isMixed('fill') ? t('混合') : draft.fill ? `#${draft.fill}` : t('無填滿')}</button>
-          <button type="button" onclick={() => change('fill', '')}>{t('無填滿')}</button>
+          <div class="color-field">
+            <span id="fill-color-label">{t('填滿色彩')}</span>
+            <button class="color-select" type="button" aria-labelledby="fill-color-label fill-color-value" aria-haspopup="dialog" aria-expanded={palette === 'fill'} onclick={(e) => togglePalette('fill', e.currentTarget)} onkeydown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); if (palette !== 'fill') void togglePalette('fill', e.currentTarget).then(() => paletteElement?.querySelector('button')?.focus()); } }}>
+              <span class="swatch" class:mixed-swatch={isMixed('fill')} style:background={isMixed('fill') ? undefined : draft.fill ? `#${draft.fill}` : 'transparent'}></span>
+              <span id="fill-color-value">{isMixed('fill') ? t('混合') : draft.fill ? `#${draft.fill}` : t('無填滿')}</span>
+              <svg class="dropdown-arrow" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="m3 5 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
+            </button>
+          </div>
           <AdvancedFillEditor value={draft.fillSpec} mixed={isMixed('fillSpec')} onchange={spec=>{if(spec.kind)change('fillSpec',spec);else change('fill',draft.fill);}} />
           <FillPreview color={draft.fill} spec={draft.fillSpec} mixed={isMixed('fill')} />
           {#if !fillValid}<p role="alert">{t('請檢查漸層角度、範圍與色彩節點。')}</p>{/if}
         {/if}
         {#if palette}
-          <div class="palette">
+          <div bind:this={paletteElement} class="palette" class:dropdown-palette={dropdownPalette} style:left={dropdownPalette ? `${palettePosition.left}px` : undefined} style:top={dropdownPalette ? `${palettePosition.top}px` : undefined}>
             <ColorPicker tabindex={0} resetLabel={palette === 'fill' ? t('無填滿') : t('自動')}
               onpick={(color) => { if (palette === 'fill' || palette === 'fontColor') change(palette, color); else if (palette) { draft[palette] = color; borderColorEdited = true; } }} onclose={() => void closePalette()} />
           </div>
@@ -263,6 +296,11 @@
   .fields { display:grid; grid-template-columns:2fr 1fr; gap:16px; }
   .checks { display:flex; flex-wrap:wrap; gap:16px; }
   .checks label, .check { flex-direction:row; align-items:center; }
+  .diagonal-layout { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px 24px; }
+  .diagonal-controls { display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+  .color-field { display:flex; flex-direction:column; align-items:flex-start; gap:5px; }
+  .color-select { display:flex; align-items:center; gap:8px; width:200px; max-width:100%; text-align:left; background:var(--input-bg); }
+  .dropdown-arrow { margin-left:auto; }
   input, select { min-width:0; box-sizing:border-box; width:100%; padding:5px 8px; color:var(--chrome-text); background:var(--input-bg); border:1px solid var(--chrome-border); border-radius:4px; font:inherit; user-select:text; -webkit-user-select:text; }
   input[type="checkbox"] { width:auto; }
   .preview { display:flex; flex-direction:column; gap:4px; padding:8px; border:1px solid var(--chrome-border); border-radius:6px; overflow-wrap:anywhere; }
@@ -274,6 +312,8 @@
   .swatch { display:inline-block; width:16px; height:16px; vertical-align:middle; border:1px solid var(--chrome-border); }
   .palette { position:relative; min-height:230px; }
   .palette :global(.picker) { position:static; width:max-content; }
+  .dropdown-palette { position:fixed; z-index:60; min-height:0; max-height:calc(100dvh - 16px); overflow:auto; }
+  .dropdown-palette :global(.picker) { margin-top:0; }
   button { padding:5px 12px; font:inherit; color:inherit; background:var(--app-bg); border:1px solid var(--chrome-border); border-radius:5px; cursor:pointer; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .actions { display:flex; justify-content:flex-end; flex-shrink:0; gap:8px; padding-top:12px; }

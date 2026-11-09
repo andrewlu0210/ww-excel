@@ -68,6 +68,7 @@
   const points: Record<BorderEdge, [number, number, number, number]> = { top: [20, 20, 180, 20], bottom: [20, 120, 180, 120], left: [20, 20, 20, 120], right: [180, 20, 180, 120], insideH: [20, 70, 180, 70], insideV: [100, 20, 100, 120] };
 </script>
 
+<div class="border-toolbar">
 <label>{t('線型')}<select value={styleMixed ? '__mixed__' : lineStyle} onchange={e=>{lineStyle=e.currentTarget.value;onstylechange?.(lineStyle);}}>{#if styleMixed}<option value="__mixed__" disabled>{t('混合')}</option>{/if}{#each styles as [code, label]}<option value={code}>{label}</option>{/each}</select></label>
 <div class="presets" aria-label={t('框線預設')}>
   <button type="button" onclick={() => preset('none')}>{t('無框線')}</button>
@@ -75,6 +76,7 @@
   <button type="button" onclick={() => preset('inside')} disabled={!enabled('insideH') && !enabled('insideV')}>{t('內框線')}</button>
   <button type="button" onclick={() => preset('all')}>{t('所有框線')}</button>
   <button type="button" onclick={leave}>{t('不修改')}</button>
+</div>
 </div>
 <div class="border-layout">
   <svg class="border-preview" viewBox="0 0 200 140" role="group" aria-label={t('框線預覽')}>
@@ -118,11 +120,15 @@
   button { font:inherit; color:inherit; background:var(--app-bg); border:1px solid var(--chrome-border); border-radius:5px; padding:5px 10px; cursor:pointer; }
   button:disabled { opacity:.45; cursor:default; }
   button:focus-visible, select:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .border-toolbar { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 12px; }
+  .border-toolbar label { flex:0 1 120px; min-width:0; }
+  .border-toolbar select { width:100%; min-width:0; box-sizing:border-box; }
   .presets { display:flex; flex-wrap:wrap; gap:6px; }
+  .presets button { padding:5px 8px; white-space:nowrap; }
   .border-layout { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:center; }
   .border-preview :global(g) { cursor:pointer; }
   .border-preview :global(g:focus-visible) { outline:2px solid var(--accent); }
-  .border-preview { width:100%; min-width:120px; }
+  .border-preview { width:100%; min-width:120px; max-height:160px; }
   .edges { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
   .edges button { display:flex; flex-direction:column; gap:3px; }
   .edges span { font-size:11px; color:var(--chrome-muted); }

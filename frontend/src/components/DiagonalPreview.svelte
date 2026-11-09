@@ -4,7 +4,7 @@
  import type { BorderLineDTO } from '../../bindings/ww-excel/internal/service/models';
  let {line,up,down,mixedUp=false,mixedDown=false}:{line:BorderLineDTO;up:boolean;down:boolean;mixedUp?:boolean;mixedDown?:boolean}=$props();
 </script>
-<svg viewBox="0 0 160 60" height="60" role="img" aria-label={t('斜線預覽')}>
+<svg viewBox="0 0 160 60" width="160" height="60" role="img" aria-label={t('斜線預覽')}>
  <rect x="1" y="1" width="158" height="58" fill="none" stroke="var(--chrome-border)"/>
  {#each [{enabled:up,mixed:mixedUp,p:[1,59,159,1]},{enabled:down,mixed:mixedDown,p:[1,1,159,59]}] as edge}
   {#if edge.enabled || edge.mixed}
