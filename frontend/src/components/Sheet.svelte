@@ -2320,30 +2320,33 @@
         contextMenu = null;
       }}
     ></div>
-    <ul class="context-menu" role="menu" use:placeContextMenu={contextMenu}>
-      {#each contextItems as item, i (i)}
-        {#if item}
-          <li role="none">
-            <button
-              role="menuitem"
-              onpointerdown={(e) => e.preventDefault()}
-              onclick={() => {
-                const a = item.action;
-                contextMenu = null;
-                if (a === 'formatCells') onappaction?.(a);
-                else void runMenu(a);
-                if (a !== 'insertNote') focus();
-              }}
-            >
-              <span>{item.label}</span>
-              {#if item.key}<kbd>{item.key}</kbd>{/if}
-            </button>
-          </li>
-        {:else}
-          <li class="sep" role="separator"></li>
-        {/if}
-      {/each}
-    </ul>
+    <!-- Keep the block's last node in place while the menu is portalled to body. -->
+    <div class="context-menu-host">
+      <ul class="context-menu" role="menu" use:placeContextMenu={contextMenu}>
+        {#each contextItems as item, i (i)}
+          {#if item}
+            <li role="none">
+              <button
+                role="menuitem"
+                onpointerdown={(e) => e.preventDefault()}
+                onclick={() => {
+                  const a = item.action;
+                  contextMenu = null;
+                  if (a === 'formatCells') onappaction?.(a);
+                  else void runMenu(a);
+                  if (a !== 'insertNote') focus();
+                }}
+              >
+                <span>{item.label}</span>
+                {#if item.key}<kbd>{item.key}</kbd>{/if}
+              </button>
+            </li>
+          {:else}
+            <li class="sep" role="separator"></li>
+          {/if}
+        {/each}
+      </ul>
+    </div>
   {/if}
 
   {#if filterMenu}

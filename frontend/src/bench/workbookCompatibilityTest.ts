@@ -16,9 +16,11 @@ import { financeWorkbookSelfTest } from './financeWorkbookSelfTest';
 import { taskWorkbookSelfTest } from './taskWorkbookSelfTest';
 import { budgetWorkbookSelfTest } from './budgetWorkbookSelfTest';
 import { richTextWorkbookSelfTest } from './richTextWorkbookSelfTest';
+import { formulaAssistSelfTest } from './formulaAssistSelfTest';
 import type Sheet from '../components/Sheet.svelte';
 
 export async function workbookCompatibilityTest(driver: ReturnType<typeof Sheet>, path: string): Promise<{ markdown: string; failed: number }> {
+  if (path === '@formula-assist') return formulaAssistSelfTest(driver);
   if (path.split(/[/\\]/).at(-1) === 'import-cancel.xlsx') return importSecuritySelfTest(path);
   const checks: { name: string; ok: boolean; detail: string }[] = [];
   const check = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
