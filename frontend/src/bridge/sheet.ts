@@ -1,8 +1,8 @@
 import type { Pivot } from '../../bindings/ww-excel/internal/model/models';
 export type { ChartLabels, ChartLabelPoint, ChartAxis, Pivot, PivotValue } from '../../bindings/ww-excel/internal/model/models';
 export type { PivotInfoDTO, PivotFilterDTO } from '../../bindings/ww-excel/internal/service/models';
-// The only module that touches generated Wails bindings. Wails3 is still
-// in beta, so keep binding/event usage behind these wrappers.
+// Keep generated Wails bindings and event handling behind these wrappers
+// to isolate the frontend from runtime API changes.
 import { Events, Screens, Window } from '@wailsio/runtime';
 import { BenchService, DocumentService, SettingsService, SheetService } from '../../bindings/ww-excel/internal/service';
 import type { Settings } from '../../bindings/ww-excel/internal/settings/models';

@@ -14,7 +14,8 @@
 #   xcrun notarytool store-credentials ww-notary --apple-id you@example.com --team-id TEAMID
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH="$HOME/go/bin:$PATH"
+# Respect an explicitly selected CLI before falling back to the Go bin directory.
+export PATH="$PATH:$HOME/go/bin"
 
 PLIST=build/darwin/Info.plist
 VERSION=${VERSION:-$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")}

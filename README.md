@@ -215,8 +215,10 @@ macOS 原生的試算表 App，目標是提供接近 Microsoft Excel 的操作�
 
 建置需使用 Go 1.27.3 或更新版本，以包含 GO-2026-6809 憑證驗證問題的修補。已發布的舊安裝檔需重新建置才會包含此修補。
 
+Wails Go module、`@wailsio/runtime` 與 `wails3` CLI 固定使用 `3.0.0`，請勿單獨更新其中一項。升級驗證與待驗收項目見 [Wails v3.0.0 升級紀錄](docs/wails-v3-upgrade.md)。
+
 ```bash
-go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.34
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 export PATH="$HOME/go/bin:$PATH"
 
 wails3 dev                       # 開發模式（hot reload）

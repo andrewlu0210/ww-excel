@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/signintech/gopdf v0.38.2
-	github.com/wailsapp/wails/v3 v3.0.0-beta.34
+	github.com/wailsapp/wails/v3 v3.0.0
 	github.com/xuri/excelize/v2 v2.11.1-0.20261003002531-6258dcebc4e2
 )
 
